@@ -350,6 +350,250 @@ class StreamSession(Base):
         return f"<StreamSession(id={self.id}, event_id={self.live_event_id}, status={self.connection_status})>"
 
 
+class TransitionType(str, Enum):
+    """Transition type between playlist videos."""
+
+    CUT = "cut"
+    FADE = "fade"
+    CROSSFADE = "crossfade"
+
+
+class PlaylistLoopMode(str, Enum):
+    """Loop mode for playlist streaming."""
+
+    NONE = "none"  # Play once and stop
+    COUNT = "count"  # Loop a specific number of times
+    INFINITE = "infinite"  # Loop forever
+
+
+class PlaylistItemStatus(str, Enum):
+    """Status of a playlist item during streaming."""
+
+    PENDING = "pending"
+    PLAYING = "playing"
+    COMPLETED = "completed"
+    SKIPPED = "skipped"
+    FAILED = "failed"
+
+
+class StreamPlaylist(Base):
+    """Stream Playlist model for managing video playlists for live streaming.
+
+    Stores playlist configuration including loop settings and transition defaults.
+    Requirements: 7.1, 7.2
+    """
+
+    __tablename__ = "stream_playlists"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    live_event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("live_events.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    # Playlist settings
+    name: Mapped[str] = mapped_column(String(255), nullable=False, default="Default Playlist")
+    
+    # Loop configuration (Requirements: 7.2)
+    loop_mode: Mapped[str] = mapped_column(
+        String(50), default=PlaylistLoopMode.NONE.value
+    )
+    loop_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # For COUNT mode
+    current_loop: Mapped[int] = mapped_column(Integer, default=0)  # Current loop iteration
+    
+    # Default transition settings (Requirements: 7.3)
+    default_transition: Mapped[str] = mapped_column(
+        String(50), default=TransitionType.CUT.value
+    )
+    default_transition_duration_ms: Mapped[int] = mapped_column(Integer, default=500)
+    
+    # Playback state
+    current_item_index: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    # Statistics
+    total_plays: Mapped[int] = mapped_column(Integer, default=0)
+    total_skips: Mapped[int] = mapped_column(Integer, default=0)
+    total_failures: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    # Relationships
+    items: Mapped[list["PlaylistItem"]] = relationship(
+        "PlaylistItem",
+        back_populates="playlist",
+        cascade="all, delete-orphan",
+        order_by="PlaylistItem.position",
+    )
+
+    def get_total_items(self) -> int:
+        """Get total number of items in playlist."""
+        return len(self.items) if self.items else 0
+
+    def should_loop(self) -> bool:
+        """Check if playlist should loop based on configuration.
+        
+        Returns:
+            bool: True if playlist should loop
+        """
+        if self.loop_mode == PlaylistLoopMode.INFINITE.value:
+            return True
+        if self.loop_mode == PlaylistLoopMode.COUNT.value:
+            return self.loop_count is not None and self.current_loop < self.loop_count
+        return False
+
+    def get_next_item_index(self) -> Optional[int]:
+        """Get the next item index to play.
+        
+        Returns:
+            Optional[int]: Next item index or None if playlist is complete
+        """
+        total_items = self.get_total_items()
+        if total_items == 0:
+            return None
+            
+        next_index = self.current_item_index + 1
+        
+        if next_index >= total_items:
+            if self.should_loop():
+                return 0  # Loop back to start
+            return None  # Playlist complete
+        
+        return next_index
+
+    def __repr__(self) -> str:
+        return f"<StreamPlaylist(id={self.id}, name={self.name}, loop_mode={self.loop_mode})>"
+
+
+class PlaylistItem(Base):
+    """Playlist Item model for individual videos in a stream playlist.
+
+    Stores video reference, ordering, and transition settings.
+    Requirements: 7.1, 7.3, 7.4
+    """
+
+    __tablename__ = "playlist_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    playlist_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("stream_playlists.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    
+    # Video reference (can be local video ID or external URL)
+    video_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("videos.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    video_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    video_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    video_duration_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    
+    # Ordering (Requirements: 7.1)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    
+    # Transition settings (Requirements: 7.3)
+    transition_type: Mapped[str] = mapped_column(
+        String(50), default=TransitionType.CUT.value
+    )
+    transition_duration_ms: Mapped[int] = mapped_column(Integer, default=500)
+    
+    # Playback settings
+    start_offset_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    end_offset_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    
+    # Status tracking
+    status: Mapped[str] = mapped_column(
+        String(50), default=PlaylistItemStatus.PENDING.value
+    )
+    play_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_played_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    # Relationship
+    playlist: Mapped["StreamPlaylist"] = relationship(
+        "StreamPlaylist", back_populates="items"
+    )
+
+    def get_effective_duration(self) -> Optional[int]:
+        """Get effective playback duration considering offsets.
+        
+        Returns:
+            Optional[int]: Duration in seconds or None if unknown
+        """
+        if self.video_duration_seconds is None:
+            return None
+        
+        duration = self.video_duration_seconds - self.start_offset_seconds
+        if self.end_offset_seconds is not None:
+            duration = min(duration, self.end_offset_seconds - self.start_offset_seconds)
+        
+        return max(0, duration)
+
+    def mark_as_playing(self) -> None:
+        """Mark item as currently playing."""
+        self.status = PlaylistItemStatus.PLAYING.value
+        self.last_played_at = datetime.utcnow()
+
+    def mark_as_completed(self) -> None:
+        """Mark item as completed."""
+        self.status = PlaylistItemStatus.COMPLETED.value
+        self.play_count += 1
+
+    def mark_as_skipped(self, error: Optional[str] = None) -> None:
+        """Mark item as skipped (Requirements: 7.4).
+        
+        Args:
+            error: Optional error message
+        """
+        self.status = PlaylistItemStatus.SKIPPED.value
+        if error:
+            self.last_error = error
+
+    def mark_as_failed(self, error: str) -> None:
+        """Mark item as failed.
+        
+        Args:
+            error: Error message
+        """
+        self.status = PlaylistItemStatus.FAILED.value
+        self.last_error = error
+
+    def reset_status(self) -> None:
+        """Reset item status to pending for replay."""
+        self.status = PlaylistItemStatus.PENDING.value
+        self.last_error = None
+
+    def __repr__(self) -> str:
+        return f"<PlaylistItem(id={self.id}, position={self.position}, title={self.video_title})>"
+
+
 class RecurrencePattern(Base):
     """Recurrence pattern for recurring live events.
 

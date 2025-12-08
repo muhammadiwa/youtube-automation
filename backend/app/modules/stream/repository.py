@@ -20,6 +20,11 @@ from app.modules.stream.models import (
     ConnectionStatus,
     RecurrencePattern,
     RecurrenceFrequency,
+    StreamPlaylist,
+    PlaylistItem,
+    PlaylistLoopMode,
+    PlaylistItemStatus,
+    TransitionType,
 )
 
 
@@ -630,3 +635,468 @@ class RecurrencePatternRepository:
         """
         await self.session.delete(pattern)
         await self.session.flush()
+
+
+class StreamPlaylistRepository:
+    """Repository for StreamPlaylist CRUD operations.
+    
+    Requirements: 7.1, 7.2, 7.5
+    """
+
+    def __init__(self, session: AsyncSession):
+        """Initialize repository with database session."""
+        self.session = session
+
+    async def create(
+        self,
+        live_event_id: uuid.UUID,
+        name: str = "Default Playlist",
+        loop_mode: str = PlaylistLoopMode.NONE.value,
+        loop_count: Optional[int] = None,
+        default_transition: str = TransitionType.CUT.value,
+        default_transition_duration_ms: int = 500,
+    ) -> StreamPlaylist:
+        """Create a new stream playlist.
+
+        Args:
+            live_event_id: Live event UUID
+            name: Playlist name
+            loop_mode: Loop mode (none, count, infinite)
+            loop_count: Number of loops for COUNT mode
+            default_transition: Default transition type
+            default_transition_duration_ms: Default transition duration
+
+        Returns:
+            StreamPlaylist: Created playlist instance
+        """
+        playlist = StreamPlaylist(
+            live_event_id=live_event_id,
+            name=name,
+            loop_mode=loop_mode,
+            loop_count=loop_count,
+            default_transition=default_transition,
+            default_transition_duration_ms=default_transition_duration_ms,
+        )
+        self.session.add(playlist)
+        await self.session.flush()
+        return playlist
+
+    async def get_by_id(
+        self, playlist_id: uuid.UUID, include_items: bool = False
+    ) -> Optional[StreamPlaylist]:
+        """Get playlist by ID.
+
+        Args:
+            playlist_id: Playlist UUID
+            include_items: Whether to load playlist items
+
+        Returns:
+            Optional[StreamPlaylist]: Playlist if found
+        """
+        query = select(StreamPlaylist).where(StreamPlaylist.id == playlist_id)
+        if include_items:
+            query = query.options(selectinload(StreamPlaylist.items))
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def get_by_event_id(
+        self, live_event_id: uuid.UUID, include_items: bool = False
+    ) -> Optional[StreamPlaylist]:
+        """Get playlist for a live event.
+
+        Args:
+            live_event_id: Live event UUID
+            include_items: Whether to load playlist items
+
+        Returns:
+            Optional[StreamPlaylist]: Playlist if found
+        """
+        query = select(StreamPlaylist).where(
+            StreamPlaylist.live_event_id == live_event_id
+        )
+        if include_items:
+            query = query.options(selectinload(StreamPlaylist.items))
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def update(self, playlist: StreamPlaylist, **kwargs) -> StreamPlaylist:
+        """Update playlist attributes.
+
+        Args:
+            playlist: StreamPlaylist instance
+            **kwargs: Attributes to update
+
+        Returns:
+            StreamPlaylist: Updated playlist instance
+        """
+        for key, value in kwargs.items():
+            if hasattr(playlist, key):
+                setattr(playlist, key, value)
+        await self.session.flush()
+        return playlist
+
+    async def set_active(self, playlist: StreamPlaylist, is_active: bool) -> StreamPlaylist:
+        """Set playlist active state.
+
+        Args:
+            playlist: StreamPlaylist instance
+            is_active: Whether playlist is active
+
+        Returns:
+            StreamPlaylist: Updated playlist instance
+        """
+        playlist.is_active = is_active
+        await self.session.flush()
+        return playlist
+
+    async def advance_to_next_item(self, playlist: StreamPlaylist) -> Optional[int]:
+        """Advance playlist to next item.
+        
+        Handles loop logic per Requirements 7.2.
+
+        Args:
+            playlist: StreamPlaylist instance
+
+        Returns:
+            Optional[int]: New item index or None if playlist complete
+        """
+        next_index = playlist.get_next_item_index()
+        
+        if next_index is None:
+            # Playlist complete
+            playlist.is_active = False
+            await self.session.flush()
+            return None
+        
+        if next_index == 0 and playlist.current_item_index > 0:
+            # Looping back to start
+            playlist.current_loop += 1
+        
+        playlist.current_item_index = next_index
+        await self.session.flush()
+        return next_index
+
+    async def reset_playlist(self, playlist: StreamPlaylist) -> StreamPlaylist:
+        """Reset playlist to initial state.
+
+        Args:
+            playlist: StreamPlaylist instance
+
+        Returns:
+            StreamPlaylist: Reset playlist instance
+        """
+        playlist.current_item_index = 0
+        playlist.current_loop = 0
+        playlist.is_active = False
+        await self.session.flush()
+        return playlist
+
+    async def increment_stats(
+        self,
+        playlist: StreamPlaylist,
+        plays: int = 0,
+        skips: int = 0,
+        failures: int = 0,
+    ) -> StreamPlaylist:
+        """Increment playlist statistics.
+
+        Args:
+            playlist: StreamPlaylist instance
+            plays: Number of plays to add
+            skips: Number of skips to add
+            failures: Number of failures to add
+
+        Returns:
+            StreamPlaylist: Updated playlist instance
+        """
+        playlist.total_plays += plays
+        playlist.total_skips += skips
+        playlist.total_failures += failures
+        await self.session.flush()
+        return playlist
+
+    async def delete(self, playlist: StreamPlaylist) -> None:
+        """Delete a playlist.
+
+        Args:
+            playlist: StreamPlaylist instance to delete
+        """
+        await self.session.delete(playlist)
+        await self.session.flush()
+
+
+class PlaylistItemRepository:
+    """Repository for PlaylistItem CRUD operations.
+    
+    Requirements: 7.1, 7.3, 7.4
+    """
+
+    def __init__(self, session: AsyncSession):
+        """Initialize repository with database session."""
+        self.session = session
+
+    async def create(
+        self,
+        playlist_id: uuid.UUID,
+        video_title: str,
+        position: int,
+        video_id: Optional[uuid.UUID] = None,
+        video_url: Optional[str] = None,
+        video_duration_seconds: Optional[int] = None,
+        transition_type: str = TransitionType.CUT.value,
+        transition_duration_ms: int = 500,
+        start_offset_seconds: int = 0,
+        end_offset_seconds: Optional[int] = None,
+    ) -> PlaylistItem:
+        """Create a new playlist item.
+
+        Args:
+            playlist_id: Playlist UUID
+            video_title: Video title
+            position: Position in playlist
+            video_id: Optional video UUID
+            video_url: Optional video URL
+            video_duration_seconds: Video duration
+            transition_type: Transition type
+            transition_duration_ms: Transition duration
+            start_offset_seconds: Start offset
+            end_offset_seconds: End offset
+
+        Returns:
+            PlaylistItem: Created item instance
+        """
+        item = PlaylistItem(
+            playlist_id=playlist_id,
+            video_title=video_title,
+            position=position,
+            video_id=video_id,
+            video_url=video_url,
+            video_duration_seconds=video_duration_seconds,
+            transition_type=transition_type,
+            transition_duration_ms=transition_duration_ms,
+            start_offset_seconds=start_offset_seconds,
+            end_offset_seconds=end_offset_seconds,
+        )
+        self.session.add(item)
+        await self.session.flush()
+        return item
+
+    async def get_by_id(self, item_id: uuid.UUID) -> Optional[PlaylistItem]:
+        """Get playlist item by ID.
+
+        Args:
+            item_id: Item UUID
+
+        Returns:
+            Optional[PlaylistItem]: Item if found
+        """
+        result = await self.session.execute(
+            select(PlaylistItem).where(PlaylistItem.id == item_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_playlist_id(
+        self, playlist_id: uuid.UUID
+    ) -> list[PlaylistItem]:
+        """Get all items for a playlist ordered by position.
+
+        Args:
+            playlist_id: Playlist UUID
+
+        Returns:
+            list[PlaylistItem]: List of items
+        """
+        result = await self.session.execute(
+            select(PlaylistItem)
+            .where(PlaylistItem.playlist_id == playlist_id)
+            .order_by(PlaylistItem.position.asc())
+        )
+        return list(result.scalars().all())
+
+    async def get_item_at_position(
+        self, playlist_id: uuid.UUID, position: int
+    ) -> Optional[PlaylistItem]:
+        """Get item at specific position.
+
+        Args:
+            playlist_id: Playlist UUID
+            position: Position index
+
+        Returns:
+            Optional[PlaylistItem]: Item if found
+        """
+        result = await self.session.execute(
+            select(PlaylistItem)
+            .where(PlaylistItem.playlist_id == playlist_id)
+            .where(PlaylistItem.position == position)
+        )
+        return result.scalar_one_or_none()
+
+    async def update(self, item: PlaylistItem, **kwargs) -> PlaylistItem:
+        """Update playlist item attributes.
+
+        Args:
+            item: PlaylistItem instance
+            **kwargs: Attributes to update
+
+        Returns:
+            PlaylistItem: Updated item instance
+        """
+        for key, value in kwargs.items():
+            if hasattr(item, key):
+                setattr(item, key, value)
+        await self.session.flush()
+        return item
+
+    async def update_position(self, item: PlaylistItem, new_position: int) -> PlaylistItem:
+        """Update item position.
+
+        Args:
+            item: PlaylistItem instance
+            new_position: New position
+
+        Returns:
+            PlaylistItem: Updated item instance
+        """
+        item.position = new_position
+        await self.session.flush()
+        return item
+
+    async def mark_as_playing(self, item: PlaylistItem) -> PlaylistItem:
+        """Mark item as currently playing.
+
+        Args:
+            item: PlaylistItem instance
+
+        Returns:
+            PlaylistItem: Updated item instance
+        """
+        item.mark_as_playing()
+        await self.session.flush()
+        return item
+
+    async def mark_as_completed(self, item: PlaylistItem) -> PlaylistItem:
+        """Mark item as completed.
+
+        Args:
+            item: PlaylistItem instance
+
+        Returns:
+            PlaylistItem: Updated item instance
+        """
+        item.mark_as_completed()
+        await self.session.flush()
+        return item
+
+    async def mark_as_skipped(
+        self, item: PlaylistItem, error: Optional[str] = None
+    ) -> PlaylistItem:
+        """Mark item as skipped (Requirements: 7.4).
+
+        Args:
+            item: PlaylistItem instance
+            error: Optional error message
+
+        Returns:
+            PlaylistItem: Updated item instance
+        """
+        item.mark_as_skipped(error)
+        await self.session.flush()
+        return item
+
+    async def mark_as_failed(self, item: PlaylistItem, error: str) -> PlaylistItem:
+        """Mark item as failed.
+
+        Args:
+            item: PlaylistItem instance
+            error: Error message
+
+        Returns:
+            PlaylistItem: Updated item instance
+        """
+        item.mark_as_failed(error)
+        await self.session.flush()
+        return item
+
+    async def reset_all_items(self, playlist_id: uuid.UUID) -> int:
+        """Reset all items in playlist to pending status.
+
+        Args:
+            playlist_id: Playlist UUID
+
+        Returns:
+            int: Number of items reset
+        """
+        items = await self.get_by_playlist_id(playlist_id)
+        for item in items:
+            item.reset_status()
+        await self.session.flush()
+        return len(items)
+
+    async def reorder_items(
+        self, playlist_id: uuid.UUID, item_ids: list[uuid.UUID]
+    ) -> list[PlaylistItem]:
+        """Reorder playlist items.
+        
+        Requirements: 7.5 - Allow playlist modification during stream.
+
+        Args:
+            playlist_id: Playlist UUID
+            item_ids: List of item IDs in new order
+
+        Returns:
+            list[PlaylistItem]: Reordered items
+        """
+        items = await self.get_by_playlist_id(playlist_id)
+        item_map = {item.id: item for item in items}
+        
+        reordered = []
+        for position, item_id in enumerate(item_ids):
+            if item_id in item_map:
+                item = item_map[item_id]
+                item.position = position
+                reordered.append(item)
+        
+        await self.session.flush()
+        return reordered
+
+    async def delete(self, item: PlaylistItem) -> None:
+        """Delete a playlist item.
+
+        Args:
+            item: PlaylistItem instance to delete
+        """
+        await self.session.delete(item)
+        await self.session.flush()
+
+    async def delete_by_playlist_id(self, playlist_id: uuid.UUID) -> int:
+        """Delete all items in a playlist.
+
+        Args:
+            playlist_id: Playlist UUID
+
+        Returns:
+            int: Number of items deleted
+        """
+        items = await self.get_by_playlist_id(playlist_id)
+        count = len(items)
+        for item in items:
+            await self.session.delete(item)
+        await self.session.flush()
+        return count
+
+    async def count_by_playlist(self, playlist_id: uuid.UUID) -> int:
+        """Count items in a playlist.
+
+        Args:
+            playlist_id: Playlist UUID
+
+        Returns:
+            int: Number of items
+        """
+        result = await self.session.execute(
+            select(sql_func.count(PlaylistItem.id)).where(
+                PlaylistItem.playlist_id == playlist_id
+            )
+        )
+        return result.scalar_one() or 0

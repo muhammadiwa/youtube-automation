@@ -19,11 +19,18 @@ from app.modules.stream.models import (
     StreamSession,
     RecurrencePattern,
     RecurrenceFrequency,
+    StreamPlaylist,
+    PlaylistItem,
+    PlaylistLoopMode,
+    PlaylistItemStatus,
+    TransitionType,
 )
 from app.modules.stream.repository import (
     LiveEventRepository,
     StreamSessionRepository,
     RecurrencePatternRepository,
+    StreamPlaylistRepository,
+    PlaylistItemRepository,
 )
 from app.modules.stream.schemas import (
     CreateLiveEventRequest,
@@ -33,6 +40,12 @@ from app.modules.stream.schemas import (
     RecurrencePatternRequest,
     LiveEventResponse,
     ScheduleConflictError,
+    CreatePlaylistRequest,
+    UpdatePlaylistRequest,
+    PlaylistItemCreate,
+    PlaylistItemUpdate,
+    PlaylistStreamStatus,
+    PlaylistLoopResult,
 )
 from app.modules.stream.youtube_api import YouTubeLiveStreamingClient, YouTubeAPIError
 
@@ -75,6 +88,8 @@ class StreamService:
         self.session_repository = StreamSessionRepository(session)
         self.recurrence_repository = RecurrencePatternRepository(session)
         self.account_repository = YouTubeAccountRepository(session)
+        self.playlist_repository = StreamPlaylistRepository(session)
+        self.playlist_item_repository = PlaylistItemRepository(session)
 
     async def create_live_event(
         self,
@@ -831,4 +846,529 @@ class StreamService:
             start_at=start_at,
             end_at=end_at,
             exclude_event_id=exclude_event_id,
+        )
+
+    # ============================================
+    # Playlist Streaming Methods (Requirements: 7.1, 7.2, 7.3, 7.4, 7.5)
+    # ============================================
+
+    async def create_playlist_stream(
+        self,
+        request: CreatePlaylistRequest,
+    ) -> StreamPlaylist:
+        """Create a playlist stream for a live event.
+
+        Requirements: 7.1, 7.2, 7.3
+
+        Args:
+            request: Playlist creation request
+
+        Returns:
+            StreamPlaylist: Created playlist
+
+        Raises:
+            LiveEventNotFoundError: If live event not found
+            StreamServiceError: If playlist already exists for event
+        """
+        # Verify live event exists
+        event = await self.event_repository.get_by_id(request.live_event_id)
+        if not event:
+            raise LiveEventNotFoundError(f"Event {request.live_event_id} not found")
+
+        # Check if playlist already exists
+        existing = await self.playlist_repository.get_by_event_id(request.live_event_id)
+        if existing:
+            raise StreamServiceError(
+                f"Playlist already exists for event {request.live_event_id}"
+            )
+
+        # Create playlist
+        playlist = await self.playlist_repository.create(
+            live_event_id=request.live_event_id,
+            name=request.name,
+            loop_mode=request.loop_mode.value,
+            loop_count=request.loop_count,
+            default_transition=request.default_transition.value,
+            default_transition_duration_ms=request.default_transition_duration_ms,
+        )
+
+        # Add initial items
+        for item_data in request.items:
+            await self.playlist_item_repository.create(
+                playlist_id=playlist.id,
+                video_title=item_data.video_title,
+                position=item_data.position,
+                video_id=item_data.video_id,
+                video_url=item_data.video_url,
+                video_duration_seconds=item_data.video_duration_seconds,
+                transition_type=item_data.transition_type.value,
+                transition_duration_ms=item_data.transition_duration_ms,
+                start_offset_seconds=item_data.start_offset_seconds,
+                end_offset_seconds=item_data.end_offset_seconds,
+            )
+
+        await self.session.commit()
+        return playlist
+
+    async def get_playlist(
+        self,
+        playlist_id: uuid.UUID,
+        include_items: bool = True,
+    ) -> Optional[StreamPlaylist]:
+        """Get playlist by ID.
+
+        Args:
+            playlist_id: Playlist UUID
+            include_items: Whether to load items
+
+        Returns:
+            Optional[StreamPlaylist]: Playlist if found
+        """
+        return await self.playlist_repository.get_by_id(playlist_id, include_items)
+
+    async def get_playlist_by_event(
+        self,
+        live_event_id: uuid.UUID,
+        include_items: bool = True,
+    ) -> Optional[StreamPlaylist]:
+        """Get playlist for a live event.
+
+        Args:
+            live_event_id: Live event UUID
+            include_items: Whether to load items
+
+        Returns:
+            Optional[StreamPlaylist]: Playlist if found
+        """
+        return await self.playlist_repository.get_by_event_id(
+            live_event_id, include_items
+        )
+
+    async def update_playlist(
+        self,
+        playlist_id: uuid.UUID,
+        request: UpdatePlaylistRequest,
+    ) -> StreamPlaylist:
+        """Update playlist settings.
+
+        Requirements: 7.5 - Allow playlist modification during stream.
+
+        Args:
+            playlist_id: Playlist UUID
+            request: Update request
+
+        Returns:
+            StreamPlaylist: Updated playlist
+
+        Raises:
+            StreamServiceError: If playlist not found
+        """
+        playlist = await self.playlist_repository.get_by_id(playlist_id)
+        if not playlist:
+            raise StreamServiceError(f"Playlist {playlist_id} not found")
+
+        update_data = request.model_dump(exclude_unset=True)
+        if "loop_mode" in update_data and update_data["loop_mode"]:
+            update_data["loop_mode"] = update_data["loop_mode"].value
+        if "default_transition" in update_data and update_data["default_transition"]:
+            update_data["default_transition"] = update_data["default_transition"].value
+
+        playlist = await self.playlist_repository.update(playlist, **update_data)
+        await self.session.commit()
+        return playlist
+
+    async def add_playlist_item(
+        self,
+        playlist_id: uuid.UUID,
+        item_data: PlaylistItemCreate,
+    ) -> PlaylistItem:
+        """Add item to playlist.
+
+        Requirements: 7.1, 7.5
+
+        Args:
+            playlist_id: Playlist UUID
+            item_data: Item creation data
+
+        Returns:
+            PlaylistItem: Created item
+
+        Raises:
+            StreamServiceError: If playlist not found
+        """
+        playlist = await self.playlist_repository.get_by_id(playlist_id)
+        if not playlist:
+            raise StreamServiceError(f"Playlist {playlist_id} not found")
+
+        item = await self.playlist_item_repository.create(
+            playlist_id=playlist_id,
+            video_title=item_data.video_title,
+            position=item_data.position,
+            video_id=item_data.video_id,
+            video_url=item_data.video_url,
+            video_duration_seconds=item_data.video_duration_seconds,
+            transition_type=item_data.transition_type.value,
+            transition_duration_ms=item_data.transition_duration_ms,
+            start_offset_seconds=item_data.start_offset_seconds,
+            end_offset_seconds=item_data.end_offset_seconds,
+        )
+
+        await self.session.commit()
+        return item
+
+    async def update_playlist_item(
+        self,
+        item_id: uuid.UUID,
+        request: PlaylistItemUpdate,
+    ) -> PlaylistItem:
+        """Update playlist item.
+
+        Requirements: 7.5
+
+        Args:
+            item_id: Item UUID
+            request: Update request
+
+        Returns:
+            PlaylistItem: Updated item
+
+        Raises:
+            StreamServiceError: If item not found
+        """
+        item = await self.playlist_item_repository.get_by_id(item_id)
+        if not item:
+            raise StreamServiceError(f"Playlist item {item_id} not found")
+
+        update_data = request.model_dump(exclude_unset=True)
+        if "transition_type" in update_data and update_data["transition_type"]:
+            update_data["transition_type"] = update_data["transition_type"].value
+
+        item = await self.playlist_item_repository.update(item, **update_data)
+        await self.session.commit()
+        return item
+
+    async def remove_playlist_item(self, item_id: uuid.UUID) -> None:
+        """Remove item from playlist.
+
+        Requirements: 7.5
+
+        Args:
+            item_id: Item UUID
+
+        Raises:
+            StreamServiceError: If item not found
+        """
+        item = await self.playlist_item_repository.get_by_id(item_id)
+        if not item:
+            raise StreamServiceError(f"Playlist item {item_id} not found")
+
+        await self.playlist_item_repository.delete(item)
+        await self.session.commit()
+
+    async def reorder_playlist(
+        self,
+        playlist_id: uuid.UUID,
+        item_ids: list[uuid.UUID],
+    ) -> list[PlaylistItem]:
+        """Reorder playlist items.
+
+        Requirements: 7.5 - Allow playlist modification during stream.
+
+        Args:
+            playlist_id: Playlist UUID
+            item_ids: Item IDs in new order
+
+        Returns:
+            list[PlaylistItem]: Reordered items
+
+        Raises:
+            StreamServiceError: If playlist not found
+        """
+        playlist = await self.playlist_repository.get_by_id(playlist_id)
+        if not playlist:
+            raise StreamServiceError(f"Playlist {playlist_id} not found")
+
+        items = await self.playlist_item_repository.reorder_items(playlist_id, item_ids)
+        await self.session.commit()
+        return items
+
+    async def start_playlist_stream(
+        self,
+        playlist_id: uuid.UUID,
+    ) -> PlaylistStreamStatus:
+        """Start streaming a playlist.
+
+        Requirements: 7.1, 7.2
+
+        Args:
+            playlist_id: Playlist UUID
+
+        Returns:
+            PlaylistStreamStatus: Current stream status
+
+        Raises:
+            StreamServiceError: If playlist not found or empty
+        """
+        playlist = await self.playlist_repository.get_by_id(playlist_id, include_items=True)
+        if not playlist:
+            raise StreamServiceError(f"Playlist {playlist_id} not found")
+
+        if not playlist.items:
+            raise StreamServiceError("Playlist is empty")
+
+        # Reset playlist state
+        await self.playlist_repository.reset_playlist(playlist)
+        await self.playlist_item_repository.reset_all_items(playlist_id)
+
+        # Activate playlist
+        playlist.is_active = True
+        playlist.current_item_index = 0
+
+        # Mark first item as playing
+        first_item = playlist.items[0]
+        await self.playlist_item_repository.mark_as_playing(first_item)
+
+        await self.session.commit()
+
+        return await self._build_playlist_status(playlist)
+
+    async def advance_playlist(
+        self,
+        playlist_id: uuid.UUID,
+        skip_on_failure: bool = True,
+        failure_error: Optional[str] = None,
+    ) -> PlaylistStreamStatus:
+        """Advance playlist to next item.
+
+        Implements loop logic (Requirements: 7.2) and skip on failure (Requirements: 7.4).
+
+        Args:
+            playlist_id: Playlist UUID
+            skip_on_failure: Whether current item failed
+            failure_error: Error message if failed
+
+        Returns:
+            PlaylistStreamStatus: Updated stream status
+
+        Raises:
+            StreamServiceError: If playlist not found
+        """
+        playlist = await self.playlist_repository.get_by_id(playlist_id, include_items=True)
+        if not playlist:
+            raise StreamServiceError(f"Playlist {playlist_id} not found")
+
+        if not playlist.is_active:
+            raise StreamServiceError("Playlist is not active")
+
+        # Get current item and mark as completed or skipped
+        current_item = await self.playlist_item_repository.get_item_at_position(
+            playlist_id, playlist.current_item_index
+        )
+
+        if current_item:
+            if skip_on_failure and failure_error:
+                # Requirements: 7.4 - Skip to next video on failure
+                await self.playlist_item_repository.mark_as_skipped(current_item, failure_error)
+                await self.playlist_repository.increment_stats(playlist, skips=1, failures=1)
+            else:
+                await self.playlist_item_repository.mark_as_completed(current_item)
+                await self.playlist_repository.increment_stats(playlist, plays=1)
+
+        # Advance to next item (handles loop logic per Requirements: 7.2)
+        next_index = await self.playlist_repository.advance_to_next_item(playlist)
+
+        if next_index is not None:
+            # Mark next item as playing
+            next_item = await self.playlist_item_repository.get_item_at_position(
+                playlist_id, next_index
+            )
+            if next_item:
+                await self.playlist_item_repository.mark_as_playing(next_item)
+
+                # If looping back to start, reset all items
+                if next_index == 0 and playlist.current_loop > 0:
+                    await self.playlist_item_repository.reset_all_items(playlist_id)
+                    await self.playlist_item_repository.mark_as_playing(next_item)
+
+        await self.session.commit()
+
+        # Refresh playlist to get updated state
+        playlist = await self.playlist_repository.get_by_id(playlist_id, include_items=True)
+        return await self._build_playlist_status(playlist)
+
+    async def stop_playlist_stream(
+        self,
+        playlist_id: uuid.UUID,
+    ) -> PlaylistStreamStatus:
+        """Stop playlist streaming.
+
+        Args:
+            playlist_id: Playlist UUID
+
+        Returns:
+            PlaylistStreamStatus: Final stream status
+
+        Raises:
+            StreamServiceError: If playlist not found
+        """
+        playlist = await self.playlist_repository.get_by_id(playlist_id, include_items=True)
+        if not playlist:
+            raise StreamServiceError(f"Playlist {playlist_id} not found")
+
+        playlist.is_active = False
+        await self.session.commit()
+
+        return await self._build_playlist_status(playlist)
+
+    async def get_playlist_status(
+        self,
+        playlist_id: uuid.UUID,
+    ) -> PlaylistStreamStatus:
+        """Get current playlist streaming status.
+
+        Args:
+            playlist_id: Playlist UUID
+
+        Returns:
+            PlaylistStreamStatus: Current stream status
+
+        Raises:
+            StreamServiceError: If playlist not found
+        """
+        playlist = await self.playlist_repository.get_by_id(playlist_id, include_items=True)
+        if not playlist:
+            raise StreamServiceError(f"Playlist {playlist_id} not found")
+
+        return await self._build_playlist_status(playlist)
+
+    async def _build_playlist_status(
+        self,
+        playlist: StreamPlaylist,
+    ) -> PlaylistStreamStatus:
+        """Build playlist status response.
+
+        Args:
+            playlist: StreamPlaylist instance
+
+        Returns:
+            PlaylistStreamStatus: Status response
+        """
+        from app.modules.stream.schemas import PlaylistItemResponse
+
+        current_item = None
+        next_item = None
+        completed_items = 0
+        skipped_items = 0
+        failed_items = 0
+
+        if playlist.items:
+            for item in playlist.items:
+                if item.position == playlist.current_item_index:
+                    current_item = PlaylistItemResponse(
+                        id=item.id,
+                        playlist_id=item.playlist_id,
+                        video_id=item.video_id,
+                        video_url=item.video_url,
+                        video_title=item.video_title,
+                        video_duration_seconds=item.video_duration_seconds,
+                        position=item.position,
+                        transition_type=item.transition_type,
+                        transition_duration_ms=item.transition_duration_ms,
+                        start_offset_seconds=item.start_offset_seconds,
+                        end_offset_seconds=item.end_offset_seconds,
+                        status=item.status,
+                        play_count=item.play_count,
+                        last_played_at=item.last_played_at,
+                        last_error=item.last_error,
+                        effective_duration=item.get_effective_duration(),
+                        created_at=item.created_at,
+                        updated_at=item.updated_at,
+                    )
+
+                next_index = playlist.get_next_item_index()
+                if next_index is not None and item.position == next_index:
+                    next_item = PlaylistItemResponse(
+                        id=item.id,
+                        playlist_id=item.playlist_id,
+                        video_id=item.video_id,
+                        video_url=item.video_url,
+                        video_title=item.video_title,
+                        video_duration_seconds=item.video_duration_seconds,
+                        position=item.position,
+                        transition_type=item.transition_type,
+                        transition_duration_ms=item.transition_duration_ms,
+                        start_offset_seconds=item.start_offset_seconds,
+                        end_offset_seconds=item.end_offset_seconds,
+                        status=item.status,
+                        play_count=item.play_count,
+                        last_played_at=item.last_played_at,
+                        last_error=item.last_error,
+                        effective_duration=item.get_effective_duration(),
+                        created_at=item.created_at,
+                        updated_at=item.updated_at,
+                    )
+
+                if item.status == PlaylistItemStatus.COMPLETED.value:
+                    completed_items += 1
+                elif item.status == PlaylistItemStatus.SKIPPED.value:
+                    skipped_items += 1
+                elif item.status == PlaylistItemStatus.FAILED.value:
+                    failed_items += 1
+
+        return PlaylistStreamStatus(
+            playlist_id=playlist.id,
+            is_active=playlist.is_active,
+            current_item_index=playlist.current_item_index,
+            current_item=current_item,
+            next_item=next_item,
+            current_loop=playlist.current_loop,
+            total_loops=playlist.loop_count,
+            loop_mode=playlist.loop_mode,
+            total_items=len(playlist.items) if playlist.items else 0,
+            completed_items=completed_items,
+            skipped_items=skipped_items,
+            failed_items=failed_items,
+        )
+
+    def calculate_playlist_loop_behavior(
+        self,
+        loop_mode: str,
+        loop_count: Optional[int],
+        total_items: int,
+        current_loop: int = 0,
+    ) -> PlaylistLoopResult:
+        """Calculate expected playlist loop behavior.
+
+        Used for property testing of loop behavior (Property 12).
+
+        Args:
+            loop_mode: Loop mode (none, count, infinite)
+            loop_count: Number of loops for COUNT mode
+            total_items: Total items in playlist
+            current_loop: Current loop iteration
+
+        Returns:
+            PlaylistLoopResult: Expected loop behavior
+        """
+        should_loop = False
+        total_plays_expected = total_items
+
+        if loop_mode == PlaylistLoopMode.INFINITE.value:
+            should_loop = True
+            # For infinite, we can't calculate total plays
+            total_plays_expected = -1  # Indicates infinite
+        elif loop_mode == PlaylistLoopMode.COUNT.value and loop_count is not None:
+            should_loop = current_loop < loop_count
+            total_plays_expected = total_items * loop_count
+        else:
+            # NONE mode
+            should_loop = False
+            total_plays_expected = total_items
+
+        return PlaylistLoopResult(
+            should_loop=should_loop,
+            current_loop=current_loop,
+            loop_count=loop_count,
+            loop_mode=loop_mode,
+            total_plays_expected=total_plays_expected,
         )

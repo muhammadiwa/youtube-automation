@@ -23,12 +23,22 @@ from app.modules.stream.schemas import (
     StreamSessionResponse,
     RecurrencePatternResponse,
     ScheduleConflictError,
+    CreatePlaylistRequest,
+    UpdatePlaylistRequest,
+    PlaylistItemCreate,
+    PlaylistItemUpdate,
+    PlaylistResponse,
+    PlaylistWithItemsResponse,
+    PlaylistItemResponse,
+    PlaylistStreamStatus,
+    ReorderPlaylistRequest,
 )
 from app.modules.stream.service import (
     StreamService,
     AccountNotFoundError,
     LiveEventNotFoundError,
     ScheduleConflictException,
+    StreamServiceError,
 )
 from app.modules.stream.youtube_api import YouTubeAPIError
 
@@ -558,4 +568,558 @@ async def generate_recurring_instances(
             total=len(events),
         )
     except LiveEventNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+# ============================================
+# Playlist Endpoints (Requirements: 7.1, 7.2, 7.3, 7.4, 7.5)
+# ============================================
+
+
+@router.post(
+    "/playlists",
+    response_model=PlaylistWithItemsResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a playlist stream",
+    description="Create a playlist for streaming videos in sequence with loop support.",
+)
+async def create_playlist(
+    request: CreatePlaylistRequest,
+    service: StreamService = Depends(get_stream_service),
+) -> PlaylistWithItemsResponse:
+    """Create a playlist stream for a live event.
+
+    Requirements: 7.1, 7.2, 7.3
+
+    Args:
+        request: Playlist creation request
+        service: Stream service instance
+
+    Returns:
+        PlaylistWithItemsResponse: Created playlist with items
+    """
+    try:
+        playlist = await service.create_playlist_stream(request)
+        # Reload with items
+        playlist = await service.get_playlist(playlist.id, include_items=True)
+        
+        items = []
+        if playlist.items:
+            for item in playlist.items:
+                items.append(PlaylistItemResponse(
+                    id=item.id,
+                    playlist_id=item.playlist_id,
+                    video_id=item.video_id,
+                    video_url=item.video_url,
+                    video_title=item.video_title,
+                    video_duration_seconds=item.video_duration_seconds,
+                    position=item.position,
+                    transition_type=item.transition_type,
+                    transition_duration_ms=item.transition_duration_ms,
+                    start_offset_seconds=item.start_offset_seconds,
+                    end_offset_seconds=item.end_offset_seconds,
+                    status=item.status,
+                    play_count=item.play_count,
+                    last_played_at=item.last_played_at,
+                    last_error=item.last_error,
+                    effective_duration=item.get_effective_duration(),
+                    created_at=item.created_at,
+                    updated_at=item.updated_at,
+                ))
+        
+        return PlaylistWithItemsResponse(
+            id=playlist.id,
+            live_event_id=playlist.live_event_id,
+            name=playlist.name,
+            loop_mode=playlist.loop_mode,
+            loop_count=playlist.loop_count,
+            current_loop=playlist.current_loop,
+            default_transition=playlist.default_transition,
+            default_transition_duration_ms=playlist.default_transition_duration_ms,
+            current_item_index=playlist.current_item_index,
+            is_active=playlist.is_active,
+            total_plays=playlist.total_plays,
+            total_skips=playlist.total_skips,
+            total_failures=playlist.total_failures,
+            total_items=len(items),
+            items=items,
+            created_at=playlist.created_at,
+            updated_at=playlist.updated_at,
+        )
+    except LiveEventNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except StreamServiceError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.get(
+    "/playlists/{playlist_id}",
+    response_model=PlaylistWithItemsResponse,
+    summary="Get a playlist",
+    description="Get playlist details with all items.",
+)
+async def get_playlist(
+    playlist_id: uuid.UUID,
+    service: StreamService = Depends(get_stream_service),
+) -> PlaylistWithItemsResponse:
+    """Get playlist by ID.
+
+    Args:
+        playlist_id: Playlist UUID
+        service: Stream service instance
+
+    Returns:
+        PlaylistWithItemsResponse: Playlist with items
+    """
+    playlist = await service.get_playlist(playlist_id, include_items=True)
+    if not playlist:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Playlist {playlist_id} not found",
+        )
+
+    items = []
+    if playlist.items:
+        for item in playlist.items:
+            items.append(PlaylistItemResponse(
+                id=item.id,
+                playlist_id=item.playlist_id,
+                video_id=item.video_id,
+                video_url=item.video_url,
+                video_title=item.video_title,
+                video_duration_seconds=item.video_duration_seconds,
+                position=item.position,
+                transition_type=item.transition_type,
+                transition_duration_ms=item.transition_duration_ms,
+                start_offset_seconds=item.start_offset_seconds,
+                end_offset_seconds=item.end_offset_seconds,
+                status=item.status,
+                play_count=item.play_count,
+                last_played_at=item.last_played_at,
+                last_error=item.last_error,
+                effective_duration=item.get_effective_duration(),
+                created_at=item.created_at,
+                updated_at=item.updated_at,
+            ))
+
+    return PlaylistWithItemsResponse(
+        id=playlist.id,
+        live_event_id=playlist.live_event_id,
+        name=playlist.name,
+        loop_mode=playlist.loop_mode,
+        loop_count=playlist.loop_count,
+        current_loop=playlist.current_loop,
+        default_transition=playlist.default_transition,
+        default_transition_duration_ms=playlist.default_transition_duration_ms,
+        current_item_index=playlist.current_item_index,
+        is_active=playlist.is_active,
+        total_plays=playlist.total_plays,
+        total_skips=playlist.total_skips,
+        total_failures=playlist.total_failures,
+        total_items=len(items),
+        items=items,
+        created_at=playlist.created_at,
+        updated_at=playlist.updated_at,
+    )
+
+
+@router.get(
+    "/events/{event_id}/playlist",
+    response_model=PlaylistWithItemsResponse,
+    summary="Get event playlist",
+    description="Get playlist for a live event.",
+)
+async def get_event_playlist(
+    event_id: uuid.UUID,
+    service: StreamService = Depends(get_stream_service),
+) -> PlaylistWithItemsResponse:
+    """Get playlist for a live event.
+
+    Args:
+        event_id: Live event UUID
+        service: Stream service instance
+
+    Returns:
+        PlaylistWithItemsResponse: Playlist with items
+    """
+    playlist = await service.get_playlist_by_event(event_id, include_items=True)
+    if not playlist:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Playlist not found for event {event_id}",
+        )
+
+    items = []
+    if playlist.items:
+        for item in playlist.items:
+            items.append(PlaylistItemResponse(
+                id=item.id,
+                playlist_id=item.playlist_id,
+                video_id=item.video_id,
+                video_url=item.video_url,
+                video_title=item.video_title,
+                video_duration_seconds=item.video_duration_seconds,
+                position=item.position,
+                transition_type=item.transition_type,
+                transition_duration_ms=item.transition_duration_ms,
+                start_offset_seconds=item.start_offset_seconds,
+                end_offset_seconds=item.end_offset_seconds,
+                status=item.status,
+                play_count=item.play_count,
+                last_played_at=item.last_played_at,
+                last_error=item.last_error,
+                effective_duration=item.get_effective_duration(),
+                created_at=item.created_at,
+                updated_at=item.updated_at,
+            ))
+
+    return PlaylistWithItemsResponse(
+        id=playlist.id,
+        live_event_id=playlist.live_event_id,
+        name=playlist.name,
+        loop_mode=playlist.loop_mode,
+        loop_count=playlist.loop_count,
+        current_loop=playlist.current_loop,
+        default_transition=playlist.default_transition,
+        default_transition_duration_ms=playlist.default_transition_duration_ms,
+        current_item_index=playlist.current_item_index,
+        is_active=playlist.is_active,
+        total_plays=playlist.total_plays,
+        total_skips=playlist.total_skips,
+        total_failures=playlist.total_failures,
+        total_items=len(items),
+        items=items,
+        created_at=playlist.created_at,
+        updated_at=playlist.updated_at,
+    )
+
+
+@router.put(
+    "/playlists/{playlist_id}",
+    response_model=PlaylistResponse,
+    summary="Update a playlist",
+    description="Update playlist settings. Changes apply after current video completes.",
+)
+async def update_playlist(
+    playlist_id: uuid.UUID,
+    request: UpdatePlaylistRequest,
+    service: StreamService = Depends(get_stream_service),
+) -> PlaylistResponse:
+    """Update playlist settings.
+
+    Requirements: 7.5 - Allow playlist modification during stream.
+    Changes apply after current video completes.
+
+    Args:
+        playlist_id: Playlist UUID
+        request: Update request
+        service: Stream service instance
+
+    Returns:
+        PlaylistResponse: Updated playlist
+    """
+    try:
+        playlist = await service.update_playlist(playlist_id, request)
+        return PlaylistResponse(
+            id=playlist.id,
+            live_event_id=playlist.live_event_id,
+            name=playlist.name,
+            loop_mode=playlist.loop_mode,
+            loop_count=playlist.loop_count,
+            current_loop=playlist.current_loop,
+            default_transition=playlist.default_transition,
+            default_transition_duration_ms=playlist.default_transition_duration_ms,
+            current_item_index=playlist.current_item_index,
+            is_active=playlist.is_active,
+            total_plays=playlist.total_plays,
+            total_skips=playlist.total_skips,
+            total_failures=playlist.total_failures,
+            total_items=playlist.get_total_items(),
+            created_at=playlist.created_at,
+            updated_at=playlist.updated_at,
+        )
+    except StreamServiceError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.post(
+    "/playlists/{playlist_id}/items",
+    response_model=PlaylistItemResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add item to playlist",
+    description="Add a video to the playlist. Changes apply after current video completes.",
+)
+async def add_playlist_item(
+    playlist_id: uuid.UUID,
+    item_data: PlaylistItemCreate,
+    service: StreamService = Depends(get_stream_service),
+) -> PlaylistItemResponse:
+    """Add item to playlist.
+
+    Requirements: 7.1, 7.5 - Allow playlist modification during stream.
+
+    Args:
+        playlist_id: Playlist UUID
+        item_data: Item creation data
+        service: Stream service instance
+
+    Returns:
+        PlaylistItemResponse: Created item
+    """
+    try:
+        item = await service.add_playlist_item(playlist_id, item_data)
+        return PlaylistItemResponse(
+            id=item.id,
+            playlist_id=item.playlist_id,
+            video_id=item.video_id,
+            video_url=item.video_url,
+            video_title=item.video_title,
+            video_duration_seconds=item.video_duration_seconds,
+            position=item.position,
+            transition_type=item.transition_type,
+            transition_duration_ms=item.transition_duration_ms,
+            start_offset_seconds=item.start_offset_seconds,
+            end_offset_seconds=item.end_offset_seconds,
+            status=item.status,
+            play_count=item.play_count,
+            last_played_at=item.last_played_at,
+            last_error=item.last_error,
+            effective_duration=item.get_effective_duration(),
+            created_at=item.created_at,
+            updated_at=item.updated_at,
+        )
+    except StreamServiceError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.put(
+    "/playlists/items/{item_id}",
+    response_model=PlaylistItemResponse,
+    summary="Update playlist item",
+    description="Update a playlist item. Changes apply after current video completes.",
+)
+async def update_playlist_item(
+    item_id: uuid.UUID,
+    request: PlaylistItemUpdate,
+    service: StreamService = Depends(get_stream_service),
+) -> PlaylistItemResponse:
+    """Update playlist item.
+
+    Requirements: 7.5 - Allow playlist modification during stream.
+
+    Args:
+        item_id: Item UUID
+        request: Update request
+        service: Stream service instance
+
+    Returns:
+        PlaylistItemResponse: Updated item
+    """
+    try:
+        item = await service.update_playlist_item(item_id, request)
+        return PlaylistItemResponse(
+            id=item.id,
+            playlist_id=item.playlist_id,
+            video_id=item.video_id,
+            video_url=item.video_url,
+            video_title=item.video_title,
+            video_duration_seconds=item.video_duration_seconds,
+            position=item.position,
+            transition_type=item.transition_type,
+            transition_duration_ms=item.transition_duration_ms,
+            start_offset_seconds=item.start_offset_seconds,
+            end_offset_seconds=item.end_offset_seconds,
+            status=item.status,
+            play_count=item.play_count,
+            last_played_at=item.last_played_at,
+            last_error=item.last_error,
+            effective_duration=item.get_effective_duration(),
+            created_at=item.created_at,
+            updated_at=item.updated_at,
+        )
+    except StreamServiceError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.delete(
+    "/playlists/items/{item_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove playlist item",
+    description="Remove an item from the playlist. Changes apply after current video completes.",
+)
+async def remove_playlist_item(
+    item_id: uuid.UUID,
+    service: StreamService = Depends(get_stream_service),
+) -> None:
+    """Remove item from playlist.
+
+    Requirements: 7.5 - Allow playlist modification during stream.
+
+    Args:
+        item_id: Item UUID
+        service: Stream service instance
+    """
+    try:
+        await service.remove_playlist_item(item_id)
+    except StreamServiceError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.post(
+    "/playlists/{playlist_id}/reorder",
+    response_model=list[PlaylistItemResponse],
+    summary="Reorder playlist items",
+    description="Reorder playlist items. Changes apply after current video completes.",
+)
+async def reorder_playlist(
+    playlist_id: uuid.UUID,
+    request: ReorderPlaylistRequest,
+    service: StreamService = Depends(get_stream_service),
+) -> list[PlaylistItemResponse]:
+    """Reorder playlist items.
+
+    Requirements: 7.5 - Allow playlist modification during stream.
+
+    Args:
+        playlist_id: Playlist UUID
+        request: Reorder request with item IDs in new order
+        service: Stream service instance
+
+    Returns:
+        list[PlaylistItemResponse]: Reordered items
+    """
+    try:
+        items = await service.reorder_playlist(playlist_id, request.item_ids)
+        return [
+            PlaylistItemResponse(
+                id=item.id,
+                playlist_id=item.playlist_id,
+                video_id=item.video_id,
+                video_url=item.video_url,
+                video_title=item.video_title,
+                video_duration_seconds=item.video_duration_seconds,
+                position=item.position,
+                transition_type=item.transition_type,
+                transition_duration_ms=item.transition_duration_ms,
+                start_offset_seconds=item.start_offset_seconds,
+                end_offset_seconds=item.end_offset_seconds,
+                status=item.status,
+                play_count=item.play_count,
+                last_played_at=item.last_played_at,
+                last_error=item.last_error,
+                effective_duration=item.get_effective_duration(),
+                created_at=item.created_at,
+                updated_at=item.updated_at,
+            )
+            for item in items
+        ]
+    except StreamServiceError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.post(
+    "/playlists/{playlist_id}/start",
+    response_model=PlaylistStreamStatus,
+    summary="Start playlist streaming",
+    description="Start streaming the playlist from the beginning.",
+)
+async def start_playlist_stream(
+    playlist_id: uuid.UUID,
+    service: StreamService = Depends(get_stream_service),
+) -> PlaylistStreamStatus:
+    """Start streaming a playlist.
+
+    Requirements: 7.1, 7.2
+
+    Args:
+        playlist_id: Playlist UUID
+        service: Stream service instance
+
+    Returns:
+        PlaylistStreamStatus: Current stream status
+    """
+    try:
+        return await service.start_playlist_stream(playlist_id)
+    except StreamServiceError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post(
+    "/playlists/{playlist_id}/advance",
+    response_model=PlaylistStreamStatus,
+    summary="Advance to next item",
+    description="Advance playlist to the next item. Handles loop logic and skip on failure.",
+)
+async def advance_playlist(
+    playlist_id: uuid.UUID,
+    skip_on_failure: bool = Query(False, description="Whether current item failed"),
+    failure_error: str = Query(None, description="Error message if failed"),
+    service: StreamService = Depends(get_stream_service),
+) -> PlaylistStreamStatus:
+    """Advance playlist to next item.
+
+    Requirements: 7.2, 7.4 - Loop logic and skip on failure.
+
+    Args:
+        playlist_id: Playlist UUID
+        skip_on_failure: Whether current item failed
+        failure_error: Error message if failed
+        service: Stream service instance
+
+    Returns:
+        PlaylistStreamStatus: Updated stream status
+    """
+    try:
+        return await service.advance_playlist(playlist_id, skip_on_failure, failure_error)
+    except StreamServiceError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post(
+    "/playlists/{playlist_id}/stop",
+    response_model=PlaylistStreamStatus,
+    summary="Stop playlist streaming",
+    description="Stop streaming the playlist.",
+)
+async def stop_playlist_stream(
+    playlist_id: uuid.UUID,
+    service: StreamService = Depends(get_stream_service),
+) -> PlaylistStreamStatus:
+    """Stop playlist streaming.
+
+    Args:
+        playlist_id: Playlist UUID
+        service: Stream service instance
+
+    Returns:
+        PlaylistStreamStatus: Final stream status
+    """
+    try:
+        return await service.stop_playlist_stream(playlist_id)
+    except StreamServiceError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.get(
+    "/playlists/{playlist_id}/status",
+    response_model=PlaylistStreamStatus,
+    summary="Get playlist status",
+    description="Get current playlist streaming status.",
+)
+async def get_playlist_status(
+    playlist_id: uuid.UUID,
+    service: StreamService = Depends(get_stream_service),
+) -> PlaylistStreamStatus:
+    """Get current playlist streaming status.
+
+    Args:
+        playlist_id: Playlist UUID
+        service: Stream service instance
+
+    Returns:
+        PlaylistStreamStatus: Current stream status
+    """
+    try:
+        return await service.get_playlist_status(playlist_id)
+    except StreamServiceError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
