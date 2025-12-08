@@ -650,3 +650,185 @@ class StreamService:
             return current_date.replace(year=year, month=month, day=day)
 
         return None
+
+    async def start_stream(
+        self,
+        event_id: uuid.UUID,
+        agent_id: Optional[uuid.UUID] = None,
+    ) -> StreamSession:
+        """Start a live stream.
+
+        Creates a stream session and updates event status to LIVE.
+        Requirements: 6.1, 6.2
+
+        Args:
+            event_id: Live event UUID
+            agent_id: Optional agent UUID to assign
+
+        Returns:
+            StreamSession: Created stream session
+
+        Raises:
+            LiveEventNotFoundError: If event not found
+            ScheduleConflictException: If another stream is active on same account
+        """
+        event = await self.event_repository.get_by_id(event_id)
+        if not event:
+            raise LiveEventNotFoundError(f"Event {event_id} not found")
+
+        # Check for active streams on same account (conflict detection)
+        active_events = await self.event_repository.get_by_account_id(
+            account_id=event.account_id,
+            status=LiveEventStatus.LIVE,
+        )
+        if active_events:
+            raise ScheduleConflictException(
+                f"Account already has an active stream: {active_events[0].title}",
+                conflicting_event=active_events[0],
+            )
+
+        # Create stream session
+        session = await self.session_repository.create(
+            live_event_id=event.id,
+            agent_id=agent_id,
+        )
+
+        # Start the session
+        await self.session_repository.start_session(session)
+
+        # Update event status
+        await self.event_repository.set_status(event, LiveEventStatus.LIVE)
+
+        await self.session.commit()
+        return session
+
+    async def stop_stream(
+        self,
+        event_id: uuid.UUID,
+        reason: str = "manual_stop",
+    ) -> None:
+        """Stop a live stream.
+
+        Ends the active stream session and updates event status.
+        Requirements: 6.3
+
+        Args:
+            event_id: Live event UUID
+            reason: Reason for stopping
+
+        Raises:
+            LiveEventNotFoundError: If event not found
+        """
+        event = await self.event_repository.get_by_id(event_id)
+        if not event:
+            raise LiveEventNotFoundError(f"Event {event_id} not found")
+
+        # Get active session
+        active_session = await self.session_repository.get_active_session(event.id)
+        if active_session:
+            await self.session_repository.end_session(active_session, end_reason=reason)
+
+        # Update event status
+        await self.event_repository.set_status(event, LiveEventStatus.ENDED)
+
+        await self.session.commit()
+
+    async def handle_disconnection(
+        self,
+        event_id: uuid.UUID,
+        session_id: uuid.UUID,
+        error: Optional[str] = None,
+    ) -> dict:
+        """Handle stream disconnection.
+
+        Implements auto-restart logic per Requirement 6.5.
+
+        Args:
+            event_id: Live event UUID
+            session_id: Stream session UUID
+            error: Error message if any
+
+        Returns:
+            dict: Action taken (restart_scheduled, ended, etc.)
+
+        Raises:
+            LiveEventNotFoundError: If event not found
+        """
+        from app.modules.stream.tasks import StreamAutoRestartManager
+
+        event = await self.event_repository.get_by_id(event_id)
+        if not event:
+            raise LiveEventNotFoundError(f"Event {event_id} not found")
+
+        session = await self.session_repository.get_by_id(session_id)
+        if not session:
+            raise StreamServiceError(f"Session {session_id} not found")
+
+        restart_manager = StreamAutoRestartManager()
+
+        # Update session status
+        from app.modules.stream.models import ConnectionStatus
+        session.connection_status = ConnectionStatus.DISCONNECTED.value
+        if error:
+            session.last_error = error
+
+        # Check if auto-restart is enabled
+        if not event.enable_auto_start:
+            await self.session_repository.end_session(
+                session, end_reason="disconnected_no_auto_restart"
+            )
+            await self.event_repository.set_status(event, LiveEventStatus.ENDED)
+            await self.session.commit()
+            return {"action": "ended", "reason": "auto_restart_disabled"}
+
+        # Check if we should attempt restart
+        if restart_manager.should_attempt_restart(session.reconnection_attempts):
+            await self.session_repository.increment_reconnection_attempts(session)
+            delay = restart_manager.calculate_restart_delay(session.reconnection_attempts)
+            await self.session.commit()
+            return {
+                "action": "restart_scheduled",
+                "attempt": session.reconnection_attempts,
+                "delay_seconds": delay,
+            }
+        else:
+            await self.session_repository.end_session(
+                session,
+                end_reason="max_reconnection_attempts_reached",
+                error=error,
+            )
+            await self.event_repository.set_status(event, LiveEventStatus.FAILED)
+            event.last_error = f"Stream failed after {session.reconnection_attempts} reconnection attempts"
+            await self.session.commit()
+            return {
+                "action": "ended",
+                "reason": "max_reconnection_attempts_reached",
+                "total_attempts": session.reconnection_attempts,
+            }
+
+    async def check_schedule_conflict(
+        self,
+        account_id: uuid.UUID,
+        start_at: datetime,
+        end_at: Optional[datetime] = None,
+        exclude_event_id: Optional[uuid.UUID] = None,
+    ) -> Optional[LiveEvent]:
+        """Check for scheduling conflicts on an account.
+
+        Requirements: 6.4
+
+        Args:
+            account_id: YouTube account UUID
+            start_at: Proposed start time
+            end_at: Proposed end time
+            exclude_event_id: Event ID to exclude from check
+
+        Returns:
+            Optional[LiveEvent]: Conflicting event if found
+        """
+        return await self.event_repository.check_schedule_conflict(
+            account_id=account_id,
+            start_at=start_at,
+            end_at=end_at,
+            exclude_event_id=exclude_event_id,
+        )
