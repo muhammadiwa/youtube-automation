@@ -1,0 +1,42 @@
+# Kiro IDE
+.kiro/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Node modules (jika ada frontend)
+node_modules/
+.next/
+out/
+
+# Python (backup dari backend)
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+*.egg-info/
+.pytest_cache/
+.hypothesis/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+logs/
+
+# Build
+dist/
+build/
