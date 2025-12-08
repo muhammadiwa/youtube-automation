@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
+    # S3/CDN Storage for transcoded outputs
+    S3_BUCKET: str = "youtube-automation-transcoded"
+    S3_REGION: str = "us-east-1"
+    S3_ENDPOINT_URL: str = ""  # For MinIO or other S3-compatible storage
+    CDN_DOMAIN: str = ""  # CloudFront or other CDN domain
+
     class Config:
         env_file = ".env"
         case_sensitive = True
