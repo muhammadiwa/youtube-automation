@@ -262,6 +262,111 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             raise
 
 
+class UsageMeteringMiddleware(BaseHTTPMiddleware):
+    """Middleware for tracking API usage per user.
+    
+    Requirements: 27.1 - Track API calls
+    """
+    
+    # Paths to exclude from metering
+    EXCLUDED_PATHS = {
+        "/health",
+        "/metrics",
+        "/docs",
+        "/openapi.json",
+        "/redoc",
+    }
+    
+    async def dispatch(
+        self, request: Request, call_next: Callable
+    ) -> Response:
+        """Track API usage for authenticated requests.
+        
+        Args:
+            request: Incoming request
+            call_next: Next middleware/handler
+            
+        Returns:
+            Response from handler
+        """
+        path = request.url.path
+        
+        # Skip excluded paths
+        if any(path.startswith(excluded) for excluded in self.EXCLUDED_PATHS):
+            return await call_next(request)
+        
+        # Process request
+        response = await call_next(request)
+        
+        # Only track successful requests from authenticated users
+        if response.status_code < 400:
+            user_id = self._get_user_id_from_request(request)
+            if user_id:
+                # Queue usage recording task (non-blocking)
+                try:
+                    from app.modules.billing.tasks import record_api_usage_task
+                    record_api_usage_task.delay(
+                        user_id=user_id,
+                        endpoint=self._normalize_path(path),
+                        method=request.method,
+                    )
+                except Exception:
+                    # Don't fail request if usage tracking fails
+                    pass
+        
+        return response
+    
+    def _get_user_id_from_request(self, request: Request) -> str | None:
+        """Extract user ID from request.
+        
+        Args:
+            request: Incoming request
+            
+        Returns:
+            User ID string or None
+        """
+        # Try to get from request state (set by auth middleware)
+        if hasattr(request.state, "user_id"):
+            return str(request.state.user_id)
+        
+        # Try to get from JWT token in header
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            try:
+                from app.modules.auth.jwt import decode_token
+                token = auth_header[7:]
+                payload = decode_token(token)
+                return payload.get("sub")
+            except Exception:
+                pass
+        
+        return None
+    
+    def _normalize_path(self, path: str) -> str:
+        """Normalize path to reduce cardinality.
+        
+        Args:
+            path: Original request path
+            
+        Returns:
+            Normalized path
+        """
+        import re
+        
+        # Replace UUIDs
+        path = re.sub(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+            "{id}",
+            path,
+            flags=re.IGNORECASE,
+        )
+        
+        # Replace numeric IDs
+        path = re.sub(r"/\d+(?=/|$)", "/{id}", path)
+        
+        return path
+
+
 # Re-export TLS middleware for convenience
 from app.core.tls import TLSEnforcementMiddleware
 
@@ -271,4 +376,5 @@ __all__ = [
     "TracingMiddleware",
     "RequestLoggingMiddleware",
     "TLSEnforcementMiddleware",
+    "UsageMeteringMiddleware",
 ]

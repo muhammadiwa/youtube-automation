@@ -15,6 +15,7 @@ from app.core.middleware import (
     CorrelationIdMiddleware,
     TracingMiddleware,
     RequestLoggingMiddleware,
+    UsageMeteringMiddleware,
 )
 from app.modules.account import account_router
 from app.modules.stream import router as stream_router
@@ -26,6 +27,8 @@ from app.modules.job.router import router as job_router
 from app.modules.notification import notification_router
 from app.modules.system_monitoring import system_monitoring_router
 from app.modules.security.router import router as security_router
+from app.modules.backup import backup_router
+from app.modules.billing import router as billing_router
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -168,6 +171,9 @@ app.add_middleware(TracingMiddleware)
 app.add_middleware(CorrelationIdMiddleware)
 app.add_middleware(MetricsMiddleware)
 
+# Add usage metering middleware (Requirements: 27.1)
+app.add_middleware(UsageMeteringMiddleware)
+
 
 def custom_openapi() -> dict:
     """Generate custom OpenAPI schema."""
@@ -255,3 +261,5 @@ app.include_router(job_router, prefix=settings.API_V1_PREFIX)
 app.include_router(notification_router, prefix=settings.API_V1_PREFIX)
 app.include_router(system_monitoring_router, prefix=settings.API_V1_PREFIX)
 app.include_router(security_router, prefix=settings.API_V1_PREFIX)
+app.include_router(backup_router, prefix=settings.API_V1_PREFIX)
+app.include_router(billing_router, prefix=settings.API_V1_PREFIX)

@@ -68,6 +68,14 @@ class Settings(BaseSettings):
     CELERY_BROKER_URL: str = ""
     CELERY_RESULT_BACKEND: str = ""
 
+    # Stripe Payment Processing (Requirements: 28.3)
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_PUBLISHABLE_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_PRICE_ID_BASIC: str = ""  # Stripe Price ID for Basic plan
+    STRIPE_PRICE_ID_PRO: str = ""    # Stripe Price ID for Pro plan
+    STRIPE_PRICE_ID_ENTERPRISE: str = ""  # Stripe Price ID for Enterprise plan
+
     # Email (for notifications)
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
