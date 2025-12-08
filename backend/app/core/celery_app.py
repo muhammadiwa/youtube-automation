@@ -23,4 +23,4 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
 )
 
-celery_app.autodiscover_tasks(["app.modules.job", "app.modules.account"])
+celery_app.autodiscover_tasks(["app.modules.job", "app.modules.account", "app.modules.video"])
