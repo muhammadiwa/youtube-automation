@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # KMS Encryption for OAuth tokens
+    KMS_ENCRYPTION_KEY: str = "your-32-byte-encryption-key-here"  # Must be 32 bytes for AES-256
+
+    # YouTube OAuth
+    YOUTUBE_CLIENT_ID: str = ""
+    YOUTUBE_CLIENT_SECRET: str = ""
+    YOUTUBE_REDIRECT_URI: str = "http://localhost:8000/api/v1/accounts/oauth/callback"
+
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 

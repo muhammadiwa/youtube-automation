@@ -16,6 +16,8 @@ redis==5.0.1
 # Security
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+cryptography==41.0.7
+pyotp==2.9.0
 
 # HTTP Client
 httpx==0.26.0

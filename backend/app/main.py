@@ -6,6 +6,7 @@ from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 
 from app.core.config import settings
+from app.modules.account import account_router
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -176,3 +177,7 @@ async def health_check() -> dict[str, str]:
         dict: Health status with "healthy" or "unhealthy" value.
     """
     return {"status": "healthy"}
+
+
+# Include routers
+app.include_router(account_router, prefix=settings.API_V1_PREFIX)
