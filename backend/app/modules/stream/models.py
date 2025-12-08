@@ -324,9 +324,15 @@ class StreamSession(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    # Relationship
+    # Relationships
     live_event: Mapped["LiveEvent"] = relationship(
         "LiveEvent", back_populates="stream_sessions"
+    )
+    health_logs: Mapped[list["StreamHealthLog"]] = relationship(
+        "StreamHealthLog",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="StreamHealthLog.collected_at.desc()",
     )
 
     def get_duration_seconds(self) -> Optional[int]:
@@ -594,6 +600,95 @@ class PlaylistItem(Base):
         return f"<PlaylistItem(id={self.id}, position={self.position}, title={self.video_title})>"
 
 
+class StreamHealthLog(Base):
+    """Stream Health Log model for storing health metrics.
+
+    Records health metrics at regular intervals for monitoring and alerting.
+    Requirements: 8.1, 8.5
+    """
+
+    __tablename__ = "stream_health_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("stream_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Health metrics (Requirements: 8.1)
+    bitrate: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    frame_rate: Mapped[float] = mapped_column(Float, nullable=True)
+    dropped_frames: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    dropped_frames_delta: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    
+    # Connection status
+    connection_status: Mapped[str] = mapped_column(
+        String(50), default=ConnectionStatus.GOOD.value
+    )
+    latency_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    
+    # Viewer metrics
+    viewer_count: Mapped[int] = mapped_column(Integer, default=0)
+    chat_rate: Mapped[float] = mapped_column(Float, default=0.0)  # messages per minute
+    
+    # Stream quality indicators
+    audio_level_db: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    video_quality_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # 0-100
+    
+    # Alert flags
+    is_alert_triggered: Mapped[bool] = mapped_column(Boolean, default=False)
+    alert_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    alert_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Timestamp for this metric collection
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    # Relationship
+    session: Mapped["StreamSession"] = relationship(
+        "StreamSession", back_populates="health_logs"
+    )
+
+    def is_healthy(self) -> bool:
+        """Check if metrics indicate healthy stream.
+        
+        Returns:
+            bool: True if stream is healthy
+        """
+        return self.connection_status in [
+            ConnectionStatus.EXCELLENT.value,
+            ConnectionStatus.GOOD.value,
+        ]
+
+    def get_quality_assessment(self) -> str:
+        """Get overall quality assessment.
+        
+        Returns:
+            str: Quality assessment (excellent, good, fair, poor)
+        """
+        if self.connection_status == ConnectionStatus.EXCELLENT.value:
+            return "excellent"
+        elif self.connection_status == ConnectionStatus.GOOD.value:
+            return "good"
+        elif self.connection_status == ConnectionStatus.FAIR.value:
+            return "fair"
+        else:
+            return "poor"
+
+    def __repr__(self) -> str:
+        return f"<StreamHealthLog(id={self.id}, session_id={self.session_id}, status={self.connection_status})>"
+
+
 class RecurrencePattern(Base):
     """Recurrence pattern for recurring live events.
 
@@ -666,3 +761,304 @@ class RecurrencePattern(Base):
 
     def __repr__(self) -> str:
         return f"<RecurrencePattern(id={self.id}, frequency={self.frequency}, interval={self.interval})>"
+
+
+# ============================================
+# Simulcast Models (Requirements: 9.1, 9.2, 9.3, 9.4, 9.5)
+# ============================================
+
+
+class SimulcastPlatform(str, Enum):
+    """Supported simulcast platforms.
+    
+    Requirements: 9.1
+    """
+
+    YOUTUBE = "youtube"
+    FACEBOOK = "facebook"
+    TWITCH = "twitch"
+    TIKTOK = "tiktok"
+    INSTAGRAM = "instagram"
+    CUSTOM = "custom"
+
+
+class SimulcastTargetStatus(str, Enum):
+    """Status of a simulcast target.
+    
+    Requirements: 9.4
+    """
+
+    PENDING = "pending"
+    CONNECTING = "connecting"
+    CONNECTED = "connected"
+    STREAMING = "streaming"
+    DISCONNECTED = "disconnected"
+    FAILED = "failed"
+    STOPPED = "stopped"
+
+
+class SimulcastTarget(Base):
+    """Simulcast Target model for multi-platform streaming.
+
+    Stores RTMP endpoints per platform with per-platform health tracking.
+    Requirements: 9.1, 9.4
+    """
+
+    __tablename__ = "simulcast_targets"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    live_event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("live_events.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Platform configuration (Requirements: 9.1)
+    platform: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True
+    )
+    platform_name: Mapped[str] = mapped_column(
+        String(255), nullable=False
+    )  # Display name for custom platforms
+
+    # RTMP endpoint configuration (Requirements: 9.1)
+    rtmp_url: Mapped[str] = mapped_column(String(1024), nullable=False)
+    _stream_key: Mapped[Optional[str]] = mapped_column(
+        "stream_key", Text, nullable=True
+    )  # Encrypted stream key
+
+    # Connection settings
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    priority: Mapped[int] = mapped_column(Integer, default=0)  # Higher = more important
+    
+    # Instagram-specific proxy settings (Requirements: 9.5)
+    use_proxy: Mapped[bool] = mapped_column(Boolean, default=False)
+    proxy_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+
+    # Status tracking (Requirements: 9.4)
+    status: Mapped[str] = mapped_column(
+        String(50), default=SimulcastTargetStatus.PENDING.value, index=True
+    )
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_error_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # Health metrics (Requirements: 9.4)
+    current_bitrate: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    dropped_frames: Mapped[int] = mapped_column(Integer, default=0)
+    connection_quality: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    last_health_check_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # Session tracking
+    connected_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    disconnected_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    total_streaming_seconds: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    @property
+    def stream_key(self) -> Optional[str]:
+        """Get decrypted stream key.
+
+        Returns:
+            Optional[str]: Decrypted stream key or None
+        """
+        if not self._stream_key:
+            return None
+        return decrypt_token(self._stream_key)
+
+    @stream_key.setter
+    def stream_key(self, value: Optional[str]) -> None:
+        """Set and encrypt stream key.
+
+        Args:
+            value: Plain text stream key to encrypt and store
+        """
+        if value is None:
+            self._stream_key = None
+        else:
+            self._stream_key = encrypt_token(value)
+
+    def is_stream_key_encrypted(self) -> bool:
+        """Check if stream key is properly encrypted.
+
+        Returns:
+            bool: True if stream key is encrypted or None
+        """
+        return self._stream_key is None or is_encrypted(self._stream_key)
+
+    def is_active(self) -> bool:
+        """Check if target is actively streaming.
+
+        Returns:
+            bool: True if target is streaming
+        """
+        return self.status in [
+            SimulcastTargetStatus.CONNECTED.value,
+            SimulcastTargetStatus.STREAMING.value,
+        ]
+
+    def is_healthy(self) -> bool:
+        """Check if target connection is healthy.
+
+        Returns:
+            bool: True if connection is healthy
+        """
+        return (
+            self.is_active()
+            and self.connection_quality in ["excellent", "good"]
+            and self.error_count < 3
+        )
+
+    def needs_proxy(self) -> bool:
+        """Check if this target requires proxy routing.
+
+        Instagram Live requires RTMP proxy (Requirements: 9.5).
+
+        Returns:
+            bool: True if proxy is needed
+        """
+        return (
+            self.platform == SimulcastPlatform.INSTAGRAM.value
+            or self.use_proxy
+        )
+
+    def get_effective_rtmp_url(self) -> str:
+        """Get the effective RTMP URL (with proxy if needed).
+
+        Returns:
+            str: RTMP URL to use for streaming
+        """
+        if self.needs_proxy() and self.proxy_url:
+            return self.proxy_url
+        return self.rtmp_url
+
+    def record_error(self, error: str) -> None:
+        """Record an error for this target.
+
+        Args:
+            error: Error message
+        """
+        self.last_error = error
+        self.error_count += 1
+        self.last_error_at = datetime.utcnow()
+        self.status = SimulcastTargetStatus.FAILED.value
+
+    def clear_errors(self) -> None:
+        """Clear error state."""
+        self.error_count = 0
+        self.last_error = None
+        self.last_error_at = None
+
+    def update_health(
+        self,
+        bitrate: Optional[int] = None,
+        dropped_frames: Optional[int] = None,
+        quality: Optional[str] = None,
+    ) -> None:
+        """Update health metrics.
+
+        Args:
+            bitrate: Current bitrate
+            dropped_frames: Dropped frame count
+            quality: Connection quality assessment
+        """
+        if bitrate is not None:
+            self.current_bitrate = bitrate
+        if dropped_frames is not None:
+            self.dropped_frames = dropped_frames
+        if quality is not None:
+            self.connection_quality = quality
+        self.last_health_check_at = datetime.utcnow()
+
+    def start_streaming(self) -> None:
+        """Mark target as streaming."""
+        self.status = SimulcastTargetStatus.STREAMING.value
+        self.connected_at = datetime.utcnow()
+        self.disconnected_at = None
+        self.clear_errors()
+
+    def stop_streaming(self, reason: Optional[str] = None) -> None:
+        """Mark target as stopped.
+
+        Args:
+            reason: Optional reason for stopping
+        """
+        self.status = SimulcastTargetStatus.STOPPED.value
+        self.disconnected_at = datetime.utcnow()
+        
+        # Calculate streaming duration
+        if self.connected_at:
+            duration = (self.disconnected_at - self.connected_at).total_seconds()
+            self.total_streaming_seconds += int(duration)
+
+        if reason:
+            self.last_error = reason
+
+    def __repr__(self) -> str:
+        return f"<SimulcastTarget(id={self.id}, platform={self.platform}, status={self.status})>"
+
+
+class SimulcastHealthLog(Base):
+    """Health log for simulcast targets.
+
+    Records per-platform health metrics for monitoring.
+    Requirements: 9.4
+    """
+
+    __tablename__ = "simulcast_health_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    target_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("simulcast_targets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Health metrics
+    bitrate: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    frame_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    dropped_frames: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    dropped_frames_delta: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    
+    # Connection status
+    connection_status: Mapped[str] = mapped_column(
+        String(50), default=ConnectionStatus.GOOD.value
+    )
+    latency_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Alert flags
+    is_alert_triggered: Mapped[bool] = mapped_column(Boolean, default=False)
+    alert_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    alert_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Timestamp
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    def __repr__(self) -> str:
+        return f"<SimulcastHealthLog(id={self.id}, target_id={self.target_id}, status={self.connection_status})>"

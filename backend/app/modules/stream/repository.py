@@ -1,7 +1,7 @@
 """Stream repository for database operations.
 
 Implements CRUD operations for LiveEvent and StreamSession with scheduling support.
-Requirements: 5.1, 5.2, 5.5
+Requirements: 5.1, 5.2, 5.5, 9.1, 9.4
 """
 
 import uuid
@@ -25,6 +25,11 @@ from app.modules.stream.models import (
     PlaylistLoopMode,
     PlaylistItemStatus,
     TransitionType,
+    StreamHealthLog,
+    SimulcastTarget,
+    SimulcastTargetStatus,
+    SimulcastPlatform,
+    SimulcastHealthLog,
 )
 
 
@@ -1100,3 +1105,709 @@ class PlaylistItemRepository:
             )
         )
         return result.scalar_one() or 0
+
+
+class StreamHealthLogRepository:
+    """Repository for StreamHealthLog CRUD operations.
+    
+    Requirements: 8.1, 8.5
+    """
+
+    def __init__(self, session: AsyncSession):
+        """Initialize repository with database session."""
+        self.session = session
+
+    async def create(
+        self,
+        session_id: uuid.UUID,
+        bitrate: int = 0,
+        frame_rate: Optional[float] = None,
+        dropped_frames: int = 0,
+        dropped_frames_delta: int = 0,
+        connection_status: str = ConnectionStatus.GOOD.value,
+        latency_ms: Optional[int] = None,
+        viewer_count: int = 0,
+        chat_rate: float = 0.0,
+        audio_level_db: Optional[float] = None,
+        video_quality_score: Optional[float] = None,
+        is_alert_triggered: bool = False,
+        alert_type: Optional[str] = None,
+        alert_message: Optional[str] = None,
+        collected_at: Optional[datetime] = None,
+    ) -> StreamHealthLog:
+        """Create a new health log entry.
+
+        Args:
+            session_id: Stream session UUID
+            bitrate: Current bitrate in bps
+            frame_rate: Current frame rate
+            dropped_frames: Total dropped frames
+            dropped_frames_delta: Dropped frames since last check
+            connection_status: Connection status
+            latency_ms: Latency in milliseconds
+            viewer_count: Current viewer count
+            chat_rate: Chat messages per minute
+            audio_level_db: Audio level in dB
+            video_quality_score: Quality score 0-100
+            is_alert_triggered: Whether alert was triggered
+            alert_type: Type of alert if triggered
+            alert_message: Alert message if triggered
+            collected_at: Time of metric collection
+
+        Returns:
+            StreamHealthLog: Created health log instance
+        """
+        log = StreamHealthLog(
+            session_id=session_id,
+            bitrate=bitrate,
+            frame_rate=frame_rate,
+            dropped_frames=dropped_frames,
+            dropped_frames_delta=dropped_frames_delta,
+            connection_status=connection_status,
+            latency_ms=latency_ms,
+            viewer_count=viewer_count,
+            chat_rate=chat_rate,
+            audio_level_db=audio_level_db,
+            video_quality_score=video_quality_score,
+            is_alert_triggered=is_alert_triggered,
+            alert_type=alert_type,
+            alert_message=alert_message,
+        )
+        if collected_at:
+            log.collected_at = collected_at
+        
+        self.session.add(log)
+        await self.session.flush()
+        return log
+
+    async def get_by_id(self, log_id: uuid.UUID) -> Optional[StreamHealthLog]:
+        """Get health log by ID.
+
+        Args:
+            log_id: Health log UUID
+
+        Returns:
+            Optional[StreamHealthLog]: Health log if found
+        """
+        result = await self.session.execute(
+            select(StreamHealthLog).where(StreamHealthLog.id == log_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_session_id(
+        self,
+        session_id: uuid.UUID,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[StreamHealthLog]:
+        """Get health logs for a session ordered by collection time.
+
+        Args:
+            session_id: Stream session UUID
+            limit: Maximum number of results
+            offset: Number of results to skip
+
+        Returns:
+            list[StreamHealthLog]: List of health logs
+        """
+        result = await self.session.execute(
+            select(StreamHealthLog)
+            .where(StreamHealthLog.session_id == session_id)
+            .order_by(StreamHealthLog.collected_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(result.scalars().all())
+
+    async def get_latest_by_session(
+        self, session_id: uuid.UUID
+    ) -> Optional[StreamHealthLog]:
+        """Get the most recent health log for a session.
+
+        Args:
+            session_id: Stream session UUID
+
+        Returns:
+            Optional[StreamHealthLog]: Latest health log if found
+        """
+        result = await self.session.execute(
+            select(StreamHealthLog)
+            .where(StreamHealthLog.session_id == session_id)
+            .order_by(StreamHealthLog.collected_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_logs_in_time_range(
+        self,
+        session_id: uuid.UUID,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> list[StreamHealthLog]:
+        """Get health logs within a time range.
+
+        Args:
+            session_id: Stream session UUID
+            start_time: Start of time range
+            end_time: End of time range
+
+        Returns:
+            list[StreamHealthLog]: List of health logs
+        """
+        result = await self.session.execute(
+            select(StreamHealthLog)
+            .where(StreamHealthLog.session_id == session_id)
+            .where(StreamHealthLog.collected_at >= start_time)
+            .where(StreamHealthLog.collected_at <= end_time)
+            .order_by(StreamHealthLog.collected_at.asc())
+        )
+        return list(result.scalars().all())
+
+    async def get_alerts_by_session(
+        self, session_id: uuid.UUID
+    ) -> list[StreamHealthLog]:
+        """Get all health logs with triggered alerts for a session.
+
+        Args:
+            session_id: Stream session UUID
+
+        Returns:
+            list[StreamHealthLog]: List of health logs with alerts
+        """
+        result = await self.session.execute(
+            select(StreamHealthLog)
+            .where(StreamHealthLog.session_id == session_id)
+            .where(StreamHealthLog.is_alert_triggered == True)
+            .order_by(StreamHealthLog.collected_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def count_by_session(self, session_id: uuid.UUID) -> int:
+        """Count health logs for a session.
+
+        Args:
+            session_id: Stream session UUID
+
+        Returns:
+            int: Number of health logs
+        """
+        result = await self.session.execute(
+            select(sql_func.count(StreamHealthLog.id)).where(
+                StreamHealthLog.session_id == session_id
+            )
+        )
+        return result.scalar_one() or 0
+
+    async def get_average_metrics(
+        self, session_id: uuid.UUID
+    ) -> dict:
+        """Get average metrics for a session.
+
+        Args:
+            session_id: Stream session UUID
+
+        Returns:
+            dict: Average metrics
+        """
+        result = await self.session.execute(
+            select(
+                sql_func.avg(StreamHealthLog.bitrate).label("avg_bitrate"),
+                sql_func.avg(StreamHealthLog.frame_rate).label("avg_frame_rate"),
+                sql_func.avg(StreamHealthLog.dropped_frames_delta).label("avg_dropped_frames"),
+                sql_func.avg(StreamHealthLog.viewer_count).label("avg_viewers"),
+                sql_func.max(StreamHealthLog.viewer_count).label("peak_viewers"),
+            ).where(StreamHealthLog.session_id == session_id)
+        )
+        row = result.one()
+        return {
+            "avg_bitrate": row.avg_bitrate or 0,
+            "avg_frame_rate": row.avg_frame_rate or 0,
+            "avg_dropped_frames": row.avg_dropped_frames or 0,
+            "avg_viewers": row.avg_viewers or 0,
+            "peak_viewers": row.peak_viewers or 0,
+        }
+
+    async def delete_old_logs(
+        self,
+        session_id: uuid.UUID,
+        older_than: datetime,
+    ) -> int:
+        """Delete health logs older than specified time.
+
+        Used for historical data retention (Requirements: 8.5).
+
+        Args:
+            session_id: Stream session UUID
+            older_than: Delete logs older than this time
+
+        Returns:
+            int: Number of logs deleted
+        """
+        result = await self.session.execute(
+            select(StreamHealthLog)
+            .where(StreamHealthLog.session_id == session_id)
+            .where(StreamHealthLog.collected_at < older_than)
+        )
+        logs = result.scalars().all()
+        count = len(logs)
+        for log in logs:
+            await self.session.delete(log)
+        await self.session.flush()
+        return count
+
+    async def delete_by_session_id(self, session_id: uuid.UUID) -> int:
+        """Delete all health logs for a session.
+
+        Args:
+            session_id: Stream session UUID
+
+        Returns:
+            int: Number of logs deleted
+        """
+        result = await self.session.execute(
+            select(StreamHealthLog).where(StreamHealthLog.session_id == session_id)
+        )
+        logs = result.scalars().all()
+        count = len(logs)
+        for log in logs:
+            await self.session.delete(log)
+        await self.session.flush()
+        return count
+
+
+# ============================================
+# Simulcast Repositories (Requirements: 9.1, 9.2, 9.3, 9.4)
+# ============================================
+
+
+class SimulcastTargetRepository:
+    """Repository for SimulcastTarget CRUD operations.
+    
+    Requirements: 9.1, 9.4
+    """
+
+    def __init__(self, session: AsyncSession):
+        """Initialize repository with database session."""
+        self.session = session
+
+    async def create(
+        self,
+        live_event_id: uuid.UUID,
+        platform: str,
+        platform_name: str,
+        rtmp_url: str,
+        stream_key: Optional[str] = None,
+        is_enabled: bool = True,
+        priority: int = 0,
+        use_proxy: bool = False,
+        proxy_url: Optional[str] = None,
+    ) -> "SimulcastTarget":
+        """Create a new simulcast target.
+
+        Args:
+            live_event_id: Live event UUID
+            platform: Platform identifier
+            platform_name: Display name
+            rtmp_url: RTMP endpoint URL
+            stream_key: Stream key (will be encrypted)
+            is_enabled: Whether target is enabled
+            priority: Priority level
+            use_proxy: Whether to use proxy
+            proxy_url: Proxy URL
+
+        Returns:
+            SimulcastTarget: Created target instance
+        """
+        from app.modules.stream.models import SimulcastTarget, SimulcastTargetStatus
+        
+        target = SimulcastTarget(
+            live_event_id=live_event_id,
+            platform=platform,
+            platform_name=platform_name,
+            rtmp_url=rtmp_url,
+            is_enabled=is_enabled,
+            priority=priority,
+            use_proxy=use_proxy,
+            proxy_url=proxy_url,
+            status=SimulcastTargetStatus.PENDING.value,
+        )
+        
+        # Set stream key (will be encrypted by property setter)
+        if stream_key:
+            target.stream_key = stream_key
+        
+        self.session.add(target)
+        await self.session.flush()
+        return target
+
+    async def get_by_id(self, target_id: uuid.UUID) -> Optional["SimulcastTarget"]:
+        """Get simulcast target by ID.
+
+        Args:
+            target_id: Target UUID
+
+        Returns:
+            Optional[SimulcastTarget]: Target if found
+        """
+        from app.modules.stream.models import SimulcastTarget
+        
+        result = await self.session.execute(
+            select(SimulcastTarget).where(SimulcastTarget.id == target_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_event_id(
+        self,
+        live_event_id: uuid.UUID,
+        enabled_only: bool = False,
+    ) -> list["SimulcastTarget"]:
+        """Get all simulcast targets for a live event.
+
+        Args:
+            live_event_id: Live event UUID
+            enabled_only: Only return enabled targets
+
+        Returns:
+            list[SimulcastTarget]: List of targets
+        """
+        from app.modules.stream.models import SimulcastTarget
+        
+        query = (
+            select(SimulcastTarget)
+            .where(SimulcastTarget.live_event_id == live_event_id)
+            .order_by(SimulcastTarget.priority.desc())
+        )
+        
+        if enabled_only:
+            query = query.where(SimulcastTarget.is_enabled == True)
+        
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def get_active_targets(
+        self, live_event_id: uuid.UUID
+    ) -> list["SimulcastTarget"]:
+        """Get actively streaming targets for a live event.
+
+        Args:
+            live_event_id: Live event UUID
+
+        Returns:
+            list[SimulcastTarget]: List of active targets
+        """
+        from app.modules.stream.models import SimulcastTarget, SimulcastTargetStatus
+        
+        result = await self.session.execute(
+            select(SimulcastTarget)
+            .where(SimulcastTarget.live_event_id == live_event_id)
+            .where(
+                SimulcastTarget.status.in_([
+                    SimulcastTargetStatus.CONNECTED.value,
+                    SimulcastTargetStatus.STREAMING.value,
+                ])
+            )
+            .order_by(SimulcastTarget.priority.desc())
+        )
+        return list(result.scalars().all())
+
+    async def get_failed_targets(
+        self, live_event_id: uuid.UUID
+    ) -> list["SimulcastTarget"]:
+        """Get failed targets for a live event.
+
+        Args:
+            live_event_id: Live event UUID
+
+        Returns:
+            list[SimulcastTarget]: List of failed targets
+        """
+        from app.modules.stream.models import SimulcastTarget, SimulcastTargetStatus
+        
+        result = await self.session.execute(
+            select(SimulcastTarget)
+            .where(SimulcastTarget.live_event_id == live_event_id)
+            .where(SimulcastTarget.status == SimulcastTargetStatus.FAILED.value)
+        )
+        return list(result.scalars().all())
+
+    async def update(
+        self, target: "SimulcastTarget", **kwargs
+    ) -> "SimulcastTarget":
+        """Update simulcast target attributes.
+
+        Args:
+            target: SimulcastTarget instance
+            **kwargs: Attributes to update
+
+        Returns:
+            SimulcastTarget: Updated target instance
+        """
+        for key, value in kwargs.items():
+            if key == "stream_key":
+                # Use property setter for encryption
+                target.stream_key = value
+            elif hasattr(target, key):
+                setattr(target, key, value)
+        await self.session.flush()
+        return target
+
+    async def set_status(
+        self,
+        target: "SimulcastTarget",
+        status: str,
+        error: Optional[str] = None,
+    ) -> "SimulcastTarget":
+        """Update target status.
+
+        Args:
+            target: SimulcastTarget instance
+            status: New status
+            error: Error message if failed
+
+        Returns:
+            SimulcastTarget: Updated target instance
+        """
+        from app.modules.stream.models import SimulcastTargetStatus
+        from datetime import datetime
+        
+        target.status = status
+        
+        if status == SimulcastTargetStatus.STREAMING.value:
+            target.start_streaming()
+        elif status in [SimulcastTargetStatus.STOPPED.value, SimulcastTargetStatus.DISCONNECTED.value]:
+            target.stop_streaming(error)
+        elif status == SimulcastTargetStatus.FAILED.value and error:
+            target.record_error(error)
+        
+        await self.session.flush()
+        return target
+
+    async def update_health(
+        self,
+        target: "SimulcastTarget",
+        bitrate: Optional[int] = None,
+        dropped_frames: Optional[int] = None,
+        quality: Optional[str] = None,
+    ) -> "SimulcastTarget":
+        """Update target health metrics.
+
+        Args:
+            target: SimulcastTarget instance
+            bitrate: Current bitrate
+            dropped_frames: Dropped frame count
+            quality: Connection quality
+
+        Returns:
+            SimulcastTarget: Updated target instance
+        """
+        target.update_health(bitrate, dropped_frames, quality)
+        await self.session.flush()
+        return target
+
+    async def start_all_targets(
+        self, live_event_id: uuid.UUID
+    ) -> list["SimulcastTarget"]:
+        """Start streaming on all enabled targets.
+
+        Args:
+            live_event_id: Live event UUID
+
+        Returns:
+            list[SimulcastTarget]: List of started targets
+        """
+        targets = await self.get_by_event_id(live_event_id, enabled_only=True)
+        for target in targets:
+            target.start_streaming()
+        await self.session.flush()
+        return targets
+
+    async def stop_all_targets(
+        self, live_event_id: uuid.UUID, reason: Optional[str] = None
+    ) -> list["SimulcastTarget"]:
+        """Stop streaming on all targets.
+
+        Args:
+            live_event_id: Live event UUID
+            reason: Reason for stopping
+
+        Returns:
+            list[SimulcastTarget]: List of stopped targets
+        """
+        targets = await self.get_active_targets(live_event_id)
+        for target in targets:
+            target.stop_streaming(reason)
+        await self.session.flush()
+        return targets
+
+    async def delete(self, target: "SimulcastTarget") -> None:
+        """Delete a simulcast target.
+
+        Args:
+            target: SimulcastTarget instance to delete
+        """
+        await self.session.delete(target)
+        await self.session.flush()
+
+    async def delete_by_event_id(self, live_event_id: uuid.UUID) -> int:
+        """Delete all targets for a live event.
+
+        Args:
+            live_event_id: Live event UUID
+
+        Returns:
+            int: Number of targets deleted
+        """
+        targets = await self.get_by_event_id(live_event_id)
+        count = len(targets)
+        for target in targets:
+            await self.session.delete(target)
+        await self.session.flush()
+        return count
+
+    async def count_by_event(
+        self, live_event_id: uuid.UUID, status: Optional[str] = None
+    ) -> int:
+        """Count targets for a live event.
+
+        Args:
+            live_event_id: Live event UUID
+            status: Optional status filter
+
+        Returns:
+            int: Number of targets
+        """
+        from app.modules.stream.models import SimulcastTarget
+        
+        query = select(sql_func.count(SimulcastTarget.id)).where(
+            SimulcastTarget.live_event_id == live_event_id
+        )
+        if status:
+            query = query.where(SimulcastTarget.status == status)
+        result = await self.session.execute(query)
+        return result.scalar_one() or 0
+
+
+class SimulcastHealthLogRepository:
+    """Repository for SimulcastHealthLog CRUD operations.
+    
+    Requirements: 9.4
+    """
+
+    def __init__(self, session: AsyncSession):
+        """Initialize repository with database session."""
+        self.session = session
+
+    async def create(
+        self,
+        target_id: uuid.UUID,
+        bitrate: int = 0,
+        frame_rate: Optional[float] = None,
+        dropped_frames: int = 0,
+        dropped_frames_delta: int = 0,
+        connection_status: str = "good",
+        latency_ms: Optional[int] = None,
+        is_alert_triggered: bool = False,
+        alert_type: Optional[str] = None,
+        alert_message: Optional[str] = None,
+    ) -> "SimulcastHealthLog":
+        """Create a new health log entry for a simulcast target.
+
+        Args:
+            target_id: Simulcast target UUID
+            bitrate: Current bitrate
+            frame_rate: Current frame rate
+            dropped_frames: Total dropped frames
+            dropped_frames_delta: Dropped frames since last check
+            connection_status: Connection status
+            latency_ms: Latency in milliseconds
+            is_alert_triggered: Whether alert was triggered
+            alert_type: Type of alert
+            alert_message: Alert message
+
+        Returns:
+            SimulcastHealthLog: Created health log instance
+        """
+        from app.modules.stream.models import SimulcastHealthLog
+        
+        log = SimulcastHealthLog(
+            target_id=target_id,
+            bitrate=bitrate,
+            frame_rate=frame_rate,
+            dropped_frames=dropped_frames,
+            dropped_frames_delta=dropped_frames_delta,
+            connection_status=connection_status,
+            latency_ms=latency_ms,
+            is_alert_triggered=is_alert_triggered,
+            alert_type=alert_type,
+            alert_message=alert_message,
+        )
+        
+        self.session.add(log)
+        await self.session.flush()
+        return log
+
+    async def get_by_target_id(
+        self,
+        target_id: uuid.UUID,
+        limit: int = 100,
+    ) -> list["SimulcastHealthLog"]:
+        """Get health logs for a target.
+
+        Args:
+            target_id: Simulcast target UUID
+            limit: Maximum number of results
+
+        Returns:
+            list[SimulcastHealthLog]: List of health logs
+        """
+        from app.modules.stream.models import SimulcastHealthLog
+        
+        result = await self.session.execute(
+            select(SimulcastHealthLog)
+            .where(SimulcastHealthLog.target_id == target_id)
+            .order_by(SimulcastHealthLog.collected_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def get_latest_by_target(
+        self, target_id: uuid.UUID
+    ) -> Optional["SimulcastHealthLog"]:
+        """Get the most recent health log for a target.
+
+        Args:
+            target_id: Simulcast target UUID
+
+        Returns:
+            Optional[SimulcastHealthLog]: Latest health log if found
+        """
+        from app.modules.stream.models import SimulcastHealthLog
+        
+        result = await self.session.execute(
+            select(SimulcastHealthLog)
+            .where(SimulcastHealthLog.target_id == target_id)
+            .order_by(SimulcastHealthLog.collected_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def delete_by_target_id(self, target_id: uuid.UUID) -> int:
+        """Delete all health logs for a target.
+
+        Args:
+            target_id: Simulcast target UUID
+
+        Returns:
+            int: Number of logs deleted
+        """
+        from app.modules.stream.models import SimulcastHealthLog
+        
+        result = await self.session.execute(
+            select(SimulcastHealthLog).where(SimulcastHealthLog.target_id == target_id)
+        )
+        logs = result.scalars().all()
+        count = len(logs)
+        for log in logs:
+            await self.session.delete(log)
+        await self.session.flush()
+        return count

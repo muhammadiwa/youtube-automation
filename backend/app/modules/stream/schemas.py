@@ -1,11 +1,12 @@
 """Pydantic schemas for stream module.
 
 Defines request/response schemas for live event management.
-Requirements: 5.1, 5.2, 5.3, 5.4, 5.5
+Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 9.1, 9.2, 9.3, 9.4, 9.5
 """
 
 import uuid
 from datetime import datetime
+from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -433,3 +434,191 @@ class PlaylistLoopResult(BaseModel):
     loop_count: Optional[int]
     loop_mode: str
     total_plays_expected: int  # Expected total plays based on loop config
+
+
+# ============================================
+# Simulcast Schemas (Requirements: 9.1, 9.2, 9.3, 9.4, 9.5)
+# ============================================
+
+
+class SimulcastPlatformEnum(str, Enum):
+    """Supported simulcast platforms."""
+
+    YOUTUBE = "youtube"
+    FACEBOOK = "facebook"
+    TWITCH = "twitch"
+    TIKTOK = "tiktok"
+    INSTAGRAM = "instagram"
+    CUSTOM = "custom"
+
+
+class SimulcastTargetStatusEnum(str, Enum):
+    """Status of a simulcast target."""
+
+    PENDING = "pending"
+    CONNECTING = "connecting"
+    CONNECTED = "connected"
+    STREAMING = "streaming"
+    DISCONNECTED = "disconnected"
+    FAILED = "failed"
+    STOPPED = "stopped"
+
+
+class CreateSimulcastTargetRequest(BaseModel):
+    """Request schema for creating a simulcast target.
+    
+    Requirements: 9.1
+    """
+
+    live_event_id: uuid.UUID = Field(..., description="Live event to attach target to")
+    platform: SimulcastPlatformEnum = Field(..., description="Target platform")
+    platform_name: str = Field(..., min_length=1, max_length=255, description="Display name")
+    rtmp_url: str = Field(..., min_length=1, max_length=1024, description="RTMP endpoint URL")
+    stream_key: Optional[str] = Field(None, description="Stream key (will be encrypted)")
+    is_enabled: bool = Field(True, description="Whether target is enabled")
+    priority: int = Field(0, ge=0, le=100, description="Priority (higher = more important)")
+    use_proxy: bool = Field(False, description="Use proxy routing")
+    proxy_url: Optional[str] = Field(None, max_length=512, description="Proxy URL for routing")
+
+    @field_validator("proxy_url")
+    @classmethod
+    def validate_proxy_url(cls, v: Optional[str], info) -> Optional[str]:
+        use_proxy = info.data.get("use_proxy", False)
+        platform = info.data.get("platform")
+        
+        # Instagram requires proxy (Requirements: 9.5)
+        if platform == SimulcastPlatformEnum.INSTAGRAM and not v:
+            # Will use default proxy if not provided
+            pass
+        
+        return v
+
+
+class UpdateSimulcastTargetRequest(BaseModel):
+    """Request schema for updating a simulcast target."""
+
+    platform_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    rtmp_url: Optional[str] = Field(None, min_length=1, max_length=1024)
+    stream_key: Optional[str] = None
+    is_enabled: Optional[bool] = None
+    priority: Optional[int] = Field(None, ge=0, le=100)
+    use_proxy: Optional[bool] = None
+    proxy_url: Optional[str] = Field(None, max_length=512)
+
+
+class SimulcastTargetResponse(BaseModel):
+    """Response schema for simulcast target.
+    
+    Requirements: 9.4
+    """
+
+    id: uuid.UUID
+    live_event_id: uuid.UUID
+    platform: str
+    platform_name: str
+    rtmp_url: str
+    is_enabled: bool
+    priority: int
+    use_proxy: bool
+    proxy_url: Optional[str]
+    status: str
+    last_error: Optional[str]
+    error_count: int
+    last_error_at: Optional[datetime]
+    current_bitrate: Optional[int]
+    dropped_frames: int
+    connection_quality: Optional[str]
+    last_health_check_at: Optional[datetime]
+    connected_at: Optional[datetime]
+    disconnected_at: Optional[datetime]
+    total_streaming_seconds: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SimulcastTargetWithKeyResponse(SimulcastTargetResponse):
+    """Response schema for simulcast target with stream key (for authorized users)."""
+
+    stream_key: Optional[str] = None
+
+
+class SimulcastHealthResponse(BaseModel):
+    """Response schema for simulcast target health.
+    
+    Requirements: 9.4
+    """
+
+    target_id: uuid.UUID
+    platform: str
+    platform_name: str
+    status: str
+    bitrate: Optional[int]
+    frame_rate: Optional[float]
+    dropped_frames: int
+    connection_quality: Optional[str]
+    latency_ms: Optional[int]
+    is_healthy: bool
+    last_health_check_at: Optional[datetime]
+
+
+class SimulcastConfigRequest(BaseModel):
+    """Request schema for configuring simulcast for a live event.
+    
+    Requirements: 9.1
+    """
+
+    targets: list[CreateSimulcastTargetRequest] = Field(
+        ..., min_length=1, description="List of simulcast targets"
+    )
+
+
+class SimulcastStatusResponse(BaseModel):
+    """Response schema for overall simulcast status.
+    
+    Requirements: 9.4
+    """
+
+    live_event_id: uuid.UUID
+    is_active: bool
+    total_targets: int
+    active_targets: int
+    failed_targets: int
+    targets: list[SimulcastHealthResponse]
+
+
+class SimulcastStartResult(BaseModel):
+    """Result of starting simulcast streaming.
+    
+    Requirements: 9.2, 9.3
+    """
+
+    live_event_id: uuid.UUID
+    started_targets: list[uuid.UUID]
+    failed_targets: list[dict]  # {target_id, platform, error}
+    all_started: bool
+
+
+class SimulcastStopResult(BaseModel):
+    """Result of stopping simulcast streaming."""
+
+    live_event_id: uuid.UUID
+    stopped_targets: list[uuid.UUID]
+    total_streaming_seconds: int
+
+
+class PlatformFailureEvent(BaseModel):
+    """Event when a single platform fails during simulcast.
+    
+    Requirements: 9.3 - Fault isolation
+    """
+
+    target_id: uuid.UUID
+    platform: str
+    platform_name: str
+    error: str
+    error_count: int
+    other_platforms_affected: bool  # Should always be False per Requirements 9.3
+    timestamp: datetime
