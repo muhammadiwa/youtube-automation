@@ -88,6 +88,14 @@ class Settings(BaseSettings):
     STREAM_HEALTH_CHECK_INTERVAL_SECONDS: int = 10
     STREAM_RECONNECT_MAX_ATTEMPTS: int = 5
 
+    # Notification Settings (Requirements: 23.1)
+    NOTIFICATION_DELIVERY_SLA_SECONDS: float = 60.0
+    NOTIFICATION_MAX_RETRY_ATTEMPTS: int = 3
+    NOTIFICATION_BATCH_INTERVAL_SECONDS: int = 300
+    
+    # Telegram Bot (optional)
+    TELEGRAM_BOT_TOKEN: str = ""
+
     class Config:
         env_file = ".env"
         case_sensitive = True

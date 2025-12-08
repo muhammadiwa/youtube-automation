@@ -13,6 +13,7 @@ from app.modules.competitor.router import router as competitor_router
 from app.modules.monitoring import monitoring_router
 from app.modules.agent import agent_router
 from app.modules.job.router import router as job_router
+from app.modules.notification import notification_router
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -201,3 +202,4 @@ app.include_router(competitor_router, prefix=settings.API_V1_PREFIX)
 app.include_router(monitoring_router, prefix=settings.API_V1_PREFIX)
 app.include_router(agent_router, prefix=settings.API_V1_PREFIX)
 app.include_router(job_router, prefix=settings.API_V1_PREFIX)
+app.include_router(notification_router, prefix=settings.API_V1_PREFIX)
