@@ -8,6 +8,7 @@ from fastapi.openapi.utils import get_openapi
 from app.core.config import settings
 from app.modules.account import account_router
 from app.modules.stream import router as stream_router
+from app.modules.ai.router import router as ai_router
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -183,3 +184,4 @@ async def health_check() -> dict[str, str]:
 # Include routers
 app.include_router(account_router, prefix=settings.API_V1_PREFIX)
 app.include_router(stream_router, prefix=settings.API_V1_PREFIX)
+app.include_router(ai_router, prefix=settings.API_V1_PREFIX)

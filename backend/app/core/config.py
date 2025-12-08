@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     S3_ENDPOINT_URL: str = ""  # For MinIO or other S3-compatible storage
     CDN_DOMAIN: str = ""  # CloudFront or other CDN domain
 
+    # OpenAI API
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4-turbo-preview"
+    OPENAI_MAX_TOKENS: int = 2000
+    OPENAI_TEMPERATURE: float = 0.7
+
     class Config:
         env_file = ".env"
         case_sensitive = True
