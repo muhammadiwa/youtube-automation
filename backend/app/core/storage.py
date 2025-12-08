@@ -502,3 +502,51 @@ class Storage:
 def get_storage() -> Storage:
     """Get the default storage instance."""
     return Storage.get_instance()
+
+
+class StorageService:
+    """Async-compatible storage service wrapper."""
+
+    def __init__(self, storage: Optional[Storage] = None):
+        """Initialize storage service."""
+        self._storage = storage or get_storage()
+
+    async def upload_file(
+        self,
+        key: str,
+        content: bytes,
+        content_type: str = "application/octet-stream",
+    ) -> StorageResult:
+        """Upload content to storage.
+
+        Args:
+            key: Storage key/path
+            content: File content as bytes
+            content_type: MIME type
+
+        Returns:
+            StorageResult: Upload result
+        """
+        import io
+        fileobj = io.BytesIO(content)
+        return self._storage.upload_fileobj(fileobj, key, content_type)
+
+    async def download_file(self, key: str, destination: str) -> bool:
+        """Download a file from storage."""
+        return self._storage.download(key, destination)
+
+    async def delete_file(self, key: str) -> bool:
+        """Delete a file from storage."""
+        return self._storage.delete(key)
+
+    async def get_url(self, key: str, expires_in: int = 3600) -> str:
+        """Get URL for a file."""
+        return self._storage.get_url(key, expires_in)
+
+    async def exists(self, key: str) -> bool:
+        """Check if a file exists."""
+        return self._storage.exists(key)
+
+
+# Global storage service instance
+storage_service = StorageService()

@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.modules.account import account_router
 from app.modules.stream import router as stream_router
 from app.modules.ai.router import router as ai_router
+from app.modules.competitor.router import router as competitor_router
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -69,6 +70,10 @@ Authorization: Bearer <access_token>
         {
             "name": "analytics",
             "description": "Analytics and reporting - metrics, revenue, competitor analysis",
+        },
+        {
+            "name": "competitors",
+            "description": "Competitor tracking and analysis - metrics, content, AI recommendations",
         },
         {
             "name": "moderation",
@@ -185,3 +190,4 @@ async def health_check() -> dict[str, str]:
 app.include_router(account_router, prefix=settings.API_V1_PREFIX)
 app.include_router(stream_router, prefix=settings.API_V1_PREFIX)
 app.include_router(ai_router, prefix=settings.API_V1_PREFIX)
+app.include_router(competitor_router, prefix=settings.API_V1_PREFIX)
