@@ -29,13 +29,13 @@ class TestAutoRestartManager:
         """**Feature: youtube-automation, Property: Auto-Restart Logic**
 
         For any number of reconnection attempts, restart SHALL be allowed
-        only if attempts < MAX_RECONNECTION_ATTEMPTS (5).
+        only if attempts < max_reconnection_attempts (5).
         """
         manager = StreamAutoRestartManager()
 
         should_restart = manager.should_attempt_restart(attempts)
 
-        if attempts < manager.MAX_RECONNECTION_ATTEMPTS:
+        if attempts < manager.max_reconnection_attempts:
             assert should_restart is True, f"Should restart at attempt {attempts}"
         else:
             assert should_restart is False, f"Should not restart at attempt {attempts}"
@@ -46,12 +46,12 @@ class TestAutoRestartManager:
         """**Feature: youtube-automation, Property: Auto-Restart Logic**
 
         For any number of attempts, remaining attempts SHALL be
-        max(0, MAX_RECONNECTION_ATTEMPTS - attempts).
+        max(0, max_reconnection_attempts - attempts).
         """
         manager = StreamAutoRestartManager()
 
         remaining = manager.get_remaining_attempts(attempts)
-        expected = max(0, manager.MAX_RECONNECTION_ATTEMPTS - attempts)
+        expected = max(0, manager.max_reconnection_attempts - attempts)
 
         assert remaining == expected, f"Remaining should be {expected}, got {remaining}"
 
@@ -117,10 +117,10 @@ class TestAutoRestartManager:
     def test_max_reconnection_attempts_is_five(self) -> None:
         """**Feature: youtube-automation, Property: Auto-Restart Logic**
 
-        MAX_RECONNECTION_ATTEMPTS SHALL be 5 per design document.
+        max_reconnection_attempts SHALL be 5 per design document.
         """
         manager = StreamAutoRestartManager()
-        assert manager.MAX_RECONNECTION_ATTEMPTS == 5
+        assert manager.max_reconnection_attempts == 5
 
     def test_uses_stream_reconnect_config(self) -> None:
         """**Feature: youtube-automation, Property: Auto-Restart Logic**

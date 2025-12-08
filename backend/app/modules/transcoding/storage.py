@@ -1,67 +1,54 @@
 """CDN storage utilities for transcoded outputs.
 
 Requirements: 10.5 - Store transcoded output in CDN-backed storage.
+Uses the universal storage module for backend flexibility.
 """
 
 import os
 import uuid
-from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
+from app.core.storage import Storage, StorageResult, get_storage
 from app.modules.transcoding.schemas import CDNUploadResult
 
 
-@dataclass
-class S3Config:
-    """Configuration for S3-compatible storage."""
-    bucket: str
-    region: str = "us-east-1"
-    endpoint_url: Optional[str] = None
-    access_key: Optional[str] = None
-    secret_key: Optional[str] = None
-    cdn_domain: Optional[str] = None
+def convert_to_cdn_result(result: StorageResult, bucket: str = "") -> CDNUploadResult:
+    """Convert StorageResult to CDNUploadResult for backward compatibility.
+    
+    Args:
+        result: Storage result
+        bucket: Bucket name (for compatibility)
+        
+    Returns:
+        CDNUploadResult
+    """
+    return CDNUploadResult(
+        success=result.success,
+        bucket=bucket,
+        key=result.key,
+        cdn_url=result.url,
+        file_size=result.file_size,
+        etag=result.etag,
+        error_message=result.error_message,
+    )
 
 
 class CDNStorage:
     """CDN-backed storage for transcoded videos.
     
     Requirements: 10.5 - Store transcoded output in CDN-backed storage.
+    
+    This is a wrapper around the universal Storage class for backward compatibility.
     """
 
-    def __init__(self, config: S3Config):
+    def __init__(self, storage: Optional[Storage] = None):
         """Initialize CDN storage.
         
         Args:
-            config: S3 configuration
+            storage: Storage instance (uses default if not provided)
         """
-        self.config = config
-        self._client = None
-
-    def _get_client(self):
-        """Get or create S3 client."""
-        if self._client is None:
-            try:
-                import boto3
-                
-                client_kwargs = {
-                    "service_name": "s3",
-                    "region_name": self.config.region,
-                }
-                
-                if self.config.endpoint_url:
-                    client_kwargs["endpoint_url"] = self.config.endpoint_url
-                
-                if self.config.access_key and self.config.secret_key:
-                    client_kwargs["aws_access_key_id"] = self.config.access_key
-                    client_kwargs["aws_secret_access_key"] = self.config.secret_key
-                
-                self._client = boto3.client(**client_kwargs)
-            except ImportError:
-                # boto3 not installed, use mock client
-                self._client = MockS3Client(self.config)
-        
-        return self._client
+        self._storage = storage or get_storage()
 
     def generate_key(
         self,
@@ -69,7 +56,7 @@ class CDNStorage:
         resolution: str,
         extension: str = "mp4",
     ) -> str:
-        """Generate S3 key for transcoded output.
+        """Generate storage key for transcoded output.
         
         Args:
             job_id: Transcode job ID
@@ -77,24 +64,25 @@ class CDNStorage:
             extension: File extension
             
         Returns:
-            S3 object key
+            Storage key
         """
-        date_prefix = datetime.utcnow().strftime("%Y/%m/%d")
-        return f"transcoded/{date_prefix}/{job_id}/{resolution}.{extension}"
+        return self._storage.generate_key(
+            prefix="transcoded",
+            filename=f"{job_id}/{resolution}.{extension}",
+            include_date=True,
+        )
 
-    def get_cdn_url(self, key: str) -> str:
+    def get_cdn_url(self, key: str, expires_in: int = 3600) -> str:
         """Get CDN URL for an object.
         
         Args:
-            key: S3 object key
+            key: Storage key
+            expires_in: URL expiration in seconds
             
         Returns:
-            CDN URL
+            CDN/Storage URL
         """
-        if self.config.cdn_domain:
-            return f"https://{self.config.cdn_domain}/{key}"
-        else:
-            return f"https://{self.config.bucket}.s3.{self.config.region}.amazonaws.com/{key}"
+        return self._storage.get_url(key, expires_in)
 
     def upload_file(
         self,
@@ -108,67 +96,25 @@ class CDNStorage:
         
         Args:
             file_path: Local file path
-            key: S3 object key
+            key: Storage key
             content_type: MIME type
             
         Returns:
             Upload result
         """
-        try:
-            client = self._get_client()
-            
-            # Get file size
-            file_size = os.path.getsize(file_path)
-            
-            # Upload file
-            with open(file_path, "rb") as f:
-                response = client.put_object(
-                    Bucket=self.config.bucket,
-                    Key=key,
-                    Body=f,
-                    ContentType=content_type,
-                )
-            
-            cdn_url = self.get_cdn_url(key)
-            etag = response.get("ETag", "").strip('"')
-            
-            return CDNUploadResult(
-                success=True,
-                bucket=self.config.bucket,
-                key=key,
-                cdn_url=cdn_url,
-                file_size=file_size,
-                etag=etag,
-            )
-            
-        except Exception as e:
-            return CDNUploadResult(
-                success=False,
-                bucket=self.config.bucket,
-                key=key,
-                cdn_url="",
-                file_size=0,
-                error_message=str(e),
-            )
+        result = self._storage.upload(file_path, key, content_type)
+        return convert_to_cdn_result(result)
 
     def delete_file(self, key: str) -> bool:
         """Delete file from CDN storage.
         
         Args:
-            key: S3 object key
+            key: Storage key
             
         Returns:
             True if deleted successfully
         """
-        try:
-            client = self._get_client()
-            client.delete_object(
-                Bucket=self.config.bucket,
-                Key=key,
-            )
-            return True
-        except Exception:
-            return False
+        return self._storage.delete(key)
 
     def generate_presigned_url(
         self,
@@ -178,60 +124,27 @@ class CDNStorage:
         """Generate presigned URL for temporary access.
         
         Args:
-            key: S3 object key
+            key: Storage key
             expires_in: Expiration time in seconds
             
         Returns:
             Presigned URL or None
         """
         try:
-            client = self._get_client()
-            url = client.generate_presigned_url(
-                "get_object",
-                Params={
-                    "Bucket": self.config.bucket,
-                    "Key": key,
-                },
-                ExpiresIn=expires_in,
-            )
-            return url
+            return self._storage.get_url(key, expires_in)
         except Exception:
             return None
 
-
-class MockS3Client:
-    """Mock S3 client for testing without boto3."""
-
-    def __init__(self, config: S3Config):
-        self.config = config
-        self._objects = {}
-
-    def put_object(self, Bucket: str, Key: str, Body, ContentType: str = None) -> dict:
-        """Mock put_object."""
-        content = Body.read() if hasattr(Body, "read") else Body
-        self._objects[f"{Bucket}/{Key}"] = {
-            "content": content,
-            "content_type": ContentType,
-        }
-        return {"ETag": f'"{uuid.uuid4().hex}"'}
-
-    def delete_object(self, Bucket: str, Key: str) -> dict:
-        """Mock delete_object."""
-        key = f"{Bucket}/{Key}"
-        if key in self._objects:
-            del self._objects[key]
-        return {}
-
-    def generate_presigned_url(
-        self,
-        operation: str,
-        Params: dict,
-        ExpiresIn: int,
-    ) -> str:
-        """Mock generate_presigned_url."""
-        bucket = Params.get("Bucket", "")
-        key = Params.get("Key", "")
-        return f"https://{bucket}.s3.amazonaws.com/{key}?expires={ExpiresIn}"
+    def file_exists(self, key: str) -> bool:
+        """Check if file exists in storage.
+        
+        Args:
+            key: Storage key
+            
+        Returns:
+            True if file exists
+        """
+        return self._storage.exists(key)
 
 
 def get_default_storage() -> CDNStorage:
@@ -240,16 +153,7 @@ def get_default_storage() -> CDNStorage:
     Returns:
         CDNStorage instance
     """
-    # In production, these would come from environment variables
-    config = S3Config(
-        bucket=os.environ.get("S3_BUCKET", "youtube-automation-transcoded"),
-        region=os.environ.get("S3_REGION", "us-east-1"),
-        endpoint_url=os.environ.get("S3_ENDPOINT_URL"),
-        access_key=os.environ.get("AWS_ACCESS_KEY_ID"),
-        secret_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
-        cdn_domain=os.environ.get("CDN_DOMAIN"),
-    )
-    return CDNStorage(config)
+    return CDNStorage()
 
 
 async def upload_transcoded_output(
@@ -294,3 +198,167 @@ def cleanup_local_file(file_path: str) -> bool:
         return False
     except Exception:
         return False
+
+
+# Thumbnail storage utilities
+class ThumbnailStorage:
+    """Storage for AI-generated thumbnails."""
+
+    def __init__(self, storage: Optional[Storage] = None):
+        """Initialize thumbnail storage.
+        
+        Args:
+            storage: Storage instance (uses default if not provided)
+        """
+        self._storage = storage or get_storage()
+
+    def generate_key(
+        self,
+        video_id: uuid.UUID,
+        thumbnail_id: str,
+        extension: str = "jpg",
+    ) -> str:
+        """Generate storage key for thumbnail.
+        
+        Args:
+            video_id: Video ID
+            thumbnail_id: Thumbnail identifier
+            extension: File extension
+            
+        Returns:
+            Storage key
+        """
+        return self._storage.generate_key(
+            prefix="thumbnails",
+            filename=f"{video_id}/{thumbnail_id}.{extension}",
+            include_date=True,
+        )
+
+    def upload(
+        self,
+        file_path: str,
+        key: str,
+        content_type: str = "image/jpeg",
+    ) -> StorageResult:
+        """Upload thumbnail to storage.
+        
+        Args:
+            file_path: Local file path
+            key: Storage key
+            content_type: MIME type
+            
+        Returns:
+            Upload result
+        """
+        return self._storage.upload(file_path, key, content_type)
+
+    def get_url(self, key: str, expires_in: int = 86400) -> str:
+        """Get URL for thumbnail.
+        
+        Args:
+            key: Storage key
+            expires_in: URL expiration in seconds (default 24 hours)
+            
+        Returns:
+            Thumbnail URL
+        """
+        return self._storage.get_url(key, expires_in)
+
+    def delete(self, key: str) -> bool:
+        """Delete thumbnail from storage.
+        
+        Args:
+            key: Storage key
+            
+        Returns:
+            True if deleted successfully
+        """
+        return self._storage.delete(key)
+
+
+# Video upload storage utilities
+class VideoStorage:
+    """Storage for uploaded videos."""
+
+    def __init__(self, storage: Optional[Storage] = None):
+        """Initialize video storage.
+        
+        Args:
+            storage: Storage instance (uses default if not provided)
+        """
+        self._storage = storage or get_storage()
+
+    def generate_key(
+        self,
+        account_id: uuid.UUID,
+        video_id: uuid.UUID,
+        filename: str,
+    ) -> str:
+        """Generate storage key for video.
+        
+        Args:
+            account_id: YouTube account ID
+            video_id: Video ID
+            filename: Original filename
+            
+        Returns:
+            Storage key
+        """
+        extension = filename.split(".")[-1] if "." in filename else "mp4"
+        return self._storage.generate_key(
+            prefix=f"videos/{account_id}",
+            filename=f"{video_id}.{extension}",
+            include_date=True,
+        )
+
+    def upload(
+        self,
+        file_path: str,
+        key: str,
+        content_type: str = "video/mp4",
+    ) -> StorageResult:
+        """Upload video to storage.
+        
+        Args:
+            file_path: Local file path
+            key: Storage key
+            content_type: MIME type
+            
+        Returns:
+            Upload result
+        """
+        return self._storage.upload(file_path, key, content_type)
+
+    def get_url(self, key: str, expires_in: int = 3600) -> str:
+        """Get URL for video.
+        
+        Args:
+            key: Storage key
+            expires_in: URL expiration in seconds
+            
+        Returns:
+            Video URL
+        """
+        return self._storage.get_url(key, expires_in)
+
+    def delete(self, key: str) -> bool:
+        """Delete video from storage.
+        
+        Args:
+            key: Storage key
+            
+        Returns:
+            True if deleted successfully
+        """
+        return self._storage.delete(key)
+
+    def exists(self, key: str) -> bool:
+        """Check if video exists in storage.
+        
+        Args:
+            key: Storage key
+            
+        Returns:
+            True if video exists
+        """
+        return self._storage.exists(key)

@@ -51,7 +51,7 @@ class TestStreamHealthCollectionFrequency:
         Collection interval SHALL be exactly 10 seconds per Requirements 8.1.
         """
         monitor = StreamHealthMonitor()
-        assert monitor.COLLECTION_INTERVAL_SECONDS == 10
+        assert monitor.collection_interval_seconds == 10
 
     @given(
         start_time=datetime_strategy,
@@ -67,7 +67,7 @@ class TestStreamHealthCollectionFrequency:
         SHALL be at most 10 seconds apart.
         """
         monitor = StreamHealthMonitor()
-        interval = monitor.COLLECTION_INTERVAL_SECONDS
+        interval = monitor.collection_interval_seconds
 
         # Simulate collection times
         collection_times = [
@@ -95,7 +95,7 @@ class TestStreamHealthCollectionFrequency:
         there SHALL be at least D/10 health metric collections.
         """
         monitor = StreamHealthMonitor()
-        interval = monitor.COLLECTION_INTERVAL_SECONDS
+        interval = monitor.collection_interval_seconds
 
         # Calculate expected minimum collections
         expected_min_collections = session_duration_seconds // interval
@@ -115,7 +115,8 @@ class TestStreamHealthCollectionFrequency:
 
         For any collection interval <= 10 seconds, it SHALL meet the requirement.
         """
-        max_allowed_interval = StreamHealthMonitor.COLLECTION_INTERVAL_SECONDS
+        monitor = StreamHealthMonitor()
+        max_allowed_interval = monitor.collection_interval_seconds
         assert interval_seconds <= max_allowed_interval
 
     @given(
@@ -129,7 +130,8 @@ class TestStreamHealthCollectionFrequency:
 
         For any collection interval > 10 seconds, it SHALL NOT meet the requirement.
         """
-        max_allowed_interval = StreamHealthMonitor.COLLECTION_INTERVAL_SECONDS
+        monitor = StreamHealthMonitor()
+        max_allowed_interval = monitor.collection_interval_seconds
         assert interval_seconds > max_allowed_interval
 
 

@@ -39,7 +39,7 @@ class TestReconnectionAttemptLimit:
         Maximum reconnection attempts SHALL be exactly 5 per Requirements 8.3.
         """
         manager = StreamReconnectionManager()
-        assert manager.MAX_RECONNECTION_ATTEMPTS == 5
+        assert manager.max_reconnection_attempts == 5
 
     @given(attempts=valid_attempts)
     @settings(max_examples=100)
@@ -161,7 +161,7 @@ class TestAutoRestartManager:
         StreamAutoRestartManager max attempts SHALL be 5.
         """
         manager = StreamAutoRestartManager()
-        assert manager.MAX_RECONNECTION_ATTEMPTS == 5
+        assert manager.max_reconnection_attempts == 5
 
     @given(attempts=valid_attempts)
     @settings(max_examples=100)
@@ -197,7 +197,7 @@ class TestAutoRestartManager:
         manager = StreamAutoRestartManager()
         remaining = manager.get_remaining_attempts(attempts)
         
-        expected = max(0, manager.MAX_RECONNECTION_ATTEMPTS - attempts)
+        expected = max(0, manager.max_reconnection_attempts - attempts)
         assert remaining == expected, (
             f"Remaining attempts should be {expected}, got {remaining}"
         )
@@ -211,7 +211,7 @@ class TestReconnectionConsistency:
         reconnection_manager = StreamReconnectionManager()
         auto_restart_manager = StreamAutoRestartManager()
         
-        assert reconnection_manager.MAX_RECONNECTION_ATTEMPTS == auto_restart_manager.MAX_RECONNECTION_ATTEMPTS
+        assert reconnection_manager.max_reconnection_attempts == auto_restart_manager.max_reconnection_attempts
 
     @given(attempts=all_attempts)
     @settings(max_examples=100)

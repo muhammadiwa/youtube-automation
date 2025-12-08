@@ -12,6 +12,7 @@ from celery import Task
 from sqlalchemy import select
 
 from app.core.celery_app import celery_app
+from app.core.config import settings
 from app.core.database import async_session_maker
 from app.modules.job.tasks import BaseTaskWithRetry, RetryConfig, RETRY_CONFIGS
 from app.modules.stream.models import (
@@ -133,8 +134,6 @@ class StreamAutoRestartManager:
     Implements exponential backoff reconnection per Requirement 6.5.
     """
     
-    MAX_RECONNECTION_ATTEMPTS = 5
-    
     def __init__(self, retry_config: Optional[RetryConfig] = None):
         """Initialize with retry configuration.
         
@@ -143,6 +142,11 @@ class StreamAutoRestartManager:
         """
         self.retry_config = retry_config or STREAM_RECONNECT_CONFIG
     
+    @property
+    def max_reconnection_attempts(self) -> int:
+        """Get max reconnection attempts from settings."""
+        return settings.STREAM_RECONNECT_MAX_ATTEMPTS
+
     def should_attempt_restart(self, reconnection_attempts: int) -> bool:
         """Check if restart should be attempted.
         
@@ -152,7 +156,7 @@ class StreamAutoRestartManager:
         Returns:
             bool: True if restart should be attempted
         """
-        return reconnection_attempts < self.MAX_RECONNECTION_ATTEMPTS
+        return reconnection_attempts < self.max_reconnection_attempts
     
     def calculate_restart_delay(self, attempt: int) -> float:
         """Calculate delay before next restart attempt.
@@ -174,7 +178,7 @@ class StreamAutoRestartManager:
         Returns:
             int: Remaining attempts
         """
-        return max(0, self.MAX_RECONNECTION_ATTEMPTS - reconnection_attempts)
+        return max(0, self.max_reconnection_attempts - reconnection_attempts)
 
 
 @celery_app.task(bind=True, base=BaseTaskWithRetry)
@@ -569,11 +573,13 @@ class StreamHealthMonitor:
     Requirements: 8.1, 8.2
     """
     
-    # Collection interval in seconds (Requirements: 8.1)
-    COLLECTION_INTERVAL_SECONDS = 10
-    
     # Alert timing requirement (Requirements: 8.2)
     MAX_ALERT_DELAY_SECONDS = 30
+    
+    @property
+    def collection_interval_seconds(self) -> int:
+        """Get collection interval from settings."""
+        return settings.STREAM_HEALTH_CHECK_INTERVAL_SECONDS
     
     def __init__(self, thresholds: Optional[HealthThresholds] = None):
         """Initialize with thresholds.
@@ -697,8 +703,6 @@ class StreamReconnectionManager:
     Requirements: 8.3, 8.4
     """
     
-    MAX_RECONNECTION_ATTEMPTS = 5
-    
     def __init__(self, retry_config: Optional[RetryConfig] = None):
         """Initialize with retry configuration.
         
@@ -706,6 +710,11 @@ class StreamReconnectionManager:
             retry_config: Retry configuration
         """
         self.retry_config = retry_config or STREAM_RECONNECT_CONFIG
+    
+    @property
+    def max_reconnection_attempts(self) -> int:
+        """Get max reconnection attempts from settings."""
+        return settings.STREAM_RECONNECT_MAX_ATTEMPTS
     
     def should_attempt_reconnection(self, attempts: int) -> bool:
         """Check if reconnection should be attempted.
@@ -716,7 +725,7 @@ class StreamReconnectionManager:
         Returns:
             bool: True if reconnection should be attempted
         """
-        return attempts < self.MAX_RECONNECTION_ATTEMPTS
+        return attempts < self.max_reconnection_attempts
     
     def calculate_reconnection_delay(self, attempt: int) -> float:
         """Calculate delay before next reconnection attempt.
