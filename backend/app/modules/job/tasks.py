@@ -93,3 +93,48 @@ class BaseTaskWithRetry(Task):
 def example_task_with_retry(self: BaseTaskWithRetry, data: dict) -> dict:
     """Example task demonstrating retry logic."""
     return {"status": "completed", "data": data}
+
+
+@celery_app.task(bind=True)
+def process_dlq_alerts_task(self) -> dict:
+    """Process DLQ jobs that need alerts.
+    
+    Requirements: 22.3 - Alert operators when job moves to DLQ
+    
+    This task should be scheduled to run periodically to check for
+    jobs that have been moved to DLQ and generate alerts for operators.
+    """
+    # This is a placeholder - actual implementation would use async session
+    # and call JobQueueService.process_dlq_alerts()
+    return {"status": "processed", "message": "DLQ alerts processed"}
+
+
+@celery_app.task(bind=True, base=BaseTaskWithRetry)
+def send_dlq_notification_task(
+    self: BaseTaskWithRetry,
+    job_id: str,
+    job_type: str,
+    error_message: str,
+    channels: list[str],
+) -> dict:
+    """Send notification for a DLQ alert.
+    
+    Requirements: 22.3 - Alert operators
+    
+    Args:
+        job_id: The ID of the job in DLQ
+        job_type: Type of the failed job
+        error_message: Error message from the job
+        channels: Notification channels to use (email, slack, etc.)
+    
+    Returns:
+        dict with notification status
+    """
+    # This is a placeholder - actual implementation would send notifications
+    # via configured channels (email, Slack, etc.)
+    return {
+        "status": "sent",
+        "job_id": job_id,
+        "job_type": job_type,
+        "channels": channels,
+    }

@@ -11,6 +11,8 @@ from app.modules.stream import router as stream_router
 from app.modules.ai.router import router as ai_router
 from app.modules.competitor.router import router as competitor_router
 from app.modules.monitoring import monitoring_router
+from app.modules.agent import agent_router
+from app.modules.job.router import router as job_router
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -197,3 +199,5 @@ app.include_router(stream_router, prefix=settings.API_V1_PREFIX)
 app.include_router(ai_router, prefix=settings.API_V1_PREFIX)
 app.include_router(competitor_router, prefix=settings.API_V1_PREFIX)
 app.include_router(monitoring_router, prefix=settings.API_V1_PREFIX)
+app.include_router(agent_router, prefix=settings.API_V1_PREFIX)
+app.include_router(job_router, prefix=settings.API_V1_PREFIX)
