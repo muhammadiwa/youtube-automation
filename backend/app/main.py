@@ -29,6 +29,8 @@ from app.modules.system_monitoring import system_monitoring_router
 from app.modules.security.router import router as security_router
 from app.modules.backup import backup_router
 from app.modules.billing import router as billing_router
+from app.modules.payment_gateway.router import router as payment_gateway_router
+from app.modules.integration.router import router as integration_router
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -121,6 +123,14 @@ Authorization: Bearer <access_token>
         {
             "name": "security",
             "description": "Security features - KMS encryption, TLS configuration, admin auth, security scanning, audit export",
+        },
+        {
+            "name": "payment-gateway",
+            "description": "Multi-payment gateway management - Stripe, PayPal, Midtrans, Xendit",
+        },
+        {
+            "name": "integration",
+            "description": "API key management, webhooks, and developer integration",
         },
     ],
     contact={
@@ -263,3 +273,5 @@ app.include_router(system_monitoring_router, prefix=settings.API_V1_PREFIX)
 app.include_router(security_router, prefix=settings.API_V1_PREFIX)
 app.include_router(backup_router, prefix=settings.API_V1_PREFIX)
 app.include_router(billing_router, prefix=settings.API_V1_PREFIX)
+app.include_router(payment_gateway_router, prefix=settings.API_V1_PREFIX)
+app.include_router(integration_router, prefix=settings.API_V1_PREFIX)
