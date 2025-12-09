@@ -59,6 +59,25 @@ export interface StreamHealth {
     last_updated: string
 }
 
+export interface StreamHealthHistory {
+    timestamp: string
+    bitrate: number
+    dropped_frames: number
+    fps: number
+    connection_quality: number
+    viewer_count: number
+}
+
+export interface StreamAlert {
+    id: string
+    event_id: string
+    type: "health_warning" | "health_critical" | "reconnection" | "failover" | "disconnection"
+    message: string
+    severity: "info" | "warning" | "error"
+    acknowledged: boolean
+    created_at: string
+}
+
 // ============ Playlist Types ============
 export interface PlaylistItem {
     id: string
@@ -157,6 +176,35 @@ export const streamsApi = {
                 last_updated: new Date().toISOString(),
             }
         }
+    },
+
+    async getHealthHistory(eventId: string, duration?: string): Promise<StreamHealthHistory[]> {
+        try {
+            return await apiClient.get(`/streams/events/${eventId}/health/history`, { duration })
+        } catch (error) {
+            // Return mock data for demo purposes
+            const now = Date.now()
+            return Array.from({ length: 30 }, (_, i) => ({
+                timestamp: new Date(now - (29 - i) * 60000).toISOString(),
+                bitrate: 4500 + Math.random() * 1000 - 500,
+                dropped_frames: Math.floor(Math.random() * 5),
+                fps: 29 + Math.random() * 2,
+                connection_quality: 85 + Math.random() * 15,
+                viewer_count: Math.floor(100 + Math.random() * 50),
+            }))
+        }
+    },
+
+    async getAlerts(eventId: string): Promise<StreamAlert[]> {
+        try {
+            return await apiClient.get(`/streams/events/${eventId}/alerts`)
+        } catch (error) {
+            return []
+        }
+    },
+
+    async acknowledgeAlert(eventId: string, alertId: string): Promise<void> {
+        return await apiClient.post(`/streams/events/${eventId}/alerts/${alertId}/acknowledge`)
     },
 
     // ============ Playlist ============

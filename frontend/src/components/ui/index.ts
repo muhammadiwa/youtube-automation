@@ -65,3 +65,4 @@ export {
 } from "./select"
 export { ToggleGroup, ToggleGroupItem } from "./toggle-group"
 export { Progress } from "./progress"
+export { ToastProvider, useToast, type Toast, type ToastType } from "./toast"
