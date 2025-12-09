@@ -5,9 +5,11 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { motion } from "framer-motion"
 import { Eye, EyeOff, Mail, Lock, User, Loader2, Check, X, Play, ArrowRight, Sparkles, Shield, Zap } from "lucide-react"
-import { Button, Input, Label } from "@/components/ui"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { useAuth } from "@/components/providers/auth-provider"
+import { useAuth } from "@/hooks/use-auth"
 import { calculatePasswordStrength, getStrengthLabel } from "@/lib/utils/password"
 
 export default function RegisterPage() {

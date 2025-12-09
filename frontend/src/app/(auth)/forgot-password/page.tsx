@@ -4,7 +4,9 @@ import { useState } from "react"
 import Link from "next/link"
 import { motion } from "framer-motion"
 import { Mail, Loader2, ArrowLeft, Check, Play, KeyRound, Shield, Lock, Sparkles } from "lucide-react"
-import { Button, Input, Label } from "@/components/ui"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import authApi from "@/lib/api/auth"
 
 export default function ForgotPasswordPage() {

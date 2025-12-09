@@ -5,7 +5,10 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { motion } from "framer-motion"
 import { Lock, Loader2, Eye, EyeOff, Check, X, ArrowLeft, AlertCircle } from "lucide-react"
-import { Button, Input, Label, Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card"
 import authApi from "@/lib/api/auth"
 import { calculatePasswordStrength, getStrengthColor, getStrengthLabel } from "@/lib/utils/password"
 
@@ -174,8 +177,8 @@ function ResetPasswordForm() {
                                             <div
                                                 key={index}
                                                 className={`h-1 flex-1 rounded-full transition-colors ${index < passwordStrength.score
-                                                        ? getStrengthColor(passwordStrength.score)
-                                                        : "bg-muted"
+                                                    ? getStrengthColor(passwordStrength.score)
+                                                    : "bg-muted"
                                                     }`}
                                             />
                                         ))}
