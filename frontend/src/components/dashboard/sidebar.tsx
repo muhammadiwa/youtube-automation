@@ -15,6 +15,7 @@ import {
     HelpCircle,
     Shield,
     MessageSquare,
+    DollarSign,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -29,6 +30,7 @@ const navigation = [
     { name: "Comments", href: "/dashboard/comments", icon: MessageSquare },
     { name: "Moderation", href: "/dashboard/moderation/settings", icon: Shield },
     { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
+    { name: "Revenue", href: "/dashboard/revenue", icon: DollarSign },
     { name: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 
@@ -84,6 +86,10 @@ export function Sidebar({ className }: SidebarProps) {
         // Handle comments routes - check if pathname starts with /dashboard/comments
         if (href.startsWith("/dashboard/comments")) {
             return pathname.startsWith("/dashboard/comments");
+        }
+        // Handle revenue routes - check if pathname starts with /dashboard/revenue
+        if (href.startsWith("/dashboard/revenue")) {
+            return pathname.startsWith("/dashboard/revenue");
         }
         return pathname.startsWith(href);
     };
