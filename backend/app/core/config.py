@@ -37,7 +37,14 @@ class Settings(BaseSettings):
     YOUTUBE_REDIRECT_URI: str = ""
 
     # CORS
-    CORS_ORIGINS: list[str] = []
+    CORS_ORIGINS: str = "http://localhost:3000"
+    
+    @property
+    def cors_origins_list(self) -> list[str]:
+        """Parse CORS origins from comma-separated string."""
+        if not self.CORS_ORIGINS:
+            return []
+        return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
 
     # Storage Configuration
     # STORAGE_BACKEND: local, s3, minio, gcs (Google Cloud Storage)

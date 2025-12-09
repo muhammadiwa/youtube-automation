@@ -1,8 +1,9 @@
 """Authentication schemas for request/response validation."""
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, field_serializer
 from datetime import datetime
 from typing import Optional
+from uuid import UUID
 
 
 class RegisterRequest(BaseModel):
@@ -120,12 +121,17 @@ class LoginResponse(TokenResponse):
 class UserResponse(BaseModel):
     """User profile response."""
     
-    id: str = Field(..., description="User ID")
+    id: UUID = Field(..., description="User ID")
     email: str = Field(..., description="User email")
     name: str = Field(..., description="User full name")
     is_2fa_enabled: bool = Field(..., alias="is2FAEnabled", description="Whether 2FA is enabled")
     created_at: datetime = Field(..., alias="createdAt", description="Account creation timestamp")
     last_login_at: Optional[datetime] = Field(None, alias="lastLoginAt", description="Last login timestamp")
+    
+    @field_serializer('id')
+    def serialize_id(self, value: UUID) -> str:
+        """Serialize UUID to string."""
+        return str(value)
     
     model_config = {
         "populate_by_name": True,
