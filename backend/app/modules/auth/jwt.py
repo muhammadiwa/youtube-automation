@@ -110,22 +110,28 @@ def create_refresh_token(user_id: uuid.UUID) -> tuple[str, str]:
     return create_token(user_id, "refresh", expires_delta)
 
 
-def create_auth_tokens(user_id: uuid.UUID) -> AuthTokens:
+def create_auth_tokens(user_id: uuid.UUID, expires_minutes: int | None = None) -> AuthTokens:
     """Create both access and refresh tokens.
 
     Args:
         user_id: User UUID
+        expires_minutes: Optional custom expiration time in minutes
 
     Returns:
         AuthTokens: Access and refresh tokens
     """
-    access_token, _ = create_access_token(user_id)
+    if expires_minutes is not None:
+        expires_delta = timedelta(minutes=expires_minutes)
+        access_token, _ = create_token(user_id, "access", expires_delta)
+    else:
+        access_token, _ = create_access_token(user_id)
+    
     refresh_token, _ = create_refresh_token(user_id)
 
     return AuthTokens(
         access_token=access_token,
         refresh_token=refresh_token,
-        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        expires_in=(expires_minutes or settings.ACCESS_TOKEN_EXPIRE_MINUTES) * 60,
     )
 
 
@@ -215,3 +221,59 @@ def get_user_id_from_token(token: str) -> uuid.UUID | None:
         return uuid.UUID(payload.sub)
     except ValueError:
         return None
+
+
+# FastAPI dependencies
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+security = HTTPBearer()
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> Any:
+    """Get current authenticated user from JWT token.
+    
+    This is a FastAPI dependency that should be used with Depends().
+    
+    Args:
+        credentials: HTTP Bearer credentials from Authorization header
+        
+    Returns:
+        User: Current authenticated user
+        
+    Raises:
+        HTTPException: If token is invalid or user not found
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from app.core.database import get_db
+    from app.modules.auth.repository import UserRepository
+    
+    token = credentials.credentials
+    
+    # Validate token
+    payload = validate_token(token, "access")
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Get user from database
+    user_id = uuid.UUID(payload.sub)
+    
+    # Get database session
+    async for db in get_db():
+        user_repo = UserRepository(db)
+        user = await user_repo.get_by_id(user_id)
+        
+        if user is None or not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found or inactive",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        return user
