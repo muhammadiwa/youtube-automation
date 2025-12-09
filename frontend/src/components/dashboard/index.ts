@@ -9,3 +9,5 @@ export { NotificationCenter } from "./notification-center";
 export { NotificationPreferencesModal } from "./notification-preferences-modal";
 export { AccountCard } from "./account-card";
 export { ConnectAccountModal } from "./connect-account-modal";
+export { LiveChatPanel } from "./live-chat-panel";
+export { SentimentBadge, SentimentIcon, SentimentDot, AttentionIndicator, SentimentSummary } from "./sentiment-indicator";

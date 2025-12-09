@@ -13,6 +13,8 @@ import {
     Menu,
     Youtube,
     HelpCircle,
+    Shield,
+    MessageSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -24,6 +26,8 @@ const navigation = [
     { name: "Accounts", href: "/dashboard/accounts", icon: Users },
     { name: "Videos", href: "/dashboard/videos", icon: Video },
     { name: "Streams", href: "/dashboard/streams", icon: Radio },
+    { name: "Comments", href: "/dashboard/comments", icon: MessageSquare },
+    { name: "Moderation", href: "/dashboard/moderation/settings", icon: Shield },
     { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
     { name: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
@@ -72,6 +76,14 @@ export function Sidebar({ className }: SidebarProps) {
     const isActiveRoute = (href: string) => {
         if (href === "/dashboard") {
             return pathname === "/dashboard";
+        }
+        // Handle moderation routes - check if pathname starts with /dashboard/moderation
+        if (href.startsWith("/dashboard/moderation")) {
+            return pathname.startsWith("/dashboard/moderation");
+        }
+        // Handle comments routes - check if pathname starts with /dashboard/comments
+        if (href.startsWith("/dashboard/comments")) {
+            return pathname.startsWith("/dashboard/comments");
         }
         return pathname.startsWith(href);
     };

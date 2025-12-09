@@ -66,3 +66,13 @@ export {
 export { ToggleGroup, ToggleGroupItem } from "./toggle-group"
 export { Progress } from "./progress"
 export { ToastProvider, useToast, type Toast, type ToastType } from "./toast"
+export {
+    Table,
+    TableHeader,
+    TableBody,
+    TableFooter,
+    TableHead,
+    TableRow,
+    TableCell,
+    TableCaption,
+} from "./table"

@@ -9,7 +9,6 @@ import {
     Users,
     Clock,
     Activity,
-    MessageSquare,
     Settings,
     RefreshCw,
     Copy,
@@ -27,6 +26,7 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { streamsApi, type LiveEvent, type StreamHealth } from "@/lib/api/streams"
+import { LiveChatPanel } from "@/components/dashboard/live-chat-panel"
 
 function formatDuration(seconds: number): string {
     const hrs = Math.floor(seconds / 3600)
@@ -55,62 +55,7 @@ function HealthIndicator({ status }: { status: StreamHealth["status"] }) {
     )
 }
 
-function ChatPanel({ eventId }: { eventId: string }) {
-    const [messages, setMessages] = useState<Array<{ id: string; user: string; text: string; time: string }>>([])
-    const [newMessage, setNewMessage] = useState("")
-
-    // Simulated chat messages for demo
-    useEffect(() => {
-        const demoMessages = [
-            { id: "1", user: "Viewer123", text: "Great stream!", time: "2 min ago" },
-            { id: "2", user: "Fan456", text: "Hello everyone!", time: "1 min ago" },
-            { id: "3", user: "User789", text: "Love the content!", time: "Just now" },
-        ]
-        setMessages(demoMessages)
-    }, [eventId])
-
-    const handleSendMessage = () => {
-        if (!newMessage.trim()) return
-        setMessages((prev) => [
-            ...prev,
-            { id: Date.now().toString(), user: "Moderator", text: newMessage, time: "Just now" },
-        ])
-        setNewMessage("")
-    }
-
-    return (
-        <Card className="h-full flex flex-col border-0 shadow-lg">
-            <CardHeader className="pb-2">
-                <CardTitle className="text-lg flex items-center gap-2">
-                    <MessageSquare className="h-5 w-5" />
-                    Live Chat
-                </CardTitle>
-            </CardHeader>
-            <CardContent className="flex-1 flex flex-col">
-                <div className="flex-1 overflow-y-auto space-y-2 mb-4 max-h-[300px]">
-                    {messages.map((msg) => (
-                        <div key={msg.id} className="p-2 rounded bg-muted">
-                            <div className="flex items-center justify-between">
-                                <span className="font-medium text-sm">{msg.user}</span>
-                                <span className="text-xs text-muted-foreground">{msg.time}</span>
-                            </div>
-                            <p className="text-sm mt-1">{msg.text}</p>
-                        </div>
-                    ))}
-                </div>
-                <div className="flex gap-2">
-                    <Input
-                        placeholder="Send a message..."
-                        value={newMessage}
-                        onChange={(e) => setNewMessage(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
-                    />
-                    <Button onClick={handleSendMessage}>Send</Button>
-                </div>
-            </CardContent>
-        </Card>
-    )
-}
+// ChatPanel is now replaced by LiveChatPanel component
 
 export default function StreamControlPage() {
     const params = useParams()
@@ -504,7 +449,7 @@ export default function StreamControlPage() {
 
                     {/* Chat Panel */}
                     <div className="lg:col-span-1">
-                        <ChatPanel eventId={eventId} />
+                        <LiveChatPanel eventId={eventId} isLive={isLive} />
                     </div>
                 </div>
             </div>
