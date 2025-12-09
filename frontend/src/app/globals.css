@@ -16,15 +16,15 @@
     --card-foreground: 224 71% 4%;
     --popover: 0 0% 100%;
     --popover-foreground: 224 71% 4%;
-    /* Orange/Coral Primary - like the reference image */
-    --primary: 24 95% 53%;
+    /* YouTube Red Primary */
+    --primary: 0 90% 50%;
     --primary-foreground: 0 0% 100%;
     --secondary: 220 14% 96%;
     --secondary-foreground: 224 71% 4%;
     --muted: 220 14% 96%;
     --muted-foreground: 220 9% 46%;
-    --accent: 24 95% 95%;
-    --accent-foreground: 24 95% 40%;
+    --accent: 0 90% 97%;
+    --accent-foreground: 0 90% 40%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
     --success: 142 76% 36%;
@@ -33,8 +33,8 @@
     --warning-foreground: 0 0% 100%;
     --border: 220 13% 91%;
     --input: 220 13% 91%;
-    --ring: 24 95% 53%;
-    --chart-1: 24 95% 53%;
+    --ring: 0 90% 50%;
+    --chart-1: 0 90% 50%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;
     --chart-4: 43 74% 66%;
@@ -42,12 +42,12 @@
     --radius: 0.5rem;
     --sidebar-background: 0 0% 100%;
     --sidebar-foreground: 224 71% 4%;
-    --sidebar-primary: 24 95% 53%;
+    --sidebar-primary: 0 90% 50%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 24 95% 97%;
-    --sidebar-accent-foreground: 24 95% 40%;
+    --sidebar-accent: 0 90% 97%;
+    --sidebar-accent-foreground: 0 90% 40%;
     --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 24 95% 53%;
+    --sidebar-ring: 0 90% 50%;
   }
 
   .dark {
@@ -57,15 +57,15 @@
     --card-foreground: 210 20% 98%;
     --popover: 224 71% 4%;
     --popover-foreground: 210 20% 98%;
-    /* Orange/Coral Primary - dark mode */
-    --primary: 24 95% 58%;
+    /* YouTube Red Primary - dark mode */
+    --primary: 0 90% 55%;
     --primary-foreground: 0 0% 100%;
     --secondary: 215 28% 17%;
     --secondary-foreground: 210 20% 98%;
     --muted: 215 28% 17%;
     --muted-foreground: 217 10% 64%;
-    --accent: 24 50% 15%;
-    --accent-foreground: 24 95% 70%;
+    --accent: 0 50% 15%;
+    --accent-foreground: 0 90% 70%;
     --destructive: 0 63% 31%;
     --destructive-foreground: 210 20% 98%;
     --success: 142 71% 45%;
@@ -74,20 +74,20 @@
     --warning-foreground: 0 0% 0%;
     --border: 215 28% 17%;
     --input: 215 28% 17%;
-    --ring: 24 95% 58%;
-    --chart-1: 24 95% 58%;
+    --ring: 0 90% 55%;
+    --chart-1: 0 90% 55%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
     --sidebar-background: 224 71% 4%;
     --sidebar-foreground: 210 20% 98%;
-    --sidebar-primary: 24 95% 58%;
+    --sidebar-primary: 0 90% 55%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 24 50% 12%;
-    --sidebar-accent-foreground: 24 95% 70%;
+    --sidebar-accent: 0 50% 12%;
+    --sidebar-accent-foreground: 0 90% 70%;
     --sidebar-border: 215 28% 17%;
-    --sidebar-ring: 24 95% 58%;
+    --sidebar-ring: 0 90% 55%;
   }
 }
 
@@ -154,5 +154,71 @@
       opacity: 0;
       transform: translateY(-4px);
     }
+  }
+}
+
+/* Dialog/Modal - Pure fade animation from center (override tailwindcss-animate) */
+[data-radix-dialog-overlay],
+[data-radix-dialog-overlay][data-state="open"],
+[data-radix-dialog-overlay][data-state="closed"] {
+  animation: dialog-overlay-fade 150ms ease-out !important;
+  transform: none !important;
+}
+
+[data-radix-dialog-content],
+[data-radix-dialog-content][data-state="open"],
+[data-radix-dialog-content][data-state="closed"] {
+  animation: dialog-content-fade 150ms ease-out !important;
+}
+
+[data-radix-dialog-overlay][data-state="closed"] {
+  animation: dialog-overlay-fade-out 150ms ease-in !important;
+}
+
+[data-radix-dialog-content][data-state="closed"] {
+  animation: dialog-content-fade-out 150ms ease-in !important;
+}
+
+@keyframes dialog-overlay-fade {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dialog-overlay-fade-out {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes dialog-content-fade {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes dialog-content-fade-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.96);
   }
 }

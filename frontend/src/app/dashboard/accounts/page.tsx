@@ -98,7 +98,7 @@ export default function AccountsPage() {
                     <Button
                         onClick={handleConnectAccount}
                         size="lg"
-                        className="w-full sm:w-auto"
+                        className="w-full sm:w-auto bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white shadow-lg shadow-red-500/25"
                     >
                         <Plus className="mr-2 h-4 w-4" />
                         Connect Account
@@ -156,7 +156,10 @@ export default function AccountsPage() {
                                 : "Try adjusting your search or filters"}
                         </p>
                         {safeAccounts.length === 0 && (
-                            <Button onClick={handleConnectAccount}>
+                            <Button
+                                onClick={handleConnectAccount}
+                                className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white shadow-lg shadow-red-500/25"
+                            >
                                 <Plus className="mr-2 h-4 w-4" />
                                 Connect Account
                             </Button>

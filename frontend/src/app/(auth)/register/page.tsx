@@ -66,7 +66,7 @@ export default function RegisterPage() {
 
     if (success) {
         return (
-            <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-orange-50 to-red-50 dark:from-gray-950 dark:to-orange-950 p-4">
+            <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-red-50 to-red-100 dark:from-gray-950 dark:to-red-950 p-4">
                 <motion.div
                     initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
@@ -77,7 +77,7 @@ export default function RegisterPage() {
                         initial={{ scale: 0 }}
                         animate={{ scale: 1, rotate: 360 }}
                         transition={{ delay: 0.2, type: "spring" }}
-                        className="mx-auto w-16 h-16 sm:w-20 sm:h-20 bg-gradient-to-br from-orange-500 to-red-500 rounded-full flex items-center justify-center mb-6 shadow-lg shadow-orange-500/30"
+                        className="mx-auto w-16 h-16 sm:w-20 sm:h-20 bg-gradient-to-br from-red-500 to-red-600 rounded-full flex items-center justify-center mb-6 shadow-lg shadow-red-500/30"
                     >
                         <Check className="h-8 w-8 sm:h-10 sm:w-10 text-white" />
                     </motion.div>
@@ -89,7 +89,7 @@ export default function RegisterPage() {
                         {[0, 1, 2].map((i) => (
                             <motion.div
                                 key={i}
-                                className="w-2 h-2 bg-orange-500 rounded-full"
+                                className="w-2 h-2 bg-red-500 rounded-full"
                                 animate={{ scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }}
                                 transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
                             />
@@ -103,7 +103,7 @@ export default function RegisterPage() {
     return (
         <div className="min-h-screen w-full flex flex-col lg:flex-row">
             {/* Left Side - Hero (Hidden on Mobile) */}
-            <div className="hidden lg:flex w-full lg:w-1/2 bg-gradient-to-br from-orange-500 via-orange-600 to-red-500 p-12 items-center justify-center relative overflow-hidden">
+            <div className="hidden lg:flex w-full lg:w-1/2 bg-gradient-to-br from-red-500 via-red-600 to-red-700 p-12 items-center justify-center relative overflow-hidden">
                 {/* Animated Background */}
                 <div className="absolute inset-0">
                     <motion.div
@@ -116,7 +116,7 @@ export default function RegisterPage() {
                         transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
                     />
                     <motion.div
-                        className="absolute bottom-20 left-20 w-96 h-96 bg-yellow-500/20 rounded-full blur-3xl"
+                        className="absolute bottom-20 left-20 w-96 h-96 bg-red-400/20 rounded-full blur-3xl"
                         animate={{
                             scale: [1, 1.3, 1],
                             x: [0, -50, 0],
@@ -125,7 +125,7 @@ export default function RegisterPage() {
                         transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
                     />
                     <motion.div
-                        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-72 bg-red-500/20 rounded-full blur-3xl"
+                        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-72 bg-red-800/20 rounded-full blur-3xl"
                         animate={{
                             scale: [1, 1.4, 1],
                         }}
@@ -204,7 +204,7 @@ export default function RegisterPage() {
                 >
                     {/* Logo */}
                     <div className="flex items-center gap-3 mb-8">
-                        <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-orange-500 to-red-500 rounded-xl flex items-center justify-center shadow-lg shadow-orange-500/30">
+                        <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-red-500 to-red-600 rounded-xl flex items-center justify-center shadow-lg shadow-red-500/30">
                             <Play className="w-5 h-5 sm:w-6 sm:h-6 text-white fill-white" />
                         </div>
                         <div>
@@ -243,7 +243,7 @@ export default function RegisterPage() {
                                     placeholder="John Doe"
                                     value={name}
                                     onChange={(e) => setName(e.target.value)}
-                                    className="pl-9 sm:pl-10 h-10 sm:h-11 text-sm sm:text-base bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-800 focus:border-orange-500 focus:ring-orange-500"
+                                    className="pl-9 sm:pl-10 h-10 sm:h-11 text-sm sm:text-base bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-800 focus:border-red-500 focus:ring-red-500"
                                     required
                                 />
                             </div>
@@ -261,7 +261,7 @@ export default function RegisterPage() {
                                     placeholder="name@example.com"
                                     value={email}
                                     onChange={(e) => setEmail(e.target.value)}
-                                    className="pl-9 sm:pl-10 h-10 sm:h-11 text-sm sm:text-base bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-800 focus:border-orange-500 focus:ring-orange-500"
+                                    className="pl-9 sm:pl-10 h-10 sm:h-11 text-sm sm:text-base bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-800 focus:border-red-500 focus:ring-red-500"
                                     required
                                 />
                             </div>
@@ -279,7 +279,7 @@ export default function RegisterPage() {
                                     placeholder="••••••••"
                                     value={password}
                                     onChange={(e) => setPassword(e.target.value)}
-                                    className="pl-9 sm:pl-10 pr-9 sm:pr-10 h-10 sm:h-11 text-sm sm:text-base bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-800 focus:border-orange-500 focus:ring-orange-500"
+                                    className="pl-9 sm:pl-10 pr-9 sm:pr-10 h-10 sm:h-11 text-sm sm:text-base bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-800 focus:border-red-500 focus:ring-red-500"
                                     required
                                 />
                                 <button
@@ -339,7 +339,7 @@ export default function RegisterPage() {
                                     placeholder="••••••••"
                                     value={confirmPassword}
                                     onChange={(e) => setConfirmPassword(e.target.value)}
-                                    className="pl-9 sm:pl-10 pr-9 sm:pr-10 h-10 sm:h-11 text-sm sm:text-base bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-800 focus:border-orange-500 focus:ring-orange-500"
+                                    className="pl-9 sm:pl-10 pr-9 sm:pr-10 h-10 sm:h-11 text-sm sm:text-base bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-800 focus:border-red-500 focus:ring-red-500"
                                     required
                                 />
                                 <button
@@ -374,16 +374,16 @@ export default function RegisterPage() {
                             <Checkbox
                                 id="terms"
                                 checked={acceptTerms}
-                                onCheckedChange={setAcceptTerms}
-                                className="mt-0.5 border-gray-300 data-[state=checked]:bg-orange-500 data-[state=checked]:border-orange-500"
+                                onCheckedChange={(checked) => setAcceptTerms(checked === true)}
+                                className="mt-0.5 border-gray-300 data-[state=checked]:bg-red-500 data-[state=checked]:border-red-500"
                             />
                             <Label htmlFor="terms" className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 leading-tight cursor-pointer">
                                 I agree to the{" "}
-                                <Link href="/terms" className="text-orange-600 dark:text-orange-400 hover:underline">
+                                <Link href="/terms" className="text-red-600 dark:text-red-400 hover:underline">
                                     Terms of Service
                                 </Link>{" "}
                                 and{" "}
-                                <Link href="/privacy" className="text-orange-600 dark:text-orange-400 hover:underline">
+                                <Link href="/privacy" className="text-red-600 dark:text-red-400 hover:underline">
                                     Privacy Policy
                                 </Link>
                             </Label>
@@ -391,7 +391,7 @@ export default function RegisterPage() {
 
                         <Button
                             type="submit"
-                            className="w-full h-10 sm:h-11 text-sm sm:text-base bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-medium shadow-lg shadow-orange-500/30"
+                            className="w-full h-10 sm:h-11 text-sm sm:text-base bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-medium shadow-lg shadow-red-500/30"
                             disabled={isLoading || !isFormValid}
                         >
                             {isLoading ? (
@@ -445,7 +445,7 @@ export default function RegisterPage() {
 
                     <p className="mt-6 text-center text-xs sm:text-sm text-gray-600 dark:text-gray-400">
                         Already have an account?{" "}
-                        <Link href="/login" className="text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 font-semibold">
+                        <Link href="/login" className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 font-semibold">
                             Sign in
                         </Link>
                     </p>

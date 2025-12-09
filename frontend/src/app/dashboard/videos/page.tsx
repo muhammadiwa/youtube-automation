@@ -163,7 +163,10 @@ export default function VideosPage() {
                         <Button variant="outline" onClick={() => router.push("/dashboard/videos/bulk-upload")}>
                             Bulk Upload
                         </Button>
-                        <Button onClick={() => router.push("/dashboard/videos/upload")}>
+                        <Button
+                            onClick={() => router.push("/dashboard/videos/upload")}
+                            className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white shadow-lg shadow-red-500/25"
+                        >
                             <Upload className="mr-2 h-4 w-4" />
                             Upload Video
                         </Button>
@@ -349,7 +352,10 @@ export default function VideosPage() {
                     <Card className="border-0 shadow-lg">
                         <CardContent className="py-12 text-center">
                             <p className="text-muted-foreground">No videos found</p>
-                            <Button className="mt-4" onClick={() => router.push("/dashboard/videos/upload")}>
+                            <Button
+                                className="mt-4 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white shadow-lg shadow-red-500/25"
+                                onClick={() => router.push("/dashboard/videos/upload")}
+                            >
                                 <Upload className="mr-2 h-4 w-4" />
                                 Upload Your First Video
                             </Button>

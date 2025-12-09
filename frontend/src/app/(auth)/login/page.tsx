@@ -49,7 +49,7 @@ export default function LoginPage() {
                 >
                     {/* Logo */}
                     <div className="flex items-center gap-3 mb-8">
-                        <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-orange-500 to-red-500 rounded-xl flex items-center justify-center shadow-lg shadow-orange-500/30">
+                        <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-red-500 to-red-600 rounded-xl flex items-center justify-center shadow-lg shadow-red-500/30">
                             <Play className="w-5 h-5 sm:w-6 sm:h-6 text-white fill-white" />
                         </div>
                         <div>
@@ -88,7 +88,7 @@ export default function LoginPage() {
                                     placeholder="name@example.com"
                                     value={email}
                                     onChange={(e) => setEmail(e.target.value)}
-                                    className="pl-9 sm:pl-10 h-10 sm:h-11 text-sm sm:text-base bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-800 focus:border-orange-500 focus:ring-orange-500"
+                                    className="pl-9 sm:pl-10 h-10 sm:h-11 text-sm sm:text-base bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-800 focus:border-red-500 focus:ring-red-500"
                                     required
                                 />
                             </div>
@@ -106,7 +106,7 @@ export default function LoginPage() {
                                     placeholder="••••••••"
                                     value={password}
                                     onChange={(e) => setPassword(e.target.value)}
-                                    className="pl-9 sm:pl-10 pr-9 sm:pr-10 h-10 sm:h-11 text-sm sm:text-base bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-800 focus:border-orange-500 focus:ring-orange-500"
+                                    className="pl-9 sm:pl-10 pr-9 sm:pr-10 h-10 sm:h-11 text-sm sm:text-base bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-800 focus:border-red-500 focus:ring-red-500"
                                     required
                                 />
                                 <button
@@ -124,8 +124,8 @@ export default function LoginPage() {
                                 <Checkbox
                                     id="remember"
                                     checked={rememberMe}
-                                    onCheckedChange={setRememberMe}
-                                    className="border-gray-300 data-[state=checked]:bg-orange-500 data-[state=checked]:border-orange-500"
+                                    onCheckedChange={(checked) => setRememberMe(checked === true)}
+                                    className="border-gray-300 data-[state=checked]:bg-red-500 data-[state=checked]:border-red-500"
                                 />
                                 <Label htmlFor="remember" className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 cursor-pointer">
                                     Remember me
@@ -133,7 +133,7 @@ export default function LoginPage() {
                             </div>
                             <Link
                                 href="/forgot-password"
-                                className="text-xs sm:text-sm text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 font-medium"
+                                className="text-xs sm:text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 font-medium"
                             >
                                 Forgot password?
                             </Link>
@@ -141,7 +141,7 @@ export default function LoginPage() {
 
                         <Button
                             type="submit"
-                            className="w-full h-10 sm:h-11 text-sm sm:text-base bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-medium shadow-lg shadow-orange-500/30"
+                            className="w-full h-10 sm:h-11 text-sm sm:text-base bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-medium shadow-lg shadow-red-500/30"
                             disabled={isLoading}
                         >
                             {isLoading ? (
@@ -195,7 +195,7 @@ export default function LoginPage() {
 
                     <p className="mt-8 text-center text-xs sm:text-sm text-gray-600 dark:text-gray-400">
                         Don't have an account?{" "}
-                        <Link href="/register" className="text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 font-semibold">
+                        <Link href="/register" className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 font-semibold">
                             Sign up for free
                         </Link>
                     </p>
@@ -203,7 +203,7 @@ export default function LoginPage() {
             </div>
 
             {/* Right Side - Hero (Hidden on Mobile) */}
-            <div className="hidden lg:flex w-full lg:w-1/2 bg-gradient-to-br from-orange-500 via-orange-600 to-red-500 p-12 items-center justify-center relative overflow-hidden order-1 lg:order-2">
+            <div className="hidden lg:flex w-full lg:w-1/2 bg-gradient-to-br from-red-500 via-red-600 to-red-700 p-12 items-center justify-center relative overflow-hidden order-1 lg:order-2">
                 {/* Animated Background */}
                 <div className="absolute inset-0">
                     <motion.div
@@ -216,7 +216,7 @@ export default function LoginPage() {
                         transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
                     />
                     <motion.div
-                        className="absolute bottom-20 left-20 w-96 h-96 bg-yellow-500/20 rounded-full blur-3xl"
+                        className="absolute bottom-20 left-20 w-96 h-96 bg-red-400/20 rounded-full blur-3xl"
                         animate={{
                             scale: [1, 1.3, 1],
                             x: [0, -50, 0],
@@ -225,7 +225,7 @@ export default function LoginPage() {
                         transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
                     />
                     <motion.div
-                        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-72 bg-red-500/20 rounded-full blur-3xl"
+                        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-72 bg-red-800/20 rounded-full blur-3xl"
                         animate={{
                             scale: [1, 1.4, 1],
                         }}
