@@ -5,11 +5,15 @@ Uses Fernet symmetric encryption which provides:
 - AES-128-CBC encryption
 - HMAC-SHA256 authentication
 - Automatic IV generation
+
+This module now delegates to the KMS module for enhanced key management
+with automatic key rotation support.
+
+Requirements: 25.1 - OAuth tokens encrypted using KMS with automatic key rotation
 """
 
 import base64
 import hashlib
-import os
 from typing import Optional
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -37,12 +41,13 @@ def get_fernet() -> Fernet:
     Returns:
         Fernet: Configured Fernet encryption instance
     """
-    key = _derive_key(settings.KMS_ENCRYPTION_KEY)
-    return Fernet(key)
+    # Use KMS key manager for enhanced key management
+    from app.core.kms import get_key_manager
+    return get_key_manager().get_fernet()
 
 
 def encrypt_token(plaintext: str) -> str:
-    """Encrypt a token using AES-256 encryption.
+    """Encrypt a token using AES-256 encryption via KMS.
 
     Args:
         plaintext: The plain text token to encrypt
@@ -56,13 +61,13 @@ def encrypt_token(plaintext: str) -> str:
     if not plaintext:
         raise ValueError("Cannot encrypt empty token")
 
-    fernet = get_fernet()
-    encrypted = fernet.encrypt(plaintext.encode())
-    return encrypted.decode()
+    # Use KMS for encryption with key versioning support
+    from app.core.kms import kms_encrypt_simple
+    return kms_encrypt_simple(plaintext)
 
 
 def decrypt_token(ciphertext: str) -> Optional[str]:
-    """Decrypt an encrypted token.
+    """Decrypt an encrypted token via KMS.
 
     Args:
         ciphertext: The encrypted token string
@@ -73,12 +78,9 @@ def decrypt_token(ciphertext: str) -> Optional[str]:
     if not ciphertext:
         return None
 
-    try:
-        fernet = get_fernet()
-        decrypted = fernet.decrypt(ciphertext.encode())
-        return decrypted.decode()
-    except (InvalidToken, ValueError):
-        return None
+    # Use KMS for decryption with multi-key support
+    from app.core.kms import kms_decrypt_simple
+    return kms_decrypt_simple(ciphertext)
 
 
 def is_encrypted(value: str) -> bool:
@@ -90,18 +92,15 @@ def is_encrypted(value: str) -> bool:
     Returns:
         bool: True if the value appears to be Fernet-encrypted
     """
-    if not value:
-        return False
-
-    try:
-        # Fernet tokens are base64-encoded and start with 'gAAAAA'
-        return value.startswith("gAAAAA") and len(value) > 50
-    except Exception:
-        return False
+    from app.core.kms import is_kms_encrypted
+    return is_kms_encrypted(value)
 
 
 def rotate_encryption_key(old_key: str, new_key: str, ciphertext: str) -> str:
     """Re-encrypt data with a new key (for key rotation).
+
+    This function is maintained for backward compatibility.
+    For new code, use kms_rotate_and_reencrypt from the kms module.
 
     Args:
         old_key: The current encryption key
@@ -124,3 +123,24 @@ def rotate_encryption_key(old_key: str, new_key: str, ciphertext: str) -> str:
     # Encrypt with new key
     new_fernet = Fernet(_derive_key(new_key))
     return new_fernet.encrypt(plaintext.encode()).decode()
+
+
+# Re-export KMS functions for convenience
+def get_key_rotation_status() -> dict:
+    """Get the current key rotation status.
+    
+    Returns:
+        dict: Key rotation status information
+    """
+    from app.core.kms import get_key_rotation_status as _get_status
+    return _get_status()
+
+
+def rotate_kms_key(new_master_key: Optional[str] = None) -> None:
+    """Rotate the KMS encryption key.
+    
+    Args:
+        new_master_key: Optional new master key (uses existing if not provided)
+    """
+    from app.core.kms import get_key_manager
+    get_key_manager().rotate_key(new_master_key)

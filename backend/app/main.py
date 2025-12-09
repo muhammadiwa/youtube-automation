@@ -6,6 +6,16 @@ from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 
 from app.core.config import settings
+from app.core.logging import setup_logging
+from app.core.tracing import setup_tracing
+from app.core.alerting import setup_default_thresholds
+from app.core.metrics import set_app_info
+from app.core.middleware import (
+    MetricsMiddleware,
+    CorrelationIdMiddleware,
+    TracingMiddleware,
+    RequestLoggingMiddleware,
+)
 from app.modules.account import account_router
 from app.modules.stream import router as stream_router
 from app.modules.ai.router import router as ai_router
@@ -14,6 +24,8 @@ from app.modules.monitoring import monitoring_router
 from app.modules.agent import agent_router
 from app.modules.job.router import router as job_router
 from app.modules.notification import notification_router
+from app.modules.system_monitoring import system_monitoring_router
+from app.modules.security.router import router as security_router
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -99,6 +111,14 @@ Authorization: Bearer <access_token>
             "name": "billing",
             "description": "Subscription and billing management",
         },
+        {
+            "name": "system-monitoring",
+            "description": "System monitoring - Prometheus metrics, health checks, alerts, tracing",
+        },
+        {
+            "name": "security",
+            "description": "Security features - KMS encryption, TLS configuration, admin auth, security scanning, audit export",
+        },
     ],
     contact={
         "name": "API Support",
@@ -110,6 +130,30 @@ Authorization: Bearer <access_token>
     },
 )
 
+# Set up logging with correlation IDs (Requirements: 24.3)
+setup_logging(
+    level="INFO" if not settings.DEBUG else "DEBUG",
+    json_format=True,
+    include_stack_trace=True,
+)
+
+# Set up distributed tracing (Requirements: 24.5)
+setup_tracing(
+    service_name=settings.PROJECT_NAME,
+    service_version=settings.VERSION,
+    environment="development" if settings.DEBUG else "production",
+    enable_console_export=settings.DEBUG,
+)
+
+# Set up default alert thresholds (Requirements: 24.4)
+setup_default_thresholds()
+
+# Set application info for metrics
+set_app_info(
+    version=settings.VERSION,
+    environment="development" if settings.DEBUG else "production",
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -117,6 +161,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add monitoring middleware (Requirements: 24.1, 24.3, 24.5)
+app.add_middleware(RequestLoggingMiddleware, log_request_body=False)
+app.add_middleware(TracingMiddleware)
+app.add_middleware(CorrelationIdMiddleware)
+app.add_middleware(MetricsMiddleware)
 
 
 def custom_openapi() -> dict:
@@ -203,3 +253,5 @@ app.include_router(monitoring_router, prefix=settings.API_V1_PREFIX)
 app.include_router(agent_router, prefix=settings.API_V1_PREFIX)
 app.include_router(job_router, prefix=settings.API_V1_PREFIX)
 app.include_router(notification_router, prefix=settings.API_V1_PREFIX)
+app.include_router(system_monitoring_router, prefix=settings.API_V1_PREFIX)
+app.include_router(security_router, prefix=settings.API_V1_PREFIX)
