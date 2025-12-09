@@ -49,15 +49,30 @@ SECRET_KEY=your-secret-key-change-in-production
 
 ### 4. Setup Database
 
+**Option 1: Using Python script (Recommended)**
 ```bash
-# Buat database di PostgreSQL
-createdb youtube_automation
+# Create database automatically
+python scripts\create_database.py
 
-# Jalankan migrations
+# Run migrations
+scripts\run_migrations.bat
+```
+
+**Option 2: Manual setup**
+```bash
+# Connect to PostgreSQL and create database
+psql -U postgres -c "CREATE DATABASE youtube_automation;"
+
+# Run migrations
 scripts\run_migrations.bat
 # atau
 alembic upgrade head
 ```
+
+**Option 3: Using pgAdmin or other GUI**
+1. Open pgAdmin or your PostgreSQL GUI
+2. Create a new database named `youtube_automation`
+3. Run migrations: `scripts\run_migrations.bat`
 
 ### 5. Run Development Server
 
