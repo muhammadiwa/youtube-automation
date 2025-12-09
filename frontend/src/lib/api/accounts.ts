@@ -1,5 +1,5 @@
 import apiClient from "./client"
-import type { YouTubeAccount, PaginatedResponse } from "@/types"
+import type { YouTubeAccount } from "@/types"
 
 export interface AccountHealth {
     status: "active" | "expired" | "error"
@@ -30,7 +30,27 @@ export const accountsApi = {
      * Get all YouTube accounts for current user
      */
     async getAccounts(filters?: AccountFilters): Promise<YouTubeAccount[]> {
-        return apiClient.get("/accounts", filters)
+        try {
+            const params = filters ? { ...filters } as Record<string, string | number | boolean | undefined> : undefined
+            const response = await apiClient.get<YouTubeAccount[] | { items: YouTubeAccount[] } | { accounts: YouTubeAccount[] }>("/accounts", params)
+
+            // Handle different response formats
+            if (Array.isArray(response)) {
+                return response
+            }
+            if (response && typeof response === 'object') {
+                if ('items' in response && Array.isArray(response.items)) {
+                    return response.items
+                }
+                if ('accounts' in response && Array.isArray(response.accounts)) {
+                    return response.accounts
+                }
+            }
+            return []
+        } catch (error) {
+            console.error("Failed to fetch accounts:", error)
+            return []
+        }
     },
 
     /**

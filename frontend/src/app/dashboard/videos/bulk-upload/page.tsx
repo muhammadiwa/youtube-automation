@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Download, Upload, FileSpreadsheet, AlertCircle, CheckCircle2, Edit2 } from "lucide-react"
+import { DashboardLayout } from "@/components/dashboard"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -199,262 +200,264 @@ export default function BulkUploadPage() {
     const invalidCount = parsedData.filter((row) => !row.isValid).length
 
     return (
-        <div className="space-y-6">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-3xl font-bold">Bulk Upload Videos</h1>
-                    <p className="text-muted-foreground">Upload multiple videos using a CSV file</p>
-                </div>
-                <Button variant="outline" onClick={() => router.push("/dashboard/videos")}>
-                    Back to Videos
-                </Button>
-            </div>
-
-            {/* Template Download */}
-            <Card>
-                <CardHeader>
-                    <CardTitle>Step 1: Download Template</CardTitle>
-                    <CardDescription>
-                        Download the CSV template and fill in your video details
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <Button onClick={downloadTemplate} variant="outline">
-                        <Download className="mr-2 h-4 w-4" />
-                        Download CSV Template
+        <DashboardLayout breadcrumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Videos", href: "/dashboard/videos" }, { label: "Bulk Upload" }]}>
+            <div className="space-y-6">
+                {/* Header */}
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h1 className="text-3xl font-bold">Bulk Upload Videos</h1>
+                        <p className="text-muted-foreground">Upload multiple videos using a CSV file</p>
+                    </div>
+                    <Button variant="outline" onClick={() => router.push("/dashboard/videos")}>
+                        Back to Videos
                     </Button>
-                    <div className="mt-4 p-4 bg-muted rounded-lg">
-                        <h4 className="font-semibold mb-2">Template Fields:</h4>
-                        <ul className="text-sm space-y-1 text-muted-foreground">
-                            <li>
-                                <strong>title</strong> (required): Video title (max 100 characters)
-                            </li>
-                            <li>
-                                <strong>description</strong> (optional): Video description (max 5000 characters)
-                            </li>
-                            <li>
-                                <strong>tags</strong> (optional): Comma-separated tags
-                            </li>
-                            <li>
-                                <strong>categoryId</strong> (optional): YouTube category ID (default: 22)
-                            </li>
-                            <li>
-                                <strong>visibility</strong> (required): public, unlisted, or private
-                            </li>
-                            <li>
-                                <strong>scheduledPublishAt</strong> (optional): ISO 8601 date format
-                            </li>
-                        </ul>
-                    </div>
-                </CardContent>
-            </Card>
+                </div>
 
-            {/* CSV Upload */}
-            <Card>
-                <CardHeader>
-                    <CardTitle>Step 2: Upload CSV File</CardTitle>
-                    <CardDescription>Upload your completed CSV file</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <div
-                        className={`border-2 border-dashed rounded-lg p-12 text-center transition-colors ${isDragging
-                                ? "border-primary bg-primary/5"
-                                : "border-muted-foreground/25 hover:border-primary/50"
-                            }`}
-                        onDrop={handleDrop}
-                        onDragOver={handleDragOver}
-                        onDragLeave={handleDragLeave}
-                    >
-                        <FileSpreadsheet className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                        <h3 className="text-lg font-semibold mb-2">Drag and drop CSV file here</h3>
-                        <p className="text-sm text-muted-foreground mb-4">or click to browse</p>
-                        <input
-                            type="file"
-                            id="csv-upload"
-                            className="hidden"
-                            accept=".csv"
-                            onChange={handleFileInput}
-                        />
-                        <Button asChild>
-                            <label htmlFor="csv-upload" className="cursor-pointer">
-                                Browse Files
-                            </label>
-                        </Button>
-                        {csvFile && (
-                            <p className="text-sm text-muted-foreground mt-4">
-                                Selected: {csvFile.name}
-                            </p>
-                        )}
-                    </div>
-                </CardContent>
-            </Card>
-
-            {/* Preview and Edit */}
-            {parsedData.length > 0 && (
+                {/* Template Download */}
                 <Card>
                     <CardHeader>
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <CardTitle>Step 3: Review and Edit</CardTitle>
-                                <CardDescription>
-                                    Review parsed entries and fix any errors before submitting
-                                </CardDescription>
-                            </div>
-                            <div className="flex gap-2">
-                                <Badge variant="default">{validCount} valid</Badge>
-                                {invalidCount > 0 && (
-                                    <Badge variant="destructive">{invalidCount} invalid</Badge>
-                                )}
-                            </div>
-                        </div>
+                        <CardTitle>Step 1: Download Template</CardTitle>
+                        <CardDescription>
+                            Download the CSV template and fill in your video details
+                        </CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <div className="space-y-3">
-                            {parsedData.map((row) => (
-                                <div
-                                    key={row.id}
-                                    className={`border rounded-lg p-4 ${!row.isValid ? "border-destructive bg-destructive/5" : ""
-                                        }`}
-                                >
-                                    <div className="flex items-start gap-3">
-                                        {row.isValid ? (
-                                            <CheckCircle2 className="h-5 w-5 text-green-500 mt-1" />
-                                        ) : (
-                                            <AlertCircle className="h-5 w-5 text-destructive mt-1" />
-                                        )}
-                                        <div className="flex-1 min-w-0">
-                                            {editingRow === row.id ? (
-                                                <div className="space-y-3">
-                                                    <div>
-                                                        <Label>Title</Label>
-                                                        <Input
-                                                            value={row.title}
-                                                            onChange={(e) =>
-                                                                updateRow(row.id, "title", e.target.value)
-                                                            }
-                                                        />
-                                                    </div>
-                                                    <div>
-                                                        <Label>Description</Label>
-                                                        <Input
-                                                            value={row.description}
-                                                            onChange={(e) =>
-                                                                updateRow(row.id, "description", e.target.value)
-                                                            }
-                                                        />
-                                                    </div>
-                                                    <div className="grid grid-cols-2 gap-3">
-                                                        <div>
-                                                            <Label>Visibility</Label>
-                                                            <Select
-                                                                value={row.visibility}
-                                                                onValueChange={(value) =>
-                                                                    updateRow(row.id, "visibility", value)
-                                                                }
-                                                            >
-                                                                <SelectTrigger>
-                                                                    <SelectValue />
-                                                                </SelectTrigger>
-                                                                <SelectContent>
-                                                                    <SelectItem value="public">Public</SelectItem>
-                                                                    <SelectItem value="unlisted">Unlisted</SelectItem>
-                                                                    <SelectItem value="private">Private</SelectItem>
-                                                                </SelectContent>
-                                                            </Select>
-                                                        </div>
-                                                        <div>
-                                                            <Label>Tags</Label>
-                                                            <Input
-                                                                value={row.tags}
-                                                                onChange={(e) =>
-                                                                    updateRow(row.id, "tags", e.target.value)
-                                                                }
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex gap-2">
-                                                        <Button
-                                                            size="sm"
-                                                            onClick={() => setEditingRow(null)}
-                                                        >
-                                                            Done
-                                                        </Button>
-                                                        <Button
-                                                            size="sm"
-                                                            variant="outline"
-                                                            onClick={() => removeRow(row.id)}
-                                                        >
-                                                            Remove
-                                                        </Button>
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <>
-                                                    <div className="flex items-start justify-between gap-2 mb-2">
-                                                        <div className="flex-1 min-w-0">
-                                                            <p className="font-medium">{row.title}</p>
-                                                            {row.description && (
-                                                                <p className="text-sm text-muted-foreground line-clamp-2 mt-1">
-                                                                    {row.description}
-                                                                </p>
-                                                            )}
-                                                            <div className="flex items-center gap-2 mt-2">
-                                                                <Badge variant="outline">{row.visibility}</Badge>
-                                                                {row.tags && (
-                                                                    <span className="text-xs text-muted-foreground">
-                                                                        Tags: {row.tags}
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            onClick={() => setEditingRow(row.id)}
-                                                        >
-                                                            <Edit2 className="h-4 w-4" />
-                                                        </Button>
-                                                    </div>
-                                                    {row.errors.length > 0 && (
-                                                        <div className="space-y-1 mt-2">
-                                                            {row.errors.map((error, i) => (
-                                                                <div
-                                                                    key={i}
-                                                                    className="flex items-center gap-2 text-sm text-destructive"
-                                                                >
-                                                                    <AlertCircle className="h-3 w-3" />
-                                                                    {error}
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    )}
-                                                </>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-
-                        <div className="flex justify-end gap-2 mt-6">
-                            <Button
-                                variant="outline"
-                                onClick={() => {
-                                    setParsedData([])
-                                    setCSVFile(null)
-                                }}
-                            >
-                                Clear
-                            </Button>
-                            <Button onClick={handleSubmit} disabled={validCount === 0}>
-                                <Upload className="mr-2 h-4 w-4" />
-                                Create {validCount} Upload Job{validCount !== 1 ? "s" : ""}
-                            </Button>
+                        <Button onClick={downloadTemplate} variant="outline">
+                            <Download className="mr-2 h-4 w-4" />
+                            Download CSV Template
+                        </Button>
+                        <div className="mt-4 p-4 bg-muted rounded-lg">
+                            <h4 className="font-semibold mb-2">Template Fields:</h4>
+                            <ul className="text-sm space-y-1 text-muted-foreground">
+                                <li>
+                                    <strong>title</strong> (required): Video title (max 100 characters)
+                                </li>
+                                <li>
+                                    <strong>description</strong> (optional): Video description (max 5000 characters)
+                                </li>
+                                <li>
+                                    <strong>tags</strong> (optional): Comma-separated tags
+                                </li>
+                                <li>
+                                    <strong>categoryId</strong> (optional): YouTube category ID (default: 22)
+                                </li>
+                                <li>
+                                    <strong>visibility</strong> (required): public, unlisted, or private
+                                </li>
+                                <li>
+                                    <strong>scheduledPublishAt</strong> (optional): ISO 8601 date format
+                                </li>
+                            </ul>
                         </div>
                     </CardContent>
                 </Card>
-            )}
-        </div>
+
+                {/* CSV Upload */}
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Step 2: Upload CSV File</CardTitle>
+                        <CardDescription>Upload your completed CSV file</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <div
+                            className={`border-2 border-dashed rounded-lg p-12 text-center transition-colors ${isDragging
+                                ? "border-primary bg-primary/5"
+                                : "border-muted-foreground/25 hover:border-primary/50"
+                                }`}
+                            onDrop={handleDrop}
+                            onDragOver={handleDragOver}
+                            onDragLeave={handleDragLeave}
+                        >
+                            <FileSpreadsheet className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                            <h3 className="text-lg font-semibold mb-2">Drag and drop CSV file here</h3>
+                            <p className="text-sm text-muted-foreground mb-4">or click to browse</p>
+                            <input
+                                type="file"
+                                id="csv-upload"
+                                className="hidden"
+                                accept=".csv"
+                                onChange={handleFileInput}
+                            />
+                            <Button asChild>
+                                <label htmlFor="csv-upload" className="cursor-pointer">
+                                    Browse Files
+                                </label>
+                            </Button>
+                            {csvFile && (
+                                <p className="text-sm text-muted-foreground mt-4">
+                                    Selected: {csvFile.name}
+                                </p>
+                            )}
+                        </div>
+                    </CardContent>
+                </Card>
+
+                {/* Preview and Edit */}
+                {parsedData.length > 0 && (
+                    <Card>
+                        <CardHeader>
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <CardTitle>Step 3: Review and Edit</CardTitle>
+                                    <CardDescription>
+                                        Review parsed entries and fix any errors before submitting
+                                    </CardDescription>
+                                </div>
+                                <div className="flex gap-2">
+                                    <Badge variant="default">{validCount} valid</Badge>
+                                    {invalidCount > 0 && (
+                                        <Badge variant="destructive">{invalidCount} invalid</Badge>
+                                    )}
+                                </div>
+                            </div>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="space-y-3">
+                                {parsedData.map((row) => (
+                                    <div
+                                        key={row.id}
+                                        className={`border rounded-lg p-4 ${!row.isValid ? "border-destructive bg-destructive/5" : ""
+                                            }`}
+                                    >
+                                        <div className="flex items-start gap-3">
+                                            {row.isValid ? (
+                                                <CheckCircle2 className="h-5 w-5 text-green-500 mt-1" />
+                                            ) : (
+                                                <AlertCircle className="h-5 w-5 text-destructive mt-1" />
+                                            )}
+                                            <div className="flex-1 min-w-0">
+                                                {editingRow === row.id ? (
+                                                    <div className="space-y-3">
+                                                        <div>
+                                                            <Label>Title</Label>
+                                                            <Input
+                                                                value={row.title}
+                                                                onChange={(e) =>
+                                                                    updateRow(row.id, "title", e.target.value)
+                                                                }
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <Label>Description</Label>
+                                                            <Input
+                                                                value={row.description}
+                                                                onChange={(e) =>
+                                                                    updateRow(row.id, "description", e.target.value)
+                                                                }
+                                                            />
+                                                        </div>
+                                                        <div className="grid grid-cols-2 gap-3">
+                                                            <div>
+                                                                <Label>Visibility</Label>
+                                                                <Select
+                                                                    value={row.visibility}
+                                                                    onValueChange={(value) =>
+                                                                        updateRow(row.id, "visibility", value)
+                                                                    }
+                                                                >
+                                                                    <SelectTrigger>
+                                                                        <SelectValue />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        <SelectItem value="public">Public</SelectItem>
+                                                                        <SelectItem value="unlisted">Unlisted</SelectItem>
+                                                                        <SelectItem value="private">Private</SelectItem>
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            </div>
+                                                            <div>
+                                                                <Label>Tags</Label>
+                                                                <Input
+                                                                    value={row.tags}
+                                                                    onChange={(e) =>
+                                                                        updateRow(row.id, "tags", e.target.value)
+                                                                    }
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex gap-2">
+                                                            <Button
+                                                                size="sm"
+                                                                onClick={() => setEditingRow(null)}
+                                                            >
+                                                                Done
+                                                            </Button>
+                                                            <Button
+                                                                size="sm"
+                                                                variant="outline"
+                                                                onClick={() => removeRow(row.id)}
+                                                            >
+                                                                Remove
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <>
+                                                        <div className="flex items-start justify-between gap-2 mb-2">
+                                                            <div className="flex-1 min-w-0">
+                                                                <p className="font-medium">{row.title}</p>
+                                                                {row.description && (
+                                                                    <p className="text-sm text-muted-foreground line-clamp-2 mt-1">
+                                                                        {row.description}
+                                                                    </p>
+                                                                )}
+                                                                <div className="flex items-center gap-2 mt-2">
+                                                                    <Badge variant="outline">{row.visibility}</Badge>
+                                                                    {row.tags && (
+                                                                        <span className="text-xs text-muted-foreground">
+                                                                            Tags: {row.tags}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                onClick={() => setEditingRow(row.id)}
+                                                            >
+                                                                <Edit2 className="h-4 w-4" />
+                                                            </Button>
+                                                        </div>
+                                                        {row.errors.length > 0 && (
+                                                            <div className="space-y-1 mt-2">
+                                                                {row.errors.map((error, i) => (
+                                                                    <div
+                                                                        key={i}
+                                                                        className="flex items-center gap-2 text-sm text-destructive"
+                                                                    >
+                                                                        <AlertCircle className="h-3 w-3" />
+                                                                        {error}
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="flex justify-end gap-2 mt-6">
+                                <Button
+                                    variant="outline"
+                                    onClick={() => {
+                                        setParsedData([])
+                                        setCSVFile(null)
+                                    }}
+                                >
+                                    Clear
+                                </Button>
+                                <Button onClick={handleSubmit} disabled={validCount === 0}>
+                                    <Upload className="mr-2 h-4 w-4" />
+                                    Create {validCount} Upload Job{validCount !== 1 ? "s" : ""}
+                                </Button>
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
+            </div>
+        </DashboardLayout>
     )
 }

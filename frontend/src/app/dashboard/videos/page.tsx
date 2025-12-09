@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { Search, Filter, Upload, Grid3x3, List, MoreVertical, Trash2, Edit, Eye } from "lucide-react"
+import { Search, Upload, Grid3x3, List, MoreVertical, Trash2, Edit, Eye } from "lucide-react"
+import { DashboardLayout } from "@/components/dashboard"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
@@ -61,9 +62,10 @@ export default function VideosPage() {
     const loadAccounts = async () => {
         try {
             const data = await accountsApi.getAccounts()
-            setAccounts(data)
+            setAccounts(Array.isArray(data) ? data : [])
         } catch (error) {
             console.error("Failed to load accounts:", error)
+            setAccounts([])
         }
     }
 
@@ -71,15 +73,16 @@ export default function VideosPage() {
         try {
             setLoading(true)
             const response = await videosApi.getVideos(filters)
-            setVideos(response.items)
+            setVideos(response.items || [])
             setPagination({
-                total: response.total,
-                page: response.page,
-                pageSize: response.pageSize,
-                totalPages: response.totalPages,
+                total: response.total || 0,
+                page: response.page || 1,
+                pageSize: response.pageSize || 20,
+                totalPages: response.totalPages || 0,
             })
         } catch (error) {
             console.error("Failed to load videos:", error)
+            setVideos([])
         } finally {
             setLoading(false)
         }
@@ -146,386 +149,388 @@ export default function VideosPage() {
     }
 
     return (
-        <div className="space-y-6">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-3xl font-bold">Videos</h1>
-                    <p className="text-muted-foreground">
-                        Manage your video library across all channels
-                    </p>
-                </div>
-                <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => router.push("/dashboard/videos/bulk-upload")}>
-                        Bulk Upload
-                    </Button>
-                    <Button onClick={() => router.push("/dashboard/videos/upload")}>
-                        <Upload className="mr-2 h-4 w-4" />
-                        Upload Video
-                    </Button>
-                </div>
-            </div>
-
-            {/* Filters and Search */}
-            <Card>
-                <CardContent className="pt-6">
-                    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                        <div className="flex flex-1 gap-2">
-                            <div className="relative flex-1 max-w-md">
-                                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                                <Input
-                                    placeholder="Search videos by title or description..."
-                                    value={searchQuery}
-                                    onChange={(e) => handleSearch(e.target.value)}
-                                    className="pl-9"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="flex gap-2">
-                            <Select
-                                value={filters.accountId || "all"}
-                                onValueChange={(value) =>
-                                    handleFilterChange("accountId", value === "all" ? undefined : value)
-                                }
-                            >
-                                <SelectTrigger className="w-[180px]">
-                                    <SelectValue placeholder="All Accounts" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">All Accounts</SelectItem>
-                                    {accounts.map((account) => (
-                                        <SelectItem key={account.id} value={account.id}>
-                                            {account.channelTitle}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-
-                            <Select
-                                value={filters.status || "all"}
-                                onValueChange={(value) =>
-                                    handleFilterChange("status", value === "all" ? undefined : value)
-                                }
-                            >
-                                <SelectTrigger className="w-[150px]">
-                                    <SelectValue placeholder="All Status" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">All Status</SelectItem>
-                                    <SelectItem value="draft">Draft</SelectItem>
-                                    <SelectItem value="uploading">Uploading</SelectItem>
-                                    <SelectItem value="processing">Processing</SelectItem>
-                                    <SelectItem value="published">Published</SelectItem>
-                                    <SelectItem value="scheduled">Scheduled</SelectItem>
-                                </SelectContent>
-                            </Select>
-
-                            <Select
-                                value={filters.visibility || "all"}
-                                onValueChange={(value) =>
-                                    handleFilterChange("visibility", value === "all" ? undefined : value)
-                                }
-                            >
-                                <SelectTrigger className="w-[150px]">
-                                    <SelectValue placeholder="All Visibility" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">All Visibility</SelectItem>
-                                    <SelectItem value="public">Public</SelectItem>
-                                    <SelectItem value="unlisted">Unlisted</SelectItem>
-                                    <SelectItem value="private">Private</SelectItem>
-                                </SelectContent>
-                            </Select>
-
-                            <Select
-                                value={`${filters.sortBy}-${filters.sortOrder}`}
-                                onValueChange={(value) => {
-                                    const [sortBy, sortOrder] = value.split("-")
-                                    setFilters((prev) => ({
-                                        ...prev,
-                                        sortBy: sortBy as any,
-                                        sortOrder: sortOrder as any,
-                                    }))
-                                }}
-                            >
-                                <SelectTrigger className="w-[150px]">
-                                    <SelectValue placeholder="Sort by" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="date-desc">Newest First</SelectItem>
-                                    <SelectItem value="date-asc">Oldest First</SelectItem>
-                                    <SelectItem value="views-desc">Most Views</SelectItem>
-                                    <SelectItem value="views-asc">Least Views</SelectItem>
-                                    <SelectItem value="status-asc">Status A-Z</SelectItem>
-                                </SelectContent>
-                            </Select>
-
-                            <div className="flex gap-1 border rounded-md">
-                                <Button
-                                    variant={viewMode === "grid" ? "secondary" : "ghost"}
-                                    size="icon"
-                                    onClick={() => setViewMode("grid")}
-                                >
-                                    <Grid3x3 className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                    variant={viewMode === "list" ? "secondary" : "ghost"}
-                                    size="icon"
-                                    onClick={() => setViewMode("list")}
-                                >
-                                    <List className="h-4 w-4" />
-                                </Button>
-                            </div>
-                        </div>
+        <DashboardLayout breadcrumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Videos" }]}>
+            <div className="space-y-6">
+                {/* Header */}
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h1 className="text-3xl font-bold">Videos</h1>
+                        <p className="text-muted-foreground">
+                            Manage your video library across all channels
+                        </p>
                     </div>
-                </CardContent>
-            </Card>
+                    <div className="flex gap-2">
+                        <Button variant="outline" onClick={() => router.push("/dashboard/videos/bulk-upload")}>
+                            Bulk Upload
+                        </Button>
+                        <Button onClick={() => router.push("/dashboard/videos/upload")}>
+                            <Upload className="mr-2 h-4 w-4" />
+                            Upload Video
+                        </Button>
+                    </div>
+                </div>
 
-            {/* Bulk Actions Toolbar */}
-            {bulkMode && (
-                <Card className="bg-muted">
-                    <CardContent className="py-3">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-4">
-                                <Checkbox
-                                    checked={selectedVideos.size === videos.length && videos.length > 0}
-                                    onCheckedChange={handleSelectAll}
-                                />
-                                <span className="text-sm font-medium">
-                                    {selectedVideos.size} video(s) selected
-                                </span>
+                {/* Filters and Search */}
+                <Card className="border-0 shadow-lg">
+                    <CardContent className="pt-6">
+                        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                            <div className="flex flex-1 gap-2">
+                                <div className="relative flex-1 max-w-md">
+                                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                    <Input
+                                        placeholder="Search videos by title or description..."
+                                        value={searchQuery}
+                                        onChange={(e) => handleSearch(e.target.value)}
+                                        className="pl-9"
+                                    />
+                                </div>
                             </div>
-                            <div className="flex gap-2">
-                                <Button
-                                    variant="destructive"
-                                    size="sm"
-                                    onClick={handleBulkDelete}
-                                    disabled={selectedVideos.size === 0}
+
+                            <div className="flex flex-wrap gap-2">
+                                <Select
+                                    value={filters.accountId || "all"}
+                                    onValueChange={(value) =>
+                                        handleFilterChange("accountId", value === "all" ? undefined : value)
+                                    }
                                 >
-                                    <Trash2 className="mr-2 h-4 w-4" />
-                                    Delete Selected
-                                </Button>
-                                <Button variant="outline" size="sm" onClick={() => {
-                                    setBulkMode(false)
-                                    setSelectedVideos(new Set())
-                                }}>
-                                    Cancel
-                                </Button>
+                                    <SelectTrigger className="w-[180px]">
+                                        <SelectValue placeholder="All Accounts" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">All Accounts</SelectItem>
+                                        {accounts.map((account) => (
+                                            <SelectItem key={account.id} value={account.id}>
+                                                {account.channelTitle}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+
+                                <Select
+                                    value={filters.status || "all"}
+                                    onValueChange={(value) =>
+                                        handleFilterChange("status", value === "all" ? undefined : value)
+                                    }
+                                >
+                                    <SelectTrigger className="w-[150px]">
+                                        <SelectValue placeholder="All Status" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">All Status</SelectItem>
+                                        <SelectItem value="draft">Draft</SelectItem>
+                                        <SelectItem value="uploading">Uploading</SelectItem>
+                                        <SelectItem value="processing">Processing</SelectItem>
+                                        <SelectItem value="published">Published</SelectItem>
+                                        <SelectItem value="scheduled">Scheduled</SelectItem>
+                                    </SelectContent>
+                                </Select>
+
+                                <Select
+                                    value={filters.visibility || "all"}
+                                    onValueChange={(value) =>
+                                        handleFilterChange("visibility", value === "all" ? undefined : value)
+                                    }
+                                >
+                                    <SelectTrigger className="w-[150px]">
+                                        <SelectValue placeholder="All Visibility" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">All Visibility</SelectItem>
+                                        <SelectItem value="public">Public</SelectItem>
+                                        <SelectItem value="unlisted">Unlisted</SelectItem>
+                                        <SelectItem value="private">Private</SelectItem>
+                                    </SelectContent>
+                                </Select>
+
+                                <Select
+                                    value={`${filters.sortBy}-${filters.sortOrder}`}
+                                    onValueChange={(value) => {
+                                        const [sortBy, sortOrder] = value.split("-")
+                                        setFilters((prev) => ({
+                                            ...prev,
+                                            sortBy: sortBy as any,
+                                            sortOrder: sortOrder as any,
+                                        }))
+                                    }}
+                                >
+                                    <SelectTrigger className="w-[150px]">
+                                        <SelectValue placeholder="Sort by" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="date-desc">Newest First</SelectItem>
+                                        <SelectItem value="date-asc">Oldest First</SelectItem>
+                                        <SelectItem value="views-desc">Most Views</SelectItem>
+                                        <SelectItem value="views-asc">Least Views</SelectItem>
+                                        <SelectItem value="status-asc">Status A-Z</SelectItem>
+                                    </SelectContent>
+                                </Select>
+
+                                <div className="flex gap-1 border rounded-md">
+                                    <Button
+                                        variant={viewMode === "grid" ? "secondary" : "ghost"}
+                                        size="icon"
+                                        onClick={() => setViewMode("grid")}
+                                    >
+                                        <Grid3x3 className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                        variant={viewMode === "list" ? "secondary" : "ghost"}
+                                        size="icon"
+                                        onClick={() => setViewMode("list")}
+                                    >
+                                        <List className="h-4 w-4" />
+                                    </Button>
+                                </div>
                             </div>
                         </div>
                     </CardContent>
                 </Card>
-            )}
 
-            {/* Toggle Bulk Mode */}
-            {!bulkMode && videos.length > 0 && (
-                <div className="flex justify-end">
-                    <Button variant="outline" size="sm" onClick={() => setBulkMode(true)}>
-                        <Checkbox className="mr-2 h-4 w-4" />
-                        Bulk Select
-                    </Button>
-                </div>
-            )}
-
-            {/* Videos Grid/List */}
-            {loading ? (
-                <div className={viewMode === "grid" ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4" : "space-y-4"}>
-                    {[...Array(8)].map((_, i) => (
-                        <Card key={i}>
-                            <Skeleton className="aspect-video w-full" />
-                            <CardContent className="p-4">
-                                <Skeleton className="h-4 w-3/4 mb-2" />
-                                <Skeleton className="h-3 w-1/2" />
-                            </CardContent>
-                        </Card>
-                    ))}
-                </div>
-            ) : videos.length === 0 ? (
-                <Card>
-                    <CardContent className="py-12 text-center">
-                        <p className="text-muted-foreground">No videos found</p>
-                        <Button className="mt-4" onClick={() => router.push("/dashboard/videos/upload")}>
-                            <Upload className="mr-2 h-4 w-4" />
-                            Upload Your First Video
-                        </Button>
-                    </CardContent>
-                </Card>
-            ) : viewMode === "grid" ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                    {videos.map((video) => (
-                        <Card key={video.id} className="overflow-hidden hover:shadow-lg transition-shadow">
-                            <div className="relative">
-                                {bulkMode && (
-                                    <div className="absolute top-2 left-2 z-10">
-                                        <Checkbox
-                                            checked={selectedVideos.has(video.id)}
-                                            onCheckedChange={() => handleSelectVideo(video.id)}
-                                            className="bg-white"
-                                        />
-                                    </div>
-                                )}
-                                <img
-                                    src={video.thumbnailUrl || "/placeholder-thumbnail.jpg"}
-                                    alt={video.title}
-                                    className="w-full aspect-video object-cover cursor-pointer"
-                                    onClick={() => router.push(`/dashboard/videos/${video.id}/edit`)}
-                                />
-                                <div className="absolute bottom-2 right-2">
-                                    {getStatusBadge(video.status)}
+                {/* Bulk Actions Toolbar */}
+                {bulkMode && (
+                    <Card className="bg-muted border-0 shadow-lg">
+                        <CardContent className="py-3">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                    <Checkbox
+                                        checked={selectedVideos.size === videos.length && videos.length > 0}
+                                        onCheckedChange={handleSelectAll}
+                                    />
+                                    <span className="text-sm font-medium">
+                                        {selectedVideos.size} video(s) selected
+                                    </span>
+                                </div>
+                                <div className="flex gap-2">
+                                    <Button
+                                        variant="destructive"
+                                        size="sm"
+                                        onClick={handleBulkDelete}
+                                        disabled={selectedVideos.size === 0}
+                                    >
+                                        <Trash2 className="mr-2 h-4 w-4" />
+                                        Delete Selected
+                                    </Button>
+                                    <Button variant="outline" size="sm" onClick={() => {
+                                        setBulkMode(false)
+                                        setSelectedVideos(new Set())
+                                    }}>
+                                        Cancel
+                                    </Button>
                                 </div>
                             </div>
-                            <CardContent className="p-4">
-                                <div className="flex items-start justify-between gap-2">
-                                    <div className="flex-1 min-w-0">
-                                        <h3
-                                            className="font-semibold truncate cursor-pointer hover:text-primary"
-                                            onClick={() => router.push(`/dashboard/videos/${video.id}/edit`)}
-                                        >
-                                            {video.title}
-                                        </h3>
-                                        <div className="flex items-center gap-3 mt-2 text-sm text-muted-foreground">
-                                            <span className="flex items-center gap-1">
-                                                <Eye className="h-3 w-3" />
-                                                {formatNumber(video.viewCount)}
-                                            </span>
-                                            <Badge variant="outline" className="text-xs">
-                                                {video.visibility}
-                                            </Badge>
-                                        </div>
-                                    </div>
-                                    <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                            <Button variant="ghost" size="icon">
-                                                <MoreVertical className="h-4 w-4" />
-                                            </Button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="end">
-                                            <DropdownMenuItem
-                                                onClick={() => router.push(`/dashboard/videos/${video.id}/edit`)}
-                                            >
-                                                <Edit className="mr-2 h-4 w-4" />
-                                                Edit
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem
-                                                className="text-destructive"
-                                                onClick={async () => {
-                                                    if (confirm("Delete this video?")) {
-                                                        await videosApi.deleteVideo(video.id)
-                                                        loadVideos()
-                                                    }
-                                                }}
-                                            >
-                                                <Trash2 className="mr-2 h-4 w-4" />
-                                                Delete
-                                            </DropdownMenuItem>
-                                        </DropdownMenuContent>
-                                    </DropdownMenu>
-                                </div>
-                            </CardContent>
-                        </Card>
-                    ))}
-                </div>
-            ) : (
-                <div className="space-y-2">
-                    {videos.map((video) => (
-                        <Card key={video.id}>
-                            <CardContent className="p-4">
-                                <div className="flex items-center gap-4">
+                        </CardContent>
+                    </Card>
+                )}
+
+                {/* Toggle Bulk Mode */}
+                {!bulkMode && videos.length > 0 && (
+                    <div className="flex justify-end">
+                        <Button variant="outline" size="sm" onClick={() => setBulkMode(true)}>
+                            <Checkbox className="mr-2 h-4 w-4" />
+                            Bulk Select
+                        </Button>
+                    </div>
+                )}
+
+                {/* Videos Grid/List */}
+                {loading ? (
+                    <div className={viewMode === "grid" ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4" : "space-y-4"}>
+                        {[...Array(8)].map((_, i) => (
+                            <Card key={i} className="border-0 shadow-lg">
+                                <Skeleton className="aspect-video w-full" />
+                                <CardContent className="p-4">
+                                    <Skeleton className="h-4 w-3/4 mb-2" />
+                                    <Skeleton className="h-3 w-1/2" />
+                                </CardContent>
+                            </Card>
+                        ))}
+                    </div>
+                ) : videos.length === 0 ? (
+                    <Card className="border-0 shadow-lg">
+                        <CardContent className="py-12 text-center">
+                            <p className="text-muted-foreground">No videos found</p>
+                            <Button className="mt-4" onClick={() => router.push("/dashboard/videos/upload")}>
+                                <Upload className="mr-2 h-4 w-4" />
+                                Upload Your First Video
+                            </Button>
+                        </CardContent>
+                    </Card>
+                ) : viewMode === "grid" ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                        {videos.map((video) => (
+                            <Card key={video.id} className="overflow-hidden border-0 shadow-lg hover:shadow-xl transition-shadow">
+                                <div className="relative">
                                     {bulkMode && (
-                                        <Checkbox
-                                            checked={selectedVideos.has(video.id)}
-                                            onCheckedChange={() => handleSelectVideo(video.id)}
-                                        />
+                                        <div className="absolute top-2 left-2 z-10">
+                                            <Checkbox
+                                                checked={selectedVideos.has(video.id)}
+                                                onCheckedChange={() => handleSelectVideo(video.id)}
+                                                className="bg-white"
+                                            />
+                                        </div>
                                     )}
                                     <img
                                         src={video.thumbnailUrl || "/placeholder-thumbnail.jpg"}
                                         alt={video.title}
-                                        className="w-32 aspect-video object-cover rounded cursor-pointer"
+                                        className="w-full aspect-video object-cover cursor-pointer"
                                         onClick={() => router.push(`/dashboard/videos/${video.id}/edit`)}
                                     />
-                                    <div className="flex-1 min-w-0">
-                                        <h3
-                                            className="font-semibold cursor-pointer hover:text-primary"
-                                            onClick={() => router.push(`/dashboard/videos/${video.id}/edit`)}
-                                        >
-                                            {video.title}
-                                        </h3>
-                                        <p className="text-sm text-muted-foreground line-clamp-2 mt-1">
-                                            {video.description}
-                                        </p>
-                                        <div className="flex items-center gap-4 mt-2">
-                                            {getStatusBadge(video.status)}
-                                            <Badge variant="outline">{video.visibility}</Badge>
-                                            <span className="text-sm text-muted-foreground">
-                                                {formatNumber(video.viewCount)} views
-                                            </span>
-                                            <span className="text-sm text-muted-foreground">
-                                                {formatNumber(video.likeCount)} likes
-                                            </span>
-                                        </div>
+                                    <div className="absolute bottom-2 right-2">
+                                        {getStatusBadge(video.status)}
                                     </div>
-                                    <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                            <Button variant="ghost" size="icon">
-                                                <MoreVertical className="h-4 w-4" />
-                                            </Button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="end">
-                                            <DropdownMenuItem
+                                </div>
+                                <CardContent className="p-4">
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div className="flex-1 min-w-0">
+                                            <h3
+                                                className="font-semibold truncate cursor-pointer hover:text-primary"
                                                 onClick={() => router.push(`/dashboard/videos/${video.id}/edit`)}
                                             >
-                                                <Edit className="mr-2 h-4 w-4" />
-                                                Edit
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem
-                                                className="text-destructive"
-                                                onClick={async () => {
-                                                    if (confirm("Delete this video?")) {
-                                                        await videosApi.deleteVideo(video.id)
-                                                        loadVideos()
-                                                    }
-                                                }}
-                                            >
-                                                <Trash2 className="mr-2 h-4 w-4" />
-                                                Delete
-                                            </DropdownMenuItem>
-                                        </DropdownMenuContent>
-                                    </DropdownMenu>
-                                </div>
-                            </CardContent>
-                        </Card>
-                    ))}
-                </div>
-            )}
-
-            {/* Pagination */}
-            {pagination.totalPages > 1 && (
-                <div className="flex items-center justify-between">
-                    <p className="text-sm text-muted-foreground">
-                        Showing {(pagination.page - 1) * pagination.pageSize + 1} to{" "}
-                        {Math.min(pagination.page * pagination.pageSize, pagination.total)} of {pagination.total} videos
-                    </p>
-                    <div className="flex gap-2">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={pagination.page === 1}
-                            onClick={() => setFilters((prev) => ({ ...prev, page: prev.page! - 1 }))}
-                        >
-                            Previous
-                        </Button>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={pagination.page === pagination.totalPages}
-                            onClick={() => setFilters((prev) => ({ ...prev, page: prev.page! + 1 }))}
-                        >
-                            Next
-                        </Button>
+                                                {video.title}
+                                            </h3>
+                                            <div className="flex items-center gap-3 mt-2 text-sm text-muted-foreground">
+                                                <span className="flex items-center gap-1">
+                                                    <Eye className="h-3 w-3" />
+                                                    {formatNumber(video.viewCount)}
+                                                </span>
+                                                <Badge variant="outline" className="text-xs">
+                                                    {video.visibility}
+                                                </Badge>
+                                            </div>
+                                        </div>
+                                        <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                                <Button variant="ghost" size="icon">
+                                                    <MoreVertical className="h-4 w-4" />
+                                                </Button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent align="end">
+                                                <DropdownMenuItem
+                                                    onClick={() => router.push(`/dashboard/videos/${video.id}/edit`)}
+                                                >
+                                                    <Edit className="mr-2 h-4 w-4" />
+                                                    Edit
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem
+                                                    className="text-destructive"
+                                                    onClick={async () => {
+                                                        if (confirm("Delete this video?")) {
+                                                            await videosApi.deleteVideo(video.id)
+                                                            loadVideos()
+                                                        }
+                                                    }}
+                                                >
+                                                    <Trash2 className="mr-2 h-4 w-4" />
+                                                    Delete
+                                                </DropdownMenuItem>
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        ))}
                     </div>
-                </div>
-            )}
-        </div>
+                ) : (
+                    <div className="space-y-2">
+                        {videos.map((video) => (
+                            <Card key={video.id} className="border-0 shadow-lg">
+                                <CardContent className="p-4">
+                                    <div className="flex items-center gap-4">
+                                        {bulkMode && (
+                                            <Checkbox
+                                                checked={selectedVideos.has(video.id)}
+                                                onCheckedChange={() => handleSelectVideo(video.id)}
+                                            />
+                                        )}
+                                        <img
+                                            src={video.thumbnailUrl || "/placeholder-thumbnail.jpg"}
+                                            alt={video.title}
+                                            className="w-32 aspect-video object-cover rounded cursor-pointer"
+                                            onClick={() => router.push(`/dashboard/videos/${video.id}/edit`)}
+                                        />
+                                        <div className="flex-1 min-w-0">
+                                            <h3
+                                                className="font-semibold cursor-pointer hover:text-primary"
+                                                onClick={() => router.push(`/dashboard/videos/${video.id}/edit`)}
+                                            >
+                                                {video.title}
+                                            </h3>
+                                            <p className="text-sm text-muted-foreground line-clamp-2 mt-1">
+                                                {video.description}
+                                            </p>
+                                            <div className="flex items-center gap-4 mt-2">
+                                                {getStatusBadge(video.status)}
+                                                <Badge variant="outline">{video.visibility}</Badge>
+                                                <span className="text-sm text-muted-foreground">
+                                                    {formatNumber(video.viewCount)} views
+                                                </span>
+                                                <span className="text-sm text-muted-foreground">
+                                                    {formatNumber(video.likeCount)} likes
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                                <Button variant="ghost" size="icon">
+                                                    <MoreVertical className="h-4 w-4" />
+                                                </Button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent align="end">
+                                                <DropdownMenuItem
+                                                    onClick={() => router.push(`/dashboard/videos/${video.id}/edit`)}
+                                                >
+                                                    <Edit className="mr-2 h-4 w-4" />
+                                                    Edit
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem
+                                                    className="text-destructive"
+                                                    onClick={async () => {
+                                                        if (confirm("Delete this video?")) {
+                                                            await videosApi.deleteVideo(video.id)
+                                                            loadVideos()
+                                                        }
+                                                    }}
+                                                >
+                                                    <Trash2 className="mr-2 h-4 w-4" />
+                                                    Delete
+                                                </DropdownMenuItem>
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        ))}
+                    </div>
+                )}
+
+                {/* Pagination */}
+                {pagination.totalPages > 1 && (
+                    <div className="flex items-center justify-between">
+                        <p className="text-sm text-muted-foreground">
+                            Showing {(pagination.page - 1) * pagination.pageSize + 1} to{" "}
+                            {Math.min(pagination.page * pagination.pageSize, pagination.total)} of {pagination.total} videos
+                        </p>
+                        <div className="flex gap-2">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={pagination.page === 1}
+                                onClick={() => setFilters((prev) => ({ ...prev, page: (prev.page || 1) - 1 }))}
+                            >
+                                Previous
+                            </Button>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={pagination.page === pagination.totalPages}
+                                onClick={() => setFilters((prev) => ({ ...prev, page: (prev.page || 1) + 1 }))}
+                            >
+                                Next
+                            </Button>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </DashboardLayout>
     )
 }

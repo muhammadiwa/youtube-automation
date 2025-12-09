@@ -40,16 +40,24 @@ export default function AccountsPage() {
         try {
             setLoading(true)
             const data = await accountsApi.getAccounts()
-            setAccounts(data)
+            // Ensure data is always an array
+            setAccounts(Array.isArray(data) ? data : [])
         } catch (error) {
             console.error("Failed to load accounts:", error)
+            setAccounts([])
         } finally {
             setLoading(false)
         }
     }
 
     const filterAccounts = () => {
-        let filtered = accounts
+        // Ensure accounts is an array before filtering
+        if (!Array.isArray(accounts)) {
+            setFilteredAccounts([])
+            return
+        }
+
+        let filtered = [...accounts]
 
         // Filter by status
         if (statusFilter !== "all") {
@@ -69,6 +77,10 @@ export default function AccountsPage() {
     const handleConnectAccount = () => {
         setConnectModalOpen(true)
     }
+
+    // Ensure filteredAccounts is always an array for rendering
+    const safeFilteredAccounts = Array.isArray(filteredAccounts) ? filteredAccounts : []
+    const safeAccounts = Array.isArray(accounts) ? accounts : []
 
     return (
         <DashboardLayout
@@ -132,18 +144,18 @@ export default function AccountsPage() {
                             <Skeleton key={i} className={view === "grid" ? "h-64" : "h-24"} />
                         ))}
                     </div>
-                ) : filteredAccounts.length === 0 ? (
+                ) : safeFilteredAccounts.length === 0 ? (
                     <div className="text-center py-12 border-2 border-dashed rounded-lg">
                         <Youtube className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
                         <h3 className="text-lg font-semibold mb-2">
-                            {accounts.length === 0 ? "No accounts connected" : "No accounts found"}
+                            {safeAccounts.length === 0 ? "No accounts connected" : "No accounts found"}
                         </h3>
                         <p className="text-muted-foreground mb-4">
-                            {accounts.length === 0
+                            {safeAccounts.length === 0
                                 ? "Connect your first YouTube account to get started"
                                 : "Try adjusting your search or filters"}
                         </p>
-                        {accounts.length === 0 && (
+                        {safeAccounts.length === 0 && (
                             <Button onClick={handleConnectAccount}>
                                 <Plus className="mr-2 h-4 w-4" />
                                 Connect Account
@@ -152,16 +164,16 @@ export default function AccountsPage() {
                     </div>
                 ) : (
                     <div className={view === "grid" ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" : "space-y-4"}>
-                        {filteredAccounts.map((account) => (
+                        {safeFilteredAccounts.map((account) => (
                             <AccountCard key={account.id} account={account} view={view} />
                         ))}
                     </div>
                 )}
 
                 {/* Results count */}
-                {!loading && filteredAccounts.length > 0 && (
+                {!loading && safeFilteredAccounts.length > 0 && (
                     <div className="text-sm text-muted-foreground text-center">
-                        Showing {filteredAccounts.length} of {accounts.length} account{accounts.length !== 1 ? "s" : ""}
+                        Showing {safeFilteredAccounts.length} of {safeAccounts.length} account{safeAccounts.length !== 1 ? "s" : ""}
                     </div>
                 )}
 

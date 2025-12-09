@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Upload, X, FileVideo, AlertCircle, CheckCircle2 } from "lucide-react"
+import { DashboardLayout } from "@/components/dashboard"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
@@ -52,12 +53,14 @@ export default function VideoUploadPage() {
     const loadAccounts = async () => {
         try {
             const data = await accountsApi.getAccounts({ status: "active" })
-            setAccounts(data)
-            if (data.length > 0) {
-                setSelectedAccount(data[0].id)
+            const accountsList = Array.isArray(data) ? data : []
+            setAccounts(accountsList)
+            if (accountsList.length > 0) {
+                setSelectedAccount(accountsList[0].id)
             }
         } catch (error) {
             console.error("Failed to load accounts:", error)
+            setAccounts([])
         }
     }
 
@@ -239,178 +242,180 @@ export default function VideoUploadPage() {
     const errorCount = uploadFiles.filter((f) => f.status === "error").length
 
     return (
-        <div className="space-y-6">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-3xl font-bold">Upload Videos</h1>
-                    <p className="text-muted-foreground">Upload up to {MAX_FILES} videos at once</p>
-                </div>
-                <Button variant="outline" onClick={() => router.push("/dashboard/videos")}>
-                    Back to Videos
-                </Button>
-            </div>
-
-            {/* Account Selection */}
-            <Card>
-                <CardHeader>
-                    <CardTitle>Select YouTube Account</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <Select value={selectedAccount} onValueChange={setSelectedAccount}>
-                        <SelectTrigger className="w-full max-w-md">
-                            <SelectValue placeholder="Select an account" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {accounts.map((account) => (
-                                <SelectItem key={account.id} value={account.id}>
-                                    <div className="flex items-center gap-2">
-                                        <img
-                                            src={account.thumbnailUrl}
-                                            alt={account.channelTitle}
-                                            className="w-6 h-6 rounded-full"
-                                        />
-                                        {account.channelTitle}
-                                    </div>
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                    {accounts.length === 0 && (
-                        <p className="text-sm text-muted-foreground mt-2">
-                            No active accounts found. Please connect a YouTube account first.
-                        </p>
-                    )}
-                </CardContent>
-            </Card>
-
-            {/* Upload Zone */}
-            <Card>
-                <CardContent className="pt-6">
-                    <div
-                        className={`border-2 border-dashed rounded-lg p-12 text-center transition-colors ${isDragging
-                                ? "border-primary bg-primary/5"
-                                : "border-muted-foreground/25 hover:border-primary/50"
-                            }`}
-                        onDrop={handleDrop}
-                        onDragOver={handleDragOver}
-                        onDragLeave={handleDragLeave}
-                    >
-                        <Upload className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                        <h3 className="text-lg font-semibold mb-2">Drag and drop video files here</h3>
-                        <p className="text-sm text-muted-foreground mb-4">
-                            or click to browse (max {MAX_FILES} files, 5GB each)
-                        </p>
-                        <input
-                            type="file"
-                            id="file-upload"
-                            className="hidden"
-                            multiple
-                            accept={ALLOWED_FORMATS.join(",")}
-                            onChange={handleFileInput}
-                            disabled={uploadFiles.length >= MAX_FILES}
-                        />
-                        <Button asChild disabled={uploadFiles.length >= MAX_FILES}>
-                            <label htmlFor="file-upload" className="cursor-pointer">
-                                Browse Files
-                            </label>
-                        </Button>
-                        <p className="text-xs text-muted-foreground mt-4">
-                            Supported formats: MP4, MOV, AVI, WMV, WebM, MPEG
-                        </p>
+        <DashboardLayout breadcrumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Videos", href: "/dashboard/videos" }, { label: "Upload" }]}>
+            <div className="space-y-6">
+                {/* Header */}
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h1 className="text-3xl font-bold">Upload Videos</h1>
+                        <p className="text-muted-foreground">Upload up to {MAX_FILES} videos at once</p>
                     </div>
-                </CardContent>
-            </Card>
+                    <Button variant="outline" onClick={() => router.push("/dashboard/videos")}>
+                        Back to Videos
+                    </Button>
+                </div>
 
-            {/* Upload Queue */}
-            {uploadFiles.length > 0 && (
+                {/* Account Selection */}
                 <Card>
                     <CardHeader>
-                        <div className="flex items-center justify-between">
-                            <CardTitle>Upload Queue ({uploadFiles.length})</CardTitle>
-                            <div className="flex gap-2">
-                                {pendingCount > 0 && (
-                                    <Button onClick={uploadAll} disabled={!selectedAccount || uploadingCount > 0}>
-                                        Upload All ({pendingCount})
-                                    </Button>
-                                )}
-                                {completedCount === uploadFiles.length && (
-                                    <Button onClick={() => router.push("/dashboard/videos")}>
-                                        View Videos
-                                    </Button>
-                                )}
-                            </div>
-                        </div>
-                        {(pendingCount > 0 || uploadingCount > 0 || errorCount > 0) && (
-                            <div className="flex gap-4 text-sm text-muted-foreground mt-2">
-                                {pendingCount > 0 && <span>{pendingCount} pending</span>}
-                                {uploadingCount > 0 && <span>{uploadingCount} uploading</span>}
-                                {completedCount > 0 && <span>{completedCount} completed</span>}
-                                {errorCount > 0 && <span className="text-destructive">{errorCount} failed</span>}
-                            </div>
-                        )}
+                        <CardTitle>Select YouTube Account</CardTitle>
                     </CardHeader>
-                    <CardContent className="space-y-3">
-                        {uploadFiles.map((uploadFile) => (
-                            <div key={uploadFile.id} className="border rounded-lg p-4">
-                                <div className="flex items-start gap-3">
-                                    {getStatusIcon(uploadFile.status)}
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center justify-between gap-2 mb-2">
-                                            <div className="flex-1 min-w-0">
-                                                <p className="font-medium truncate">{uploadFile.file.name}</p>
-                                                <p className="text-sm text-muted-foreground">
-                                                    {formatFileSize(uploadFile.file.size)}
-                                                </p>
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                {getStatusBadge(uploadFile.status)}
-                                                {uploadFile.status === "pending" && (
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        onClick={() => removeFile(uploadFile.id)}
-                                                    >
-                                                        <X className="h-4 w-4" />
-                                                    </Button>
-                                                )}
-                                                {uploadFile.status === "uploading" && (
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        onClick={() => cancelUpload(uploadFile.id)}
-                                                    >
-                                                        <X className="h-4 w-4" />
-                                                    </Button>
-                                                )}
-                                            </div>
+                    <CardContent>
+                        <Select value={selectedAccount} onValueChange={setSelectedAccount}>
+                            <SelectTrigger className="w-full max-w-md">
+                                <SelectValue placeholder="Select an account" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {accounts.map((account) => (
+                                    <SelectItem key={account.id} value={account.id}>
+                                        <div className="flex items-center gap-2">
+                                            <img
+                                                src={account.thumbnailUrl}
+                                                alt={account.channelTitle}
+                                                className="w-6 h-6 rounded-full"
+                                            />
+                                            {account.channelTitle}
                                         </div>
-                                        {uploadFile.status === "uploading" && (
-                                            <div className="space-y-1">
-                                                <Progress value={uploadFile.progress} />
-                                                <p className="text-xs text-muted-foreground">
-                                                    {uploadFile.progress}% uploaded
-                                                </p>
-                                            </div>
-                                        )}
-                                        {uploadFile.status === "error" && (
-                                            <div className="flex items-center gap-2 text-sm text-destructive">
-                                                <AlertCircle className="h-4 w-4" />
-                                                {uploadFile.error}
-                                            </div>
-                                        )}
-                                        {uploadFile.status === "completed" && uploadFile.jobId && (
-                                            <p className="text-sm text-muted-foreground">
-                                                Upload complete. Processing video...
-                                            </p>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        {accounts.length === 0 && (
+                            <p className="text-sm text-muted-foreground mt-2">
+                                No active accounts found. Please connect a YouTube account first.
+                            </p>
+                        )}
                     </CardContent>
                 </Card>
-            )}
-        </div>
+
+                {/* Upload Zone */}
+                <Card>
+                    <CardContent className="pt-6">
+                        <div
+                            className={`border-2 border-dashed rounded-lg p-12 text-center transition-colors ${isDragging
+                                ? "border-primary bg-primary/5"
+                                : "border-muted-foreground/25 hover:border-primary/50"
+                                }`}
+                            onDrop={handleDrop}
+                            onDragOver={handleDragOver}
+                            onDragLeave={handleDragLeave}
+                        >
+                            <Upload className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                            <h3 className="text-lg font-semibold mb-2">Drag and drop video files here</h3>
+                            <p className="text-sm text-muted-foreground mb-4">
+                                or click to browse (max {MAX_FILES} files, 5GB each)
+                            </p>
+                            <input
+                                type="file"
+                                id="file-upload"
+                                className="hidden"
+                                multiple
+                                accept={ALLOWED_FORMATS.join(",")}
+                                onChange={handleFileInput}
+                                disabled={uploadFiles.length >= MAX_FILES}
+                            />
+                            <Button asChild disabled={uploadFiles.length >= MAX_FILES}>
+                                <label htmlFor="file-upload" className="cursor-pointer">
+                                    Browse Files
+                                </label>
+                            </Button>
+                            <p className="text-xs text-muted-foreground mt-4">
+                                Supported formats: MP4, MOV, AVI, WMV, WebM, MPEG
+                            </p>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                {/* Upload Queue */}
+                {uploadFiles.length > 0 && (
+                    <Card>
+                        <CardHeader>
+                            <div className="flex items-center justify-between">
+                                <CardTitle>Upload Queue ({uploadFiles.length})</CardTitle>
+                                <div className="flex gap-2">
+                                    {pendingCount > 0 && (
+                                        <Button onClick={uploadAll} disabled={!selectedAccount || uploadingCount > 0}>
+                                            Upload All ({pendingCount})
+                                        </Button>
+                                    )}
+                                    {completedCount === uploadFiles.length && (
+                                        <Button onClick={() => router.push("/dashboard/videos")}>
+                                            View Videos
+                                        </Button>
+                                    )}
+                                </div>
+                            </div>
+                            {(pendingCount > 0 || uploadingCount > 0 || errorCount > 0) && (
+                                <div className="flex gap-4 text-sm text-muted-foreground mt-2">
+                                    {pendingCount > 0 && <span>{pendingCount} pending</span>}
+                                    {uploadingCount > 0 && <span>{uploadingCount} uploading</span>}
+                                    {completedCount > 0 && <span>{completedCount} completed</span>}
+                                    {errorCount > 0 && <span className="text-destructive">{errorCount} failed</span>}
+                                </div>
+                            )}
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                            {uploadFiles.map((uploadFile) => (
+                                <div key={uploadFile.id} className="border rounded-lg p-4">
+                                    <div className="flex items-start gap-3">
+                                        {getStatusIcon(uploadFile.status)}
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center justify-between gap-2 mb-2">
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="font-medium truncate">{uploadFile.file.name}</p>
+                                                    <p className="text-sm text-muted-foreground">
+                                                        {formatFileSize(uploadFile.file.size)}
+                                                    </p>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    {getStatusBadge(uploadFile.status)}
+                                                    {uploadFile.status === "pending" && (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            onClick={() => removeFile(uploadFile.id)}
+                                                        >
+                                                            <X className="h-4 w-4" />
+                                                        </Button>
+                                                    )}
+                                                    {uploadFile.status === "uploading" && (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            onClick={() => cancelUpload(uploadFile.id)}
+                                                        >
+                                                            <X className="h-4 w-4" />
+                                                        </Button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            {uploadFile.status === "uploading" && (
+                                                <div className="space-y-1">
+                                                    <Progress value={uploadFile.progress} />
+                                                    <p className="text-xs text-muted-foreground">
+                                                        {uploadFile.progress}% uploaded
+                                                    </p>
+                                                </div>
+                                            )}
+                                            {uploadFile.status === "error" && (
+                                                <div className="flex items-center gap-2 text-sm text-destructive">
+                                                    <AlertCircle className="h-4 w-4" />
+                                                    {uploadFile.error}
+                                                </div>
+                                            )}
+                                            {uploadFile.status === "completed" && uploadFile.jobId && (
+                                                <p className="text-sm text-muted-foreground">
+                                                    Upload complete. Processing video...
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </CardContent>
+                    </Card>
+                )}
+            </div>
+        </DashboardLayout>
     )
 }

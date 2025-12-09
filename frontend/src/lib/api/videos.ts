@@ -44,12 +44,52 @@ export interface BulkResult {
     }>
 }
 
+const defaultPaginatedResponse: PaginatedResponse<Video> = {
+    items: [],
+    total: 0,
+    page: 1,
+    pageSize: 20,
+    totalPages: 0,
+}
+
 export const videosApi = {
     /**
      * Get paginated list of videos
      */
     async getVideos(filters?: VideoFilters): Promise<PaginatedResponse<Video>> {
-        return apiClient.get("/videos", filters)
+        try {
+            const params = filters ? { ...filters } as Record<string, string | number | boolean | undefined> : undefined
+            const response = await apiClient.get<PaginatedResponse<Video> | Video[] | { videos: Video[] }>("/videos", params)
+
+            // Handle different response formats
+            if (Array.isArray(response)) {
+                return {
+                    items: response,
+                    total: response.length,
+                    page: 1,
+                    pageSize: response.length,
+                    totalPages: 1,
+                }
+            }
+            if (response && typeof response === 'object') {
+                if ('items' in response && Array.isArray(response.items)) {
+                    return response as PaginatedResponse<Video>
+                }
+                if ('videos' in response && Array.isArray(response.videos)) {
+                    return {
+                        items: response.videos,
+                        total: response.videos.length,
+                        page: 1,
+                        pageSize: response.videos.length,
+                        totalPages: 1,
+                    }
+                }
+            }
+            return defaultPaginatedResponse
+        } catch (error) {
+            console.error("Failed to fetch videos:", error)
+            return defaultPaginatedResponse
+        }
     },
 
     /**
@@ -67,7 +107,7 @@ export const videosApi = {
         formData.append("file", file)
         formData.append("data", JSON.stringify(data))
 
-        const response = await fetch(`${apiClient["baseUrl"]}/videos/upload`, {
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"}/videos/upload`, {
             method: "POST",
             headers: {
                 Authorization: `Bearer ${apiClient.getAccessToken()}`,
