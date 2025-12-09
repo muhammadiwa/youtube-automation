@@ -416,7 +416,8 @@ export default function VideoEditPage() {
                                             </label>
                                         </Button>
                                         <AIThumbnailGenerator
-                                            videoId={videoId}
+                                            videoTitle={title}
+                                            videoContent={description}
                                             onApply={setThumbnailPreview}
                                         />
                                         <p className="text-xs text-muted-foreground">

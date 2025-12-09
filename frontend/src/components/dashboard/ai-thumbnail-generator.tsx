@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Sparkles, Download, Check, Sliders } from "lucide-react"
+import { Sparkles, Download, Check, Sliders, Image as ImageIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
     Dialog,
@@ -18,13 +18,15 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Switch } from "@/components/ui/switch"
 import { Slider } from "@/components/ui/slider"
 import { aiApi, type ThumbnailResult } from "@/lib/api/ai"
+import { cn } from "@/lib/utils"
 
 interface AIThumbnailGeneratorProps {
-    videoId: string
+    videoTitle: string
+    videoContent?: string
     onApply: (thumbnailUrl: string) => void
 }
 
-export function AIThumbnailGenerator({ videoId, onApply }: AIThumbnailGeneratorProps) {
+export function AIThumbnailGenerator({ videoTitle, videoContent, onApply }: AIThumbnailGeneratorProps) {
     const [open, setOpen] = useState(false)
     const [loading, setLoading] = useState(false)
     const [thumbnails, setThumbnails] = useState<ThumbnailResult[]>([])
@@ -32,7 +34,7 @@ export function AIThumbnailGenerator({ videoId, onApply }: AIThumbnailGeneratorP
     const [showEditor, setShowEditor] = useState(false)
 
     // Generation options
-    const [style, setStyle] = useState<"modern" | "classic" | "bold" | "minimal">("modern")
+    const [style, setStyle] = useState<"modern" | "minimalist" | "bold" | "professional" | "gaming">("modern")
     const [includeText, setIncludeText] = useState(true)
     const [text, setText] = useState("")
 
@@ -42,15 +44,21 @@ export function AIThumbnailGenerator({ videoId, onApply }: AIThumbnailGeneratorP
     const [saturation, setSaturation] = useState(100)
 
     const generateThumbnails = async () => {
+        if (!videoTitle.trim()) {
+            alert("Please enter a video title first")
+            return
+        }
+
         try {
             setLoading(true)
-            const results = await aiApi.generateThumbnails({
-                videoId,
+            const response = await aiApi.generateThumbnails({
+                video_title: videoTitle,
+                video_content: videoContent,
                 style,
-                includeText,
-                text: includeText ? text : undefined,
+                include_text: includeText,
+                text_content: includeText ? text : undefined,
             })
-            setThumbnails(results)
+            setThumbnails(response.thumbnails)
             setSelectedIndex(null)
         } catch (error) {
             console.error("Failed to generate thumbnails:", error)
@@ -78,7 +86,7 @@ export function AIThumbnailGenerator({ videoId, onApply }: AIThumbnailGeneratorP
 
     const applyThumbnail = () => {
         if (selectedIndex !== null && thumbnails[selectedIndex]) {
-            onApply(thumbnails[selectedIndex].imageUrl)
+            onApply(thumbnails[selectedIndex].image_url)
             setOpen(false)
         }
     }
@@ -92,50 +100,79 @@ export function AIThumbnailGenerator({ videoId, onApply }: AIThumbnailGeneratorP
     return (
         <Dialog open={open} onOpenChange={handleOpen}>
             <DialogTrigger asChild>
-                <Button variant="outline" size="sm">
-                    <Sparkles className="mr-2 h-4 w-4" />
+                <Button variant="outline" size="sm" className="group hover:border-primary/50 transition-all duration-300">
+                    <Sparkles className="mr-2 h-4 w-4 group-hover:text-primary transition-colors" />
                     Generate Thumbnails
                 </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
                 <DialogHeader>
-                    <DialogTitle>AI Thumbnail Generator</DialogTitle>
+                    <DialogTitle className="flex items-center gap-2">
+                        <div className="p-2 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5">
+                            <ImageIcon className="h-5 w-5 text-primary" />
+                        </div>
+                        AI Thumbnail Generator
+                    </DialogTitle>
                     <DialogDescription>
                         Generate 3 professional thumbnail variations for your video
                     </DialogDescription>
                 </DialogHeader>
 
-                <div className="space-y-6 mt-4">
+                <div className="flex-1 overflow-y-auto space-y-6 mt-4 pr-2">
                     {/* Generation Options */}
-                    <div className="border rounded-lg p-4 space-y-4">
-                        <h3 className="font-semibold">Generation Options</h3>
+                    <div className="border rounded-xl p-4 space-y-4 bg-card shadow-sm">
+                        <h3 className="font-semibold flex items-center gap-2">
+                            <Sliders className="h-4 w-4 text-primary" />
+                            Generation Options
+                        </h3>
 
                         <div>
                             <Label>Style</Label>
                             <RadioGroup value={style} onValueChange={(v: any) => setStyle(v)}>
-                                <div className="grid grid-cols-4 gap-2 mt-2">
-                                    <div className="flex items-center space-x-2 border rounded p-2">
+                                <div className="grid grid-cols-5 gap-2 mt-2">
+                                    <div className={cn(
+                                        "flex items-center space-x-2 border rounded-lg p-2 cursor-pointer transition-all",
+                                        style === "modern" && "border-primary bg-primary/5"
+                                    )}>
                                         <RadioGroupItem value="modern" id="modern" />
-                                        <Label htmlFor="modern" className="font-normal cursor-pointer">
+                                        <Label htmlFor="modern" className="font-normal cursor-pointer text-sm">
                                             Modern
                                         </Label>
                                     </div>
-                                    <div className="flex items-center space-x-2 border rounded p-2">
-                                        <RadioGroupItem value="classic" id="classic" />
-                                        <Label htmlFor="classic" className="font-normal cursor-pointer">
-                                            Classic
+                                    <div className={cn(
+                                        "flex items-center space-x-2 border rounded-lg p-2 cursor-pointer transition-all",
+                                        style === "minimalist" && "border-primary bg-primary/5"
+                                    )}>
+                                        <RadioGroupItem value="minimalist" id="minimalist" />
+                                        <Label htmlFor="minimalist" className="font-normal cursor-pointer text-sm">
+                                            Minimal
                                         </Label>
                                     </div>
-                                    <div className="flex items-center space-x-2 border rounded p-2">
+                                    <div className={cn(
+                                        "flex items-center space-x-2 border rounded-lg p-2 cursor-pointer transition-all",
+                                        style === "bold" && "border-primary bg-primary/5"
+                                    )}>
                                         <RadioGroupItem value="bold" id="bold" />
-                                        <Label htmlFor="bold" className="font-normal cursor-pointer">
+                                        <Label htmlFor="bold" className="font-normal cursor-pointer text-sm">
                                             Bold
                                         </Label>
                                     </div>
-                                    <div className="flex items-center space-x-2 border rounded p-2">
-                                        <RadioGroupItem value="minimal" id="minimal" />
-                                        <Label htmlFor="minimal" className="font-normal cursor-pointer">
-                                            Minimal
+                                    <div className={cn(
+                                        "flex items-center space-x-2 border rounded-lg p-2 cursor-pointer transition-all",
+                                        style === "professional" && "border-primary bg-primary/5"
+                                    )}>
+                                        <RadioGroupItem value="professional" id="professional" />
+                                        <Label htmlFor="professional" className="font-normal cursor-pointer text-sm">
+                                            Pro
+                                        </Label>
+                                    </div>
+                                    <div className={cn(
+                                        "flex items-center space-x-2 border rounded-lg p-2 cursor-pointer transition-all",
+                                        style === "gaming" && "border-primary bg-primary/5"
+                                    )}>
+                                        <RadioGroupItem value="gaming" id="gaming" />
+                                        <Label htmlFor="gaming" className="font-normal cursor-pointer text-sm">
+                                            Gaming
                                         </Label>
                                     </div>
                                 </div>
@@ -190,14 +227,14 @@ export function AIThumbnailGenerator({ videoId, onApply }: AIThumbnailGeneratorP
                                     >
                                         <div className="relative">
                                             <img
-                                                src={thumbnail.imageUrl}
+                                                src={thumbnail.image_url}
                                                 alt={`Thumbnail ${index + 1}`}
                                                 className="w-full aspect-video object-cover"
                                                 style={selectedIndex === index && showEditor ? getFilterStyle() : {}}
                                             />
                                             {selectedIndex === index && (
                                                 <div className="absolute top-2 right-2">
-                                                    <Check className="h-6 w-6 text-primary bg-white rounded-full p-1" />
+                                                    <Check className="h-6 w-6 text-primary bg-white rounded-full p-1 shadow-lg" />
                                                 </div>
                                             )}
                                         </div>
@@ -298,7 +335,7 @@ export function AIThumbnailGenerator({ videoId, onApply }: AIThumbnailGeneratorP
                                             variant="outline"
                                             onClick={() =>
                                                 downloadThumbnail(
-                                                    thumbnails[selectedIndex].imageUrl,
+                                                    thumbnails[selectedIndex].image_url,
                                                     selectedIndex
                                                 )
                                             }
