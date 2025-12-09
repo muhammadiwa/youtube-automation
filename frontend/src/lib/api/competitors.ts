@@ -72,6 +72,35 @@ export interface CompetitorRecommendation {
     created_at: string
 }
 
+export interface CompetitorAlert {
+    id: string
+    competitor_id: string
+    competitor_name: string
+    type: "new_video" | "milestone" | "trending" | "upload_frequency"
+    title: string
+    message: string
+    video_id?: string
+    video_title?: string
+    video_thumbnail?: string
+    read: boolean
+    created_at: string
+}
+
+export interface CompetitorAlertPreference {
+    competitor_id: string
+    competitor_name: string
+    new_video_enabled: boolean
+    milestone_enabled: boolean
+    trending_enabled: boolean
+    upload_frequency_enabled: boolean
+}
+
+export interface CompetitorAlertsResponse {
+    items: CompetitorAlert[]
+    total: number
+    unread_count: number
+}
+
 export interface CompetitorsResponse {
     items: Competitor[]
     total: number
@@ -173,6 +202,53 @@ export const competitorsApi = {
     // ============ Export ============
     async exportAnalysis(competitorIds?: string[], format: "pdf" | "csv" = "pdf"): Promise<{ download_url: string }> {
         return await apiClient.post("/competitors/export", { competitor_ids: competitorIds, format })
+    },
+
+    // ============ Alerts ============
+    async getAlerts(params?: {
+        page?: number
+        page_size?: number
+        unread_only?: boolean
+        competitor_id?: string
+    }): Promise<CompetitorAlertsResponse> {
+        try {
+            return await apiClient.get("/competitors/alerts", params)
+        } catch (error) {
+            return { items: [], total: 0, unread_count: 0 }
+        }
+    },
+
+    async markAlertAsRead(alertId: string): Promise<CompetitorAlert> {
+        return await apiClient.post(`/competitors/alerts/${alertId}/read`)
+    },
+
+    async markAllAlertsAsRead(): Promise<void> {
+        return await apiClient.post("/competitors/alerts/read-all")
+    },
+
+    async deleteAlert(alertId: string): Promise<void> {
+        return await apiClient.delete(`/competitors/alerts/${alertId}`)
+    },
+
+    // ============ Alert Preferences ============
+    async getAlertPreferences(): Promise<CompetitorAlertPreference[]> {
+        try {
+            return await apiClient.get("/competitors/alerts/preferences")
+        } catch (error) {
+            return []
+        }
+    },
+
+    async updateAlertPreference(
+        competitorId: string,
+        data: Partial<{
+            new_video_enabled: boolean
+            milestone_enabled: boolean
+            trending_enabled: boolean
+            upload_frequency_enabled: boolean
+        }>
+    ): Promise<CompetitorAlertPreference> {
+        return await apiClient.patch(`/competitors/alerts/preferences/${competitorId}`, data)
     },
 }
 

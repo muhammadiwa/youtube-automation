@@ -19,7 +19,7 @@ import {
     Zap,
     Activity,
 } from "lucide-react"
-import { DashboardLayout } from "@/components/dashboard"
+import { DashboardLayout, PausedStreamsIndicator } from "@/components/dashboard"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
@@ -338,6 +338,9 @@ export default function StreamsPage() {
                         </DropdownMenu>
                     </div>
                 </div>
+
+                {/* Paused Streams Warning */}
+                <PausedStreamsIndicator />
 
                 {/* Filters and Search */}
                 <Card className="border-0 shadow-lg">

@@ -16,6 +16,8 @@ import {
     Shield,
     MessageSquare,
     DollarSign,
+    Target,
+    AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -31,6 +33,8 @@ const navigation = [
     { name: "Moderation", href: "/dashboard/moderation/settings", icon: Shield },
     { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
     { name: "Revenue", href: "/dashboard/revenue", icon: DollarSign },
+    { name: "Competitors", href: "/dashboard/competitors", icon: Target },
+    { name: "Strikes", href: "/dashboard/strikes", icon: AlertTriangle },
     { name: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 
@@ -90,6 +94,10 @@ export function Sidebar({ className }: SidebarProps) {
         // Handle revenue routes - check if pathname starts with /dashboard/revenue
         if (href.startsWith("/dashboard/revenue")) {
             return pathname.startsWith("/dashboard/revenue");
+        }
+        // Handle strikes routes - check if pathname starts with /dashboard/strikes
+        if (href.startsWith("/dashboard/strikes")) {
+            return pathname.startsWith("/dashboard/strikes");
         }
         return pathname.startsWith(href);
     };

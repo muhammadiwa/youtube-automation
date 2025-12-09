@@ -17,6 +17,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { MobileSidebar } from "./sidebar";
 import { NotificationCenter } from "./notification-center";
 import { NotificationPreferencesModal } from "./notification-preferences-modal";
+import { StrikeAlertBadge } from "./strike-alerts";
 import { useAuth } from "@/hooks/use-auth";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -94,6 +95,9 @@ export function Header({ breadcrumbs }: HeaderProps) {
                     <div className="flex items-center gap-1">
                         {/* Theme Toggle */}
                         <ThemeToggle />
+
+                        {/* Strike Alerts */}
+                        <StrikeAlertBadge />
 
                         {/* Notifications */}
                         <NotificationCenter

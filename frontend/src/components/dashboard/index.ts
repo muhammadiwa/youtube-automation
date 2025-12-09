@@ -12,3 +12,11 @@ export { ConnectAccountModal } from "./connect-account-modal";
 export { LiveChatPanel } from "./live-chat-panel";
 export { SentimentBadge, SentimentIcon, SentimentDot, AttentionIndicator, SentimentSummary } from "./sentiment-indicator";
 export { AIInsightsPanel } from "./ai-insights-panel";
+export {
+    StrikeWarningBanner,
+    PausedStreamsIndicator,
+    useStrikeNotifications,
+    StrikeAlertBadge,
+    StrikeStatusMiniCard,
+    InlineStrikeWarning,
+} from "./strike-alerts";
