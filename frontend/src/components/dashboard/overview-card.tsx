@@ -1,6 +1,6 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { LucideIcon, TrendingUp, TrendingDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -13,6 +13,7 @@ interface OverviewCardProps {
         isPositive: boolean;
     };
     description?: string;
+    gradient?: string;
 }
 
 export function OverviewCard({
@@ -21,36 +22,51 @@ export function OverviewCard({
     icon: Icon,
     trend,
     description,
+    gradient = "from-red-500 to-red-600",
 }: OverviewCardProps) {
     return (
-        <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">{title}</CardTitle>
-                <Icon className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-                <div className="text-2xl font-bold">{value}</div>
-                {trend && (
-                    <div className="flex items-center text-xs text-muted-foreground mt-1">
-                        {trend.isPositive ? (
-                            <TrendingUp className="mr-1 h-3 w-3 text-green-500" />
-                        ) : (
-                            <TrendingDown className="mr-1 h-3 w-3 text-red-500" />
+        <Card className="group relative overflow-hidden bg-card shadow-lg hover:shadow-xl transition-all duration-300 border-0">
+            <CardContent className="p-6">
+                <div className="flex items-start justify-between">
+                    <div className="space-y-3">
+                        <p className="text-sm font-medium text-muted-foreground">
+                            {title}
+                        </p>
+                        <p className="text-3xl font-bold tracking-tight">{value}</p>
+                        {trend && (
+                            <div className="flex items-center gap-1.5">
+                                <div className={cn(
+                                    "flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full",
+                                    trend.isPositive
+                                        ? "bg-green-500/10 text-green-600"
+                                        : "bg-red-500/10 text-red-600"
+                                )}>
+                                    {trend.isPositive ? (
+                                        <TrendingUp className="h-3 w-3" />
+                                    ) : (
+                                        <TrendingDown className="h-3 w-3" />
+                                    )}
+                                    <span>
+                                        {trend.isPositive ? "+" : ""}
+                                        {trend.value}%
+                                    </span>
+                                </div>
+                                <span className="text-xs text-muted-foreground">
+                                    vs last month
+                                </span>
+                            </div>
                         )}
-                        <span
-                            className={cn(
-                                trend.isPositive ? "text-green-500" : "text-red-500"
-                            )}
-                        >
-                            {trend.isPositive ? "+" : ""}
-                            {trend.value}%
-                        </span>
-                        <span className="ml-1">from last month</span>
+                        {description && (
+                            <p className="text-xs text-muted-foreground">{description}</p>
+                        )}
                     </div>
-                )}
-                {description && (
-                    <p className="text-xs text-muted-foreground mt-1">{description}</p>
-                )}
+                    <div className={cn(
+                        "flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br shadow-lg transition-transform duration-300 group-hover:scale-110",
+                        gradient
+                    )}>
+                        <Icon className="h-6 w-6 text-white" />
+                    </div>
+                </div>
             </CardContent>
         </Card>
     );

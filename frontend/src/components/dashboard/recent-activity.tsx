@@ -2,7 +2,6 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Badge } from "@/components/ui/badge";
 import {
     Upload,
     Radio,
@@ -10,6 +9,7 @@ import {
     Video,
     AlertCircle,
     CheckCircle,
+    Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -60,55 +60,76 @@ const mockActivities: Activity[] = [
     },
 ];
 
-const activityIcons = {
-    upload: Upload,
-    stream: Radio,
-    account: UserPlus,
-    video: Video,
-    error: AlertCircle,
-    success: CheckCircle,
-};
-
-const activityColors = {
-    upload: "text-blue-500",
-    stream: "text-red-500",
-    account: "text-green-500",
-    video: "text-purple-500",
-    error: "text-red-500",
-    success: "text-green-500",
+const activityConfig = {
+    upload: {
+        icon: Upload,
+        bgColor: "bg-blue-500/10",
+        iconColor: "text-blue-500",
+    },
+    stream: {
+        icon: Radio,
+        bgColor: "bg-red-500/10",
+        iconColor: "text-red-500",
+    },
+    account: {
+        icon: UserPlus,
+        bgColor: "bg-green-500/10",
+        iconColor: "text-green-500",
+    },
+    video: {
+        icon: Video,
+        bgColor: "bg-purple-500/10",
+        iconColor: "text-purple-500",
+    },
+    error: {
+        icon: AlertCircle,
+        bgColor: "bg-red-500/10",
+        iconColor: "text-red-500",
+    },
+    success: {
+        icon: CheckCircle,
+        bgColor: "bg-green-500/10",
+        iconColor: "text-green-500",
+    },
 };
 
 export function RecentActivity() {
     return (
-        <Card>
-            <CardHeader>
-                <CardTitle>Recent Activity</CardTitle>
+        <Card className="border-0 bg-card shadow-lg h-full">
+            <CardHeader className="pb-4">
+                <div className="flex items-center gap-2">
+                    <Clock className="h-5 w-5 text-muted-foreground" />
+                    <CardTitle className="text-lg">Recent Activity</CardTitle>
+                </div>
             </CardHeader>
             <CardContent>
-                <ScrollArea className="h-[400px] pr-4">
-                    <div className="space-y-4">
+                <ScrollArea className="h-[350px] pr-4">
+                    <div className="space-y-3">
                         {mockActivities.map((activity) => {
-                            const Icon = activityIcons[activity.type];
-                            const colorClass = activityColors[activity.type];
+                            const config = activityConfig[activity.type];
+                            const Icon = config.icon;
 
                             return (
-                                <div key={activity.id} className="flex items-start gap-4">
+                                <div
+                                    key={activity.id}
+                                    className="group flex items-start gap-4 p-3 rounded-xl transition-all duration-300 hover:bg-accent/50"
+                                >
                                     <div
                                         className={cn(
-                                            "mt-1 rounded-full p-2 bg-muted",
-                                            colorClass
+                                            "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-transform duration-300 group-hover:scale-110",
+                                            config.bgColor
                                         )}
                                     >
-                                        <Icon className="h-4 w-4" />
+                                        <Icon className={cn("h-5 w-5", config.iconColor)} />
                                     </div>
-                                    <div className="flex-1 space-y-1">
-                                        <p className="text-sm font-medium leading-none">
+                                    <div className="flex-1 min-w-0 space-y-1">
+                                        <p className="text-sm font-medium leading-none truncate">
                                             {activity.title}
                                         </p>
-                                        <p className="text-sm text-muted-foreground">
+                                        <p className="text-sm text-muted-foreground truncate">
                                             {activity.description}
                                         </p>
-                                        <p className="text-xs text-muted-foreground">
+                                        <p className="text-xs text-muted-foreground/70">
                                             {activity.timestamp}
                                         </p>
                                     </div>

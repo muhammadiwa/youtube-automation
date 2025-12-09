@@ -11,7 +11,8 @@ import {
     BarChart3,
     Settings,
     Menu,
-    X,
+    Youtube,
+    HelpCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -19,7 +20,7 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useState } from "react";
 
 const navigation = [
-    { name: "Home", href: "/dashboard", icon: Home },
+    { name: "Dashboard", href: "/dashboard", icon: Home },
     { name: "Accounts", href: "/dashboard/accounts", icon: Users },
     { name: "Videos", href: "/dashboard/videos", icon: Video },
     { name: "Streams", href: "/dashboard/streams", icon: Radio },
@@ -31,37 +32,98 @@ interface SidebarProps {
     className?: string;
 }
 
+function NavItem({
+    item,
+    isActive,
+    onClick
+}: {
+    item: typeof navigation[0];
+    isActive: boolean;
+    onClick?: () => void;
+}) {
+    return (
+        <Link href={item.href} onClick={onClick}>
+            <div
+                className={cn(
+                    "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-300 ease-out",
+                    isActive
+                        ? "bg-gradient-to-r from-red-500 to-red-600 text-white shadow-lg shadow-red-500/30"
+                        : "text-muted-foreground hover:bg-accent/80 hover:text-foreground"
+                )}
+            >
+                <item.icon
+                    className={cn(
+                        "h-5 w-5 transition-all duration-300",
+                        isActive ? "text-white" : "group-hover:scale-110"
+                    )}
+                />
+                <span className="flex-1">{item.name}</span>
+                {isActive && (
+                    <div className="h-1.5 w-1.5 rounded-full bg-white/80 animate-pulse" />
+                )}
+            </div>
+        </Link>
+    );
+}
+
 export function Sidebar({ className }: SidebarProps) {
     const pathname = usePathname();
 
+    const isActiveRoute = (href: string) => {
+        if (href === "/dashboard") {
+            return pathname === "/dashboard";
+        }
+        return pathname.startsWith(href);
+    };
+
     return (
-        <div className={cn("pb-12 min-h-screen", className)}>
-            <div className="space-y-4 py-4">
-                <div className="px-3 py-2">
-                    <div className="mb-4 px-4">
-                        <h2 className="text-2xl font-bold tracking-tight">
-                            YouTube Automation
-                        </h2>
+        <div className={cn("flex flex-col h-full bg-card border-r", className)}>
+            {/* Logo Section - h-16 to match header */}
+            <div className="h-16 flex items-center px-6 border-b">
+                <Link href="/dashboard" className="flex items-center gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-red-500 to-red-600 shadow-lg shadow-red-500/30">
+                        <Youtube className="h-5 w-5 text-white" />
                     </div>
-                    <div className="space-y-1">
-                        {navigation.map((item) => {
-                            const isActive = pathname === item.href;
-                            return (
-                                <Link key={item.name} href={item.href}>
-                                    <Button
-                                        variant={isActive ? "secondary" : "ghost"}
-                                        className={cn(
-                                            "w-full justify-start",
-                                            isActive && "bg-secondary"
-                                        )}
-                                    >
-                                        <item.icon className="mr-2 h-4 w-4" />
-                                        {item.name}
-                                    </Button>
-                                </Link>
-                            );
-                        })}
+                    <div className="flex flex-col">
+                        <span className="text-base font-bold tracking-tight">YT Automation</span>
+                        <span className="text-[10px] text-muted-foreground leading-none">Manage your channels</span>
                     </div>
+                </Link>
+            </div>
+
+            {/* Navigation */}
+            <ScrollArea className="flex-1 px-3 py-4">
+                <div className="space-y-1.5">
+                    <p className="px-3 mb-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                        Menu
+                    </p>
+                    {navigation.map((item) => (
+                        <NavItem
+                            key={item.name}
+                            item={item}
+                            isActive={isActiveRoute(item.href)}
+                        />
+                    ))}
+                </div>
+            </ScrollArea>
+
+            {/* Footer */}
+            <div className="p-3 border-t">
+                <div className="rounded-xl bg-gradient-to-br from-red-500/5 via-orange-500/5 to-yellow-500/5 p-4 border border-red-500/10">
+                    <div className="flex items-center gap-2 mb-2">
+                        <HelpCircle className="h-4 w-4 text-red-500" />
+                        <p className="text-sm font-semibold">Need help?</p>
+                    </div>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                        Check our docs for guides and tutorials.
+                    </p>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-3 w-full text-xs h-8 rounded-lg border-red-500/20 hover:bg-red-500/10 hover:text-red-500 transition-colors"
+                    >
+                        View Documentation
+                    </Button>
                 </div>
             </div>
         </div>
@@ -72,6 +134,13 @@ export function MobileSidebar() {
     const [open, setOpen] = useState(false);
     const pathname = usePathname();
 
+    const isActiveRoute = (href: string) => {
+        if (href === "/dashboard") {
+            return pathname === "/dashboard";
+        }
+        return pathname.startsWith(href);
+    };
+
     return (
         <Sheet open={open} onOpenChange={setOpen}>
             <SheetTrigger asChild>
@@ -80,41 +149,62 @@ export function MobileSidebar() {
                     <span className="sr-only">Toggle menu</span>
                 </Button>
             </SheetTrigger>
-            <SheetContent side="left" className="w-64 p-0">
-                <ScrollArea className="h-full">
-                    <div className="space-y-4 py-4">
-                        <div className="px-3 py-2">
-                            <div className="mb-4 px-4 flex items-center justify-between">
-                                <h2 className="text-xl font-bold tracking-tight">
-                                    YouTube Automation
-                                </h2>
+            <SheetContent side="left" className="w-72 p-0">
+                <div className="flex flex-col h-full bg-card">
+                    {/* Logo Section */}
+                    <div className="h-16 flex items-center px-6 border-b">
+                        <Link
+                            href="/dashboard"
+                            className="flex items-center gap-3"
+                            onClick={() => setOpen(false)}
+                        >
+                            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-red-500 to-red-600 shadow-lg shadow-red-500/30">
+                                <Youtube className="h-5 w-5 text-white" />
                             </div>
-                            <div className="space-y-1">
-                                {navigation.map((item) => {
-                                    const isActive = pathname === item.href;
-                                    return (
-                                        <Link
-                                            key={item.name}
-                                            href={item.href}
-                                            onClick={() => setOpen(false)}
-                                        >
-                                            <Button
-                                                variant={isActive ? "secondary" : "ghost"}
-                                                className={cn(
-                                                    "w-full justify-start",
-                                                    isActive && "bg-secondary"
-                                                )}
-                                            >
-                                                <item.icon className="mr-2 h-4 w-4" />
-                                                {item.name}
-                                            </Button>
-                                        </Link>
-                                    );
-                                })}
+                            <div className="flex flex-col">
+                                <span className="text-base font-bold tracking-tight">YT Automation</span>
+                                <span className="text-[10px] text-muted-foreground leading-none">Manage your channels</span>
                             </div>
+                        </Link>
+                    </div>
+
+                    {/* Navigation */}
+                    <ScrollArea className="flex-1 px-3 py-4">
+                        <div className="space-y-1.5">
+                            <p className="px-3 mb-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                                Menu
+                            </p>
+                            {navigation.map((item) => (
+                                <NavItem
+                                    key={item.name}
+                                    item={item}
+                                    isActive={isActiveRoute(item.href)}
+                                    onClick={() => setOpen(false)}
+                                />
+                            ))}
+                        </div>
+                    </ScrollArea>
+
+                    {/* Footer */}
+                    <div className="p-3 border-t">
+                        <div className="rounded-xl bg-gradient-to-br from-red-500/5 via-orange-500/5 to-yellow-500/5 p-4 border border-red-500/10">
+                            <div className="flex items-center gap-2 mb-2">
+                                <HelpCircle className="h-4 w-4 text-red-500" />
+                                <p className="text-sm font-semibold">Need help?</p>
+                            </div>
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                                Check our docs for guides.
+                            </p>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="mt-3 w-full text-xs h-8 rounded-lg border-red-500/20 hover:bg-red-500/10 hover:text-red-500 transition-colors"
+                            >
+                                View Docs
+                            </Button>
                         </div>
                     </div>
-                </ScrollArea>
+                </div>
             </SheetContent>
         </Sheet>
     );

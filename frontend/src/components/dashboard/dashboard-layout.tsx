@@ -17,16 +17,18 @@ export function DashboardLayout({
     className,
 }: DashboardLayoutProps) {
     return (
-        <div className="flex min-h-screen">
+        <div className="flex min-h-screen bg-muted/30">
             {/* Desktop Sidebar */}
-            <aside className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 border-r bg-background">
+            <aside className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 z-50">
                 <Sidebar />
             </aside>
 
             {/* Main Content */}
-            <div className="flex-1 md:pl-64">
+            <div className="flex-1 flex flex-col md:pl-64">
                 <Header breadcrumbs={breadcrumbs} />
-                <main className={cn("flex-1 p-6", className)}>{children}</main>
+                <main className={cn("flex-1 p-4 md:p-6 lg:p-8", className)}>
+                    {children}
+                </main>
             </div>
         </div>
     );

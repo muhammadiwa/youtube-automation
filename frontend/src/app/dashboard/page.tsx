@@ -33,11 +33,11 @@ export default function DashboardPage() {
 
     return (
         <DashboardLayout breadcrumbs={[{ label: "Dashboard" }]}>
-            <div className="space-y-6">
+            <div className="space-y-8">
                 {/* Welcome Message */}
-                <div>
-                    <h1 className="text-3xl font-bold tracking-tight">
-                        Welcome back, {user?.name || "User"}!
+                <div className="space-y-1">
+                    <h1 className="text-2xl md:text-3xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text">
+                        Welcome back, {user?.name || "User"}! 👋
                     </h1>
                     <p className="text-muted-foreground">
                         Here's what's happening with your channels today.
@@ -45,30 +45,34 @@ export default function DashboardPage() {
                 </div>
 
                 {/* Overview Cards */}
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                     <OverviewCard
                         title="Total Subscribers"
                         value={stats.subscribers.value}
                         icon={Users}
                         trend={stats.subscribers.trend}
+                        gradient="from-blue-500 to-blue-600"
                     />
                     <OverviewCard
                         title="Total Views"
                         value={stats.views.value}
                         icon={Eye}
                         trend={stats.views.trend}
+                        gradient="from-purple-500 to-purple-600"
                     />
                     <OverviewCard
                         title="Revenue"
                         value={stats.revenue.value}
                         icon={DollarSign}
                         trend={stats.revenue.trend}
+                        gradient="from-green-500 to-green-600"
                     />
                     <OverviewCard
                         title="Active Streams"
                         value={stats.activeStreams.value}
                         icon={Radio}
                         trend={stats.activeStreams.trend}
+                        gradient="from-red-500 to-red-600"
                     />
                 </div>
 
@@ -76,9 +80,13 @@ export default function DashboardPage() {
                 <QuickActions />
 
                 {/* Charts and Activity */}
-                <div className="grid gap-4 md:grid-cols-2">
-                    <PerformanceChart />
-                    <RecentActivity />
+                <div className="grid gap-6 lg:grid-cols-5">
+                    <div className="lg:col-span-3">
+                        <PerformanceChart />
+                    </div>
+                    <div className="lg:col-span-2">
+                        <RecentActivity />
+                    </div>
                 </div>
             </div>
         </DashboardLayout>
