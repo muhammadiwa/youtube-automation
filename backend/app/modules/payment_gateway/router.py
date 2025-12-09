@@ -1,0 +1,757 @@
+"""Payment Gateway Admin Router.
+
+Provides API endpoints for:
+- CRUD operations for gateway configuration (Requirements: 30.6)
+- Credential validation endpoint (Requirements: 30.7)
+- Statistics endpoint per gateway (Requirements: 30.6)
+- Enable/disable gateway (Requirements: 30.2)
+
+Requirements: 30.1, 30.2, 30.3, 30.4, 30.5, 30.6, 30.7
+"""
+
+import uuid
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, status, Header
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_session
+from app.modules.payment_gateway.service import (
+    GatewayManagerService,
+    PaymentService,
+)
+from app.modules.payment_gateway.schemas import (
+    GatewayProvider,
+    GatewayConfigCreate,
+    GatewayConfigUpdate,
+    GatewayConfigResponse,
+    GatewayPublicInfo,
+    GatewayStatisticsResponse,
+    AllGatewayStatisticsResponse,
+    ValidationResult,
+    EnableDisableResponse,
+    CreatePaymentRequest,
+    PaymentResponse,
+    PaymentStatusResponse,
+    PaymentTransactionResponse,
+    RetryPaymentRequest,
+)
+
+# Admin router for gateway management
+admin_router = APIRouter(prefix="/admin/payment-gateways", tags=["Payment Gateway Admin"])
+
+# Public router for payment processing
+payment_router = APIRouter(prefix="/payments", tags=["Payments"])
+
+
+# ==================== Admin Endpoints ====================
+
+@admin_router.get("", response_model=list[GatewayConfigResponse])
+async def list_all_gateways(
+    session: AsyncSession = Depends(get_session),
+):
+    """List all payment gateway configurations.
+    
+    Requirements: 30.6 - Gateway dashboard
+    
+    Returns all configured gateways with their status and settings.
+    Credentials are not exposed.
+    """
+    service = GatewayManagerService(session)
+    configs = await service.get_all_gateways()
+    
+    return [
+        GatewayConfigResponse(
+            id=c.id,
+            provider=c.provider,
+            display_name=c.display_name,
+            is_enabled=c.is_enabled,
+            is_default=c.is_default,
+            sandbox_mode=c.sandbox_mode,
+            supported_currencies=c.supported_currencies,
+            supported_payment_methods=c.supported_payment_methods,
+            transaction_fee_percent=c.transaction_fee_percent,
+            fixed_fee=c.fixed_fee,
+            min_amount=c.min_amount,
+            max_amount=c.max_amount,
+            has_credentials=c.has_credentials(),
+            created_at=c.created_at,
+            updated_at=c.updated_at,
+        )
+        for c in configs
+    ]
+
+
+@admin_router.get("/{provider}", response_model=GatewayConfigResponse)
+async def get_gateway(
+    provider: GatewayProvider,
+    session: AsyncSession = Depends(get_session),
+):
+    """Get a specific gateway configuration.
+    
+    Requirements: 30.6 - Gateway dashboard
+    """
+    service = GatewayManagerService(session)
+    config = await service.get_gateway(provider.value)
+    
+    if not config:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Gateway {provider.value} not found",
+        )
+    
+    return GatewayConfigResponse(
+        id=config.id,
+        provider=config.provider,
+        display_name=config.display_name,
+        is_enabled=config.is_enabled,
+        is_default=config.is_default,
+        sandbox_mode=config.sandbox_mode,
+        supported_currencies=config.supported_currencies,
+        supported_payment_methods=config.supported_payment_methods,
+        transaction_fee_percent=config.transaction_fee_percent,
+        fixed_fee=config.fixed_fee,
+        min_amount=config.min_amount,
+        max_amount=config.max_amount,
+        has_credentials=config.has_credentials(),
+        created_at=config.created_at,
+        updated_at=config.updated_at,
+    )
+
+
+@admin_router.post("/{provider}/configure", response_model=GatewayConfigResponse)
+async def configure_gateway(
+    provider: GatewayProvider,
+    data: GatewayConfigCreate,
+    session: AsyncSession = Depends(get_session),
+):
+    """Configure gateway credentials.
+    
+    Requirements: 30.4 - Encrypted credentials via KMS
+    Requirements: 30.7 - Validate API keys before saving
+    
+    Creates or updates gateway configuration with encrypted credentials.
+    """
+    service = GatewayManagerService(session)
+    
+    config = await service.configure_gateway(
+        provider=provider.value,
+        api_key=data.api_key,
+        api_secret=data.api_secret,
+        webhook_secret=data.webhook_secret,
+        sandbox_mode=data.sandbox_mode,
+        display_name=data.display_name,
+        transaction_fee_percent=data.transaction_fee_percent,
+        fixed_fee=data.fixed_fee,
+        min_amount=data.min_amount,
+        max_amount=data.max_amount,
+    )
+    
+    await session.commit()
+    
+    return GatewayConfigResponse(
+        id=config.id,
+        provider=config.provider,
+        display_name=config.display_name,
+        is_enabled=config.is_enabled,
+        is_default=config.is_default,
+        sandbox_mode=config.sandbox_mode,
+        supported_currencies=config.supported_currencies,
+        supported_payment_methods=config.supported_payment_methods,
+        transaction_fee_percent=config.transaction_fee_percent,
+        fixed_fee=config.fixed_fee,
+        min_amount=config.min_amount,
+        max_amount=config.max_amount,
+        has_credentials=config.has_credentials(),
+        created_at=config.created_at,
+        updated_at=config.updated_at,
+    )
+
+
+@admin_router.patch("/{provider}", response_model=GatewayConfigResponse)
+async def update_gateway(
+    provider: GatewayProvider,
+    data: GatewayConfigUpdate,
+    session: AsyncSession = Depends(get_session),
+):
+    """Update gateway configuration.
+    
+    Requirements: 30.6 - Gateway configuration management
+    
+    Updates non-credential settings. Use /configure endpoint for credentials.
+    """
+    service = GatewayManagerService(session)
+    
+    config = await service.get_gateway(provider.value)
+    if not config:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Gateway {provider.value} not found",
+        )
+    
+    # Build update kwargs
+    update_kwargs = {}
+    if data.display_name is not None:
+        update_kwargs["display_name"] = data.display_name
+    if data.sandbox_mode is not None:
+        update_kwargs["sandbox_mode"] = data.sandbox_mode
+    if data.transaction_fee_percent is not None:
+        update_kwargs["transaction_fee_percent"] = data.transaction_fee_percent
+    if data.fixed_fee is not None:
+        update_kwargs["fixed_fee"] = data.fixed_fee
+    if data.min_amount is not None:
+        update_kwargs["min_amount"] = data.min_amount
+    if data.max_amount is not None:
+        update_kwargs["max_amount"] = data.max_amount
+    
+    # Handle credential updates if provided
+    if data.api_key or data.api_secret:
+        if not (data.api_key and data.api_secret):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Both api_key and api_secret must be provided together",
+            )
+        config = await service.configure_gateway(
+            provider=provider.value,
+            api_key=data.api_key,
+            api_secret=data.api_secret,
+            webhook_secret=data.webhook_secret,
+            **update_kwargs,
+        )
+    elif update_kwargs:
+        from app.modules.payment_gateway.repository import PaymentGatewayRepository
+        repo = PaymentGatewayRepository(session)
+        config = await repo.update_config(provider.value, **update_kwargs)
+    
+    await session.commit()
+    
+    return GatewayConfigResponse(
+        id=config.id,
+        provider=config.provider,
+        display_name=config.display_name,
+        is_enabled=config.is_enabled,
+        is_default=config.is_default,
+        sandbox_mode=config.sandbox_mode,
+        supported_currencies=config.supported_currencies,
+        supported_payment_methods=config.supported_payment_methods,
+        transaction_fee_percent=config.transaction_fee_percent,
+        fixed_fee=config.fixed_fee,
+        min_amount=config.min_amount,
+        max_amount=config.max_amount,
+        has_credentials=config.has_credentials(),
+        created_at=config.created_at,
+        updated_at=config.updated_at,
+    )
+
+
+@admin_router.post("/{provider}/enable", response_model=EnableDisableResponse)
+async def enable_gateway(
+    provider: GatewayProvider,
+    session: AsyncSession = Depends(get_session),
+):
+    """Enable a payment gateway.
+    
+    Requirements: 30.2 - Enable gateway dynamically without system restart
+    
+    Gateway must have credentials configured before enabling.
+    """
+    service = GatewayManagerService(session)
+    
+    try:
+        config = await service.enable_gateway(provider.value)
+        if not config:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Gateway {provider.value} not found",
+            )
+        
+        await session.commit()
+        
+        return EnableDisableResponse(
+            provider=provider.value,
+            is_enabled=True,
+            message=f"Gateway {provider.value} enabled successfully",
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@admin_router.post("/{provider}/disable", response_model=EnableDisableResponse)
+async def disable_gateway(
+    provider: GatewayProvider,
+    session: AsyncSession = Depends(get_session),
+):
+    """Disable a payment gateway.
+    
+    Requirements: 30.2 - Disable gateway dynamically without system restart
+    """
+    service = GatewayManagerService(session)
+    
+    config = await service.disable_gateway(provider.value)
+    if not config:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Gateway {provider.value} not found",
+        )
+    
+    await session.commit()
+    
+    return EnableDisableResponse(
+        provider=provider.value,
+        is_enabled=False,
+        message=f"Gateway {provider.value} disabled successfully",
+    )
+
+
+@admin_router.post("/{provider}/set-default", response_model=GatewayConfigResponse)
+async def set_default_gateway(
+    provider: GatewayProvider,
+    session: AsyncSession = Depends(get_session),
+):
+    """Set a gateway as the default.
+    
+    Requirements: 30.2 - Gateway configuration management
+    
+    The gateway will be automatically enabled if not already.
+    """
+    service = GatewayManagerService(session)
+    
+    try:
+        config = await service.set_default_gateway(provider.value)
+        if not config:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Gateway {provider.value} not found",
+            )
+        
+        await session.commit()
+        
+        return GatewayConfigResponse(
+            id=config.id,
+            provider=config.provider,
+            display_name=config.display_name,
+            is_enabled=config.is_enabled,
+            is_default=config.is_default,
+            sandbox_mode=config.sandbox_mode,
+            supported_currencies=config.supported_currencies,
+            supported_payment_methods=config.supported_payment_methods,
+            transaction_fee_percent=config.transaction_fee_percent,
+            fixed_fee=config.fixed_fee,
+            min_amount=config.min_amount,
+            max_amount=config.max_amount,
+            has_credentials=config.has_credentials(),
+            created_at=config.created_at,
+            updated_at=config.updated_at,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@admin_router.post("/{provider}/validate", response_model=ValidationResult)
+async def validate_gateway_credentials(
+    provider: GatewayProvider,
+    session: AsyncSession = Depends(get_session),
+):
+    """Validate gateway API credentials.
+    
+    Requirements: 30.7 - Validate API keys before saving
+    
+    Tests the configured credentials against the gateway's API.
+    """
+    service = GatewayManagerService(session)
+    result = await service.validate_gateway_credentials(provider.value)
+    return result
+
+
+@admin_router.get("/{provider}/statistics", response_model=GatewayStatisticsResponse)
+async def get_gateway_statistics(
+    provider: GatewayProvider,
+    session: AsyncSession = Depends(get_session),
+):
+    """Get statistics for a specific gateway.
+    
+    Requirements: 30.6 - Transaction statistics, success rates, health status
+    """
+    service = GatewayManagerService(session)
+    stats = await service.get_gateway_statistics(provider.value)
+    
+    if not stats:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Statistics for gateway {provider.value} not found",
+        )
+    
+    return GatewayStatisticsResponse(
+        provider=stats.provider,
+        total_transactions=stats.total_transactions,
+        successful_transactions=stats.successful_transactions,
+        failed_transactions=stats.failed_transactions,
+        success_rate=stats.success_rate,
+        total_volume=stats.total_volume,
+        average_transaction=stats.average_transaction,
+        health_status=stats.health_status,
+        last_transaction_at=stats.last_transaction_at,
+        transactions_24h=stats.transactions_24h,
+        success_rate_24h=stats.success_rate_24h,
+    )
+
+
+@admin_router.get("/statistics/all", response_model=AllGatewayStatisticsResponse)
+async def get_all_gateway_statistics(
+    session: AsyncSession = Depends(get_session),
+):
+    """Get statistics for all gateways.
+    
+    Requirements: 30.6 - Gateway dashboard with statistics
+    """
+    service = GatewayManagerService(session)
+    all_stats = await service.get_all_gateway_statistics()
+    
+    gateway_stats = [
+        GatewayStatisticsResponse(
+            provider=s.provider,
+            total_transactions=s.total_transactions,
+            successful_transactions=s.successful_transactions,
+            failed_transactions=s.failed_transactions,
+            success_rate=s.success_rate,
+            total_volume=s.total_volume,
+            average_transaction=s.average_transaction,
+            health_status=s.health_status,
+            last_transaction_at=s.last_transaction_at,
+            transactions_24h=s.transactions_24h,
+            success_rate_24h=s.success_rate_24h,
+        )
+        for s in all_stats
+    ]
+    
+    total_volume = sum(s.total_volume for s in all_stats)
+    total_transactions = sum(s.total_transactions for s in all_stats)
+    total_successful = sum(s.successful_transactions for s in all_stats)
+    overall_success_rate = (
+        (total_successful / total_transactions * 100) 
+        if total_transactions > 0 else 0.0
+    )
+    
+    return AllGatewayStatisticsResponse(
+        gateways=gateway_stats,
+        total_volume=total_volume,
+        total_transactions=total_transactions,
+        overall_success_rate=overall_success_rate,
+    )
+
+
+@admin_router.post("/initialize", response_model=list[GatewayConfigResponse])
+async def initialize_default_gateways(
+    session: AsyncSession = Depends(get_session),
+):
+    """Initialize default gateway configurations.
+    
+    Creates placeholder configurations for all supported providers.
+    Useful for initial setup.
+    """
+    service = GatewayManagerService(session)
+    configs = await service.initialize_default_gateways()
+    await session.commit()
+    
+    return [
+        GatewayConfigResponse(
+            id=c.id,
+            provider=c.provider,
+            display_name=c.display_name,
+            is_enabled=c.is_enabled,
+            is_default=c.is_default,
+            sandbox_mode=c.sandbox_mode,
+            supported_currencies=c.supported_currencies,
+            supported_payment_methods=c.supported_payment_methods,
+            transaction_fee_percent=c.transaction_fee_percent,
+            fixed_fee=c.fixed_fee,
+            min_amount=c.min_amount,
+            max_amount=c.max_amount,
+            has_credentials=c.has_credentials(),
+            created_at=c.created_at,
+            updated_at=c.updated_at,
+        )
+        for c in configs
+    ]
+
+
+# ==================== Public Payment Endpoints ====================
+
+@payment_router.get("/gateways", response_model=list[GatewayPublicInfo])
+async def list_available_gateways(
+    currency: str = "USD",
+    session: AsyncSession = Depends(get_session),
+):
+    """List available payment gateways for a currency.
+    
+    Requirements: 30.3 - Display only enabled payment gateways
+    
+    Returns public information about enabled gateways.
+    """
+    service = PaymentService(session)
+    configs = await service.get_available_gateways(currency)
+    
+    return [
+        GatewayPublicInfo(
+            provider=c.provider,
+            display_name=c.display_name,
+            supported_currencies=c.supported_currencies,
+            supported_payment_methods=c.supported_payment_methods,
+            min_amount=c.min_amount,
+            max_amount=c.max_amount,
+        )
+        for c in configs
+    ]
+
+
+@payment_router.post("", response_model=PaymentResponse)
+async def create_payment(
+    data: CreatePaymentRequest,
+    user_id: uuid.UUID = Header(..., alias="X-User-ID"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Create a new payment.
+    
+    Requirements: 30.4 - Process payment through gateway
+    
+    Creates a payment transaction and processes it through the selected gateway.
+    """
+    service = PaymentService(session)
+    
+    try:
+        # Create transaction
+        transaction = await service.create_payment(
+            user_id=user_id,
+            amount=data.amount,
+            currency=data.currency,
+            description=data.description,
+            gateway_provider=data.preferred_gateway.value if data.preferred_gateway else None,
+            subscription_id=data.subscription_id,
+            success_url=data.success_url,
+            cancel_url=data.cancel_url,
+            metadata=data.metadata,
+        )
+        
+        # Process payment
+        transaction = await service.process_payment(transaction.id)
+        await session.commit()
+        
+        return PaymentResponse(
+            payment_id=transaction.id,
+            gateway_provider=transaction.gateway_provider,
+            status=transaction.status,
+            checkout_url=transaction.checkout_url,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@payment_router.get("/{payment_id}", response_model=PaymentTransactionResponse)
+async def get_payment(
+    payment_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    """Get payment transaction details.
+    
+    Requirements: 30.6 - Transaction tracking
+    """
+    service = PaymentService(session)
+    transaction = await service.get_transaction(payment_id)
+    
+    if not transaction:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Payment {payment_id} not found",
+        )
+    
+    return PaymentTransactionResponse(
+        id=transaction.id,
+        user_id=transaction.user_id,
+        subscription_id=transaction.subscription_id,
+        gateway_provider=transaction.gateway_provider,
+        gateway_payment_id=transaction.gateway_payment_id,
+        amount=transaction.amount,
+        currency=transaction.currency,
+        status=transaction.status,
+        payment_method=transaction.payment_method,
+        description=transaction.description,
+        error_message=transaction.error_message,
+        attempt_count=transaction.attempt_count,
+        created_at=transaction.created_at,
+        completed_at=transaction.completed_at,
+    )
+
+
+@payment_router.get("/{payment_id}/status", response_model=PaymentStatusResponse)
+async def get_payment_status(
+    payment_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    """Get payment status.
+    
+    Requirements: 30.4 - Payment status tracking
+    """
+    service = PaymentService(session)
+    transaction = await service.get_transaction(payment_id)
+    
+    if not transaction:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Payment {payment_id} not found",
+        )
+    
+    return PaymentStatusResponse(
+        payment_id=transaction.id,
+        gateway_provider=transaction.gateway_provider,
+        status=transaction.status,
+        amount=transaction.amount,
+        currency=transaction.currency,
+        created_at=transaction.created_at,
+        completed_at=transaction.completed_at,
+        error_message=transaction.error_message,
+    )
+
+
+@payment_router.post("/{payment_id}/verify", response_model=PaymentTransactionResponse)
+async def verify_payment(
+    payment_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    """Verify payment status with gateway.
+    
+    Requirements: 30.4 - Payment verification
+    
+    Checks the payment status directly with the gateway.
+    """
+    service = PaymentService(session)
+    
+    try:
+        transaction = await service.verify_payment(payment_id)
+        await session.commit()
+        
+        return PaymentTransactionResponse(
+            id=transaction.id,
+            user_id=transaction.user_id,
+            subscription_id=transaction.subscription_id,
+            gateway_provider=transaction.gateway_provider,
+            gateway_payment_id=transaction.gateway_payment_id,
+            amount=transaction.amount,
+            currency=transaction.currency,
+            status=transaction.status,
+            payment_method=transaction.payment_method,
+            description=transaction.description,
+            error_message=transaction.error_message,
+            attempt_count=transaction.attempt_count,
+            created_at=transaction.created_at,
+            completed_at=transaction.completed_at,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@payment_router.get("/{payment_id}/alternatives", response_model=list[GatewayPublicInfo])
+async def get_alternative_gateways(
+    payment_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    """Get alternative gateways for a failed payment.
+    
+    Requirements: 30.5 - Allow retry with alternative gateway
+    """
+    service = PaymentService(session)
+    configs = await service.get_alternative_gateways(payment_id)
+    
+    return [
+        GatewayPublicInfo(
+            provider=c.provider,
+            display_name=c.display_name,
+            supported_currencies=c.supported_currencies,
+            supported_payment_methods=c.supported_payment_methods,
+            min_amount=c.min_amount,
+            max_amount=c.max_amount,
+        )
+        for c in configs
+    ]
+
+
+@payment_router.post("/{payment_id}/retry", response_model=PaymentResponse)
+async def retry_payment(
+    payment_id: uuid.UUID,
+    data: RetryPaymentRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Retry a failed payment with an alternative gateway.
+    
+    Requirements: 30.5 - Retry with alternative gateway on failure
+    """
+    service = PaymentService(session)
+    
+    try:
+        transaction = await service.retry_with_alternative_gateway(
+            payment_id,
+            data.alternative_gateway.value,
+        )
+        await session.commit()
+        
+        return PaymentResponse(
+            payment_id=transaction.id,
+            gateway_provider=transaction.gateway_provider,
+            status=transaction.status,
+            checkout_url=transaction.checkout_url,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@payment_router.post("/webhook/{provider}")
+async def handle_webhook(
+    provider: GatewayProvider,
+    payload: dict,
+    x_signature: Optional[str] = Header(None, alias="X-Signature"),
+    stripe_signature: Optional[str] = Header(None, alias="Stripe-Signature"),
+    x_callback_token: Optional[str] = Header(None, alias="X-Callback-Token"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Handle webhook callback from a payment gateway.
+    
+    Requirements: 30.4 - Webhook handling for payment status updates
+    
+    Different gateways use different signature headers:
+    - Stripe: Stripe-Signature
+    - PayPal: X-Signature
+    - Midtrans: signature_key in payload
+    - Xendit: X-Callback-Token
+    """
+    # Determine signature based on provider
+    signature = ""
+    if provider == GatewayProvider.STRIPE:
+        signature = stripe_signature or ""
+    elif provider == GatewayProvider.XENDIT:
+        signature = x_callback_token or ""
+    elif provider == GatewayProvider.MIDTRANS:
+        signature = payload.get("signature_key", "")
+    else:
+        signature = x_signature or ""
+    
+    service = PaymentService(session)
+    transaction = await service.handle_webhook(provider.value, payload, signature)
+    await session.commit()
+    
+    if transaction:
+        return {"status": "processed", "payment_id": str(transaction.id)}
+    return {"status": "acknowledged"}
