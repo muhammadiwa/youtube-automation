@@ -47,25 +47,28 @@ import { useTheme } from "next-themes";
 import Link from "next/link";
 import analyticsApi, {
     RevenueBreakdown,
-    RevenueTrend,
+    MonthlyRevenueSummary,
     TopEarningVideo,
 } from "@/lib/api/analytics";
 import accountsApi from "@/lib/api/accounts";
+import { useAuth } from "@/components/providers/auth-provider";
 import { YouTubeAccount } from "@/types";
 
 type Period = "7d" | "30d" | "90d" | "1y";
 
 const COLORS = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6", "#8b5cf6"];
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 export default function RevenuePage() {
     const { theme } = useTheme();
     const isDark = theme === "dark";
+    const { user } = useAuth();
 
     const [period, setPeriod] = useState<Period>("30d");
     const [selectedAccount, setSelectedAccount] = useState<string>("all");
     const [accounts, setAccounts] = useState<YouTubeAccount[]>([]);
     const [revenue, setRevenue] = useState<RevenueBreakdown | null>(null);
-    const [trends, setTrends] = useState<RevenueTrend[]>([]);
+    const [monthlyData, setMonthlyData] = useState<MonthlyRevenueSummary[]>([]);
     const [topVideos, setTopVideos] = useState<TopEarningVideo[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -75,11 +78,15 @@ export default function RevenuePage() {
 
     useEffect(() => {
         loadRevenueData();
-    }, [period, selectedAccount]);
+    }, [period, selectedAccount, user]);
 
     const loadAccounts = async () => {
-        const data = await accountsApi.getAccounts();
-        setAccounts(data);
+        try {
+            const data = await accountsApi.getAccounts();
+            setAccounts(data);
+        } catch (error) {
+            console.error("Failed to load accounts:", error);
+        }
     };
 
     const loadRevenueData = async () => {
@@ -88,9 +95,11 @@ export default function RevenuePage() {
             const params = {
                 period,
                 account_id: selectedAccount !== "all" ? selectedAccount : undefined,
+                user_id: user?.id,
             };
 
-            const [revenueData, trendsData, videosData] = await Promise.all([
+            // Load revenue overview from backend
+            const [revenueData, monthlyTrends, videosData] = await Promise.all([
                 analyticsApi.getRevenueOverview(params),
                 analyticsApi.getMonthlyRevenueTrends({
                     account_id: params.account_id,
@@ -100,74 +109,25 @@ export default function RevenuePage() {
             ]);
 
             setRevenue(revenueData);
-            setTrends(trendsData.length > 0 ? trendsData : generateMockTrends());
-            setTopVideos(videosData.length > 0 ? videosData : generateMockVideos());
+            setMonthlyData(monthlyTrends);
+            setTopVideos(videosData);
         } catch (error) {
             console.error("Failed to load revenue data:", error);
+            // Set empty state on error
+            setRevenue({
+                total: 0,
+                ads: 0,
+                memberships: 0,
+                super_chat: 0,
+                super_stickers: 0,
+                merchandise: 0,
+                youtube_premium: 0,
+            });
+            setMonthlyData([]);
+            setTopVideos([]);
         } finally {
             setLoading(false);
         }
-    };
-
-    // Generate mock data for demo
-    const generateMockTrends = (): RevenueTrend[] => {
-        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-        const currentMonth = new Date().getMonth();
-        return months.slice(0, currentMonth + 1).map((month, i) => ({
-            date: month,
-            amount: Math.floor(Math.random() * 5000) + 1000,
-            source: "total",
-        }));
-    };
-
-    const generateMockVideos = (): TopEarningVideo[] => {
-        return [
-            {
-                video_id: "1",
-                title: "How to Build a YouTube Automation System",
-                thumbnail_url: "/placeholder-video.jpg",
-                revenue: 1250.50,
-                views: 125000,
-                cpm: 10.00,
-                published_at: "2024-11-15",
-            },
-            {
-                video_id: "2",
-                title: "Complete Guide to Live Streaming",
-                thumbnail_url: "/placeholder-video.jpg",
-                revenue: 980.25,
-                views: 98000,
-                cpm: 10.00,
-                published_at: "2024-11-10",
-            },
-            {
-                video_id: "3",
-                title: "AI Tools for Content Creators",
-                thumbnail_url: "/placeholder-video.jpg",
-                revenue: 750.00,
-                views: 75000,
-                cpm: 10.00,
-                published_at: "2024-11-05",
-            },
-            {
-                video_id: "4",
-                title: "Monetization Strategies 2024",
-                thumbnail_url: "/placeholder-video.jpg",
-                revenue: 620.75,
-                views: 62000,
-                cpm: 10.01,
-                published_at: "2024-10-28",
-            },
-            {
-                video_id: "5",
-                title: "Growing Your Channel Fast",
-                thumbnail_url: "/placeholder-video.jpg",
-                revenue: 450.00,
-                views: 45000,
-                cpm: 10.00,
-                published_at: "2024-10-20",
-            },
-        ];
     };
 
     const formatCurrency = (amount: number): string => {
@@ -194,10 +154,10 @@ export default function RevenuePage() {
         { name: "YT Premium", value: revenue.youtube_premium, color: COLORS[5] },
     ].filter(item => item.value > 0) : [];
 
-    // Prepare line chart data
-    const chartData = trends.map(t => ({
-        date: t.date,
-        revenue: t.amount,
+    // Prepare line chart data from monthly breakdown
+    const chartData = monthlyData.map(m => ({
+        date: MONTH_NAMES[m.month - 1],
+        revenue: m.total_revenue,
     }));
 
     const CustomTooltip = ({ active, payload, label }: any) => {

@@ -17,6 +17,13 @@ import {
     DialogTrigger,
 } from "@/components/ui/dialog";
 import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import {
     Target,
     Plus,
     Pencil,
@@ -27,8 +34,10 @@ import {
     AlertCircle,
 } from "lucide-react";
 import analyticsApi, { RevenueGoal } from "@/lib/api/analytics";
+import { useAuth } from "@/components/providers/auth-provider";
 
 export default function RevenueGoalsPage() {
+    const { user } = useAuth();
     const [goals, setGoals] = useState<RevenueGoal[]>([]);
     const [loading, setLoading] = useState(true);
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -40,62 +49,29 @@ export default function RevenueGoalsPage() {
         target_amount: "",
         start_date: "",
         end_date: "",
+        period_type: "monthly" as "daily" | "weekly" | "monthly" | "yearly" | "custom",
     });
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
-        loadGoals();
-    }, []);
+        if (user?.id) {
+            loadGoals();
+        }
+    }, [user]);
 
     const loadGoals = async () => {
+        if (!user?.id) return;
+
         setLoading(true);
         try {
-            const data = await analyticsApi.getRevenueGoals();
-            setGoals(data.length > 0 ? data : generateMockGoals());
+            const data = await analyticsApi.getRevenueGoals(user.id);
+            setGoals(data);
         } catch (error) {
             console.error("Failed to load goals:", error);
-            setGoals(generateMockGoals());
+            setGoals([]);
         } finally {
             setLoading(false);
         }
-    };
-
-    const generateMockGoals = (): RevenueGoal[] => {
-        return [
-            {
-                id: "1",
-                name: "Q4 2024 Revenue Target",
-                target_amount: 10000,
-                current_amount: 7500,
-                start_date: "2024-10-01",
-                end_date: "2024-12-31",
-                progress_percentage: 75,
-                forecast_amount: 9800,
-                forecast_probability: 85,
-            },
-            {
-                id: "2",
-                name: "Monthly Membership Goal",
-                target_amount: 500,
-                current_amount: 320,
-                start_date: "2024-12-01",
-                end_date: "2024-12-31",
-                progress_percentage: 64,
-                forecast_amount: 480,
-                forecast_probability: 70,
-            },
-            {
-                id: "3",
-                name: "Super Chat Holiday Special",
-                target_amount: 1000,
-                current_amount: 450,
-                start_date: "2024-12-15",
-                end_date: "2024-12-25",
-                progress_percentage: 45,
-                forecast_amount: 920,
-                forecast_probability: 60,
-            },
-        ];
     };
 
     const formatCurrency = (amount: number): string => {
@@ -135,19 +111,21 @@ export default function RevenueGoalsPage() {
             target_amount: "",
             start_date: "",
             end_date: "",
+            period_type: "monthly",
         });
     };
 
     const handleAddGoal = async () => {
-        if (!formData.name || !formData.target_amount || !formData.start_date || !formData.end_date) {
+        if (!user?.id || !formData.name || !formData.target_amount || !formData.start_date || !formData.end_date) {
             return;
         }
 
         setSaving(true);
         try {
-            const newGoal = await analyticsApi.createRevenueGoal({
+            const newGoal = await analyticsApi.createRevenueGoal(user.id, {
                 name: formData.name,
                 target_amount: parseFloat(formData.target_amount),
+                period_type: formData.period_type,
                 start_date: formData.start_date,
                 end_date: formData.end_date,
             });
@@ -155,19 +133,9 @@ export default function RevenueGoalsPage() {
             setIsAddModalOpen(false);
             resetForm();
         } catch (error) {
-            // For demo, add mock goal
-            const mockGoal: RevenueGoal = {
-                id: Date.now().toString(),
-                name: formData.name,
-                target_amount: parseFloat(formData.target_amount),
-                current_amount: 0,
-                start_date: formData.start_date,
-                end_date: formData.end_date,
-                progress_percentage: 0,
-            };
-            setGoals([...goals, mockGoal]);
-            setIsAddModalOpen(false);
-            resetForm();
+            console.error("Failed to create goal:", error);
+            // Show error to user instead of creating mock data
+            alert("Failed to create goal. Please try again.");
         } finally {
             setSaving(false);
         }
@@ -183,7 +151,6 @@ export default function RevenueGoalsPage() {
             const updatedGoal = await analyticsApi.updateRevenueGoal(selectedGoal.id, {
                 name: formData.name,
                 target_amount: parseFloat(formData.target_amount),
-                start_date: formData.start_date,
                 end_date: formData.end_date,
             });
             setGoals(goals.map(g => g.id === selectedGoal.id ? updatedGoal : g));
@@ -191,17 +158,8 @@ export default function RevenueGoalsPage() {
             setSelectedGoal(null);
             resetForm();
         } catch (error) {
-            // For demo, update locally
-            setGoals(goals.map(g => g.id === selectedGoal.id ? {
-                ...g,
-                name: formData.name,
-                target_amount: parseFloat(formData.target_amount),
-                start_date: formData.start_date,
-                end_date: formData.end_date,
-            } : g));
-            setIsEditModalOpen(false);
-            setSelectedGoal(null);
-            resetForm();
+            console.error("Failed to update goal:", error);
+            alert("Failed to update goal. Please try again.");
         } finally {
             setSaving(false);
         }
@@ -217,10 +175,8 @@ export default function RevenueGoalsPage() {
             setIsDeleteModalOpen(false);
             setSelectedGoal(null);
         } catch (error) {
-            // For demo, delete locally
-            setGoals(goals.filter(g => g.id !== selectedGoal.id));
-            setIsDeleteModalOpen(false);
-            setSelectedGoal(null);
+            console.error("Failed to delete goal:", error);
+            alert("Failed to delete goal. Please try again.");
         } finally {
             setSaving(false);
         }
@@ -233,6 +189,7 @@ export default function RevenueGoalsPage() {
             target_amount: goal.target_amount.toString(),
             start_date: goal.start_date,
             end_date: goal.end_date,
+            period_type: (goal.period_type as "daily" | "weekly" | "monthly" | "yearly" | "custom") || "monthly",
         });
         setIsEditModalOpen(true);
     };

@@ -53,7 +53,7 @@ export interface AnalyticsReport {
     created_at: string
 }
 
-// ============ Revenue Types ============
+// ============ Revenue Types (matching backend schemas) ============
 export interface RevenueBreakdown {
     total: number
     ads: number
@@ -64,22 +64,85 @@ export interface RevenueBreakdown {
     youtube_premium: number
 }
 
-export interface RevenueGoal {
-    id: string
-    name: string
-    target_amount: number
-    current_amount: number
+// Backend response format for dashboard
+export interface RevenueDashboardResponse {
+    total_revenue: number
+    ad_revenue: number
+    membership_revenue: number
+    super_chat_revenue: number
+    super_sticker_revenue: number
+    merchandise_revenue: number
+    youtube_premium_revenue: number
+    revenue_change: number
+    revenue_change_percent: number
+    breakdown: {
+        ad: number
+        membership: number
+        super_chat: number
+        super_sticker: number
+        merchandise: number
+        youtube_premium: number
+        total: number
+    }
+    accounts: AccountRevenue[]
     start_date: string
     end_date: string
+    currency: string
+}
+
+export interface AccountRevenue {
+    account_id: string
+    channel_title?: string
+    total_revenue: number
+    ad_revenue: number
+    membership_revenue: number
+    super_chat_revenue: number
+    super_sticker_revenue: number
+    merchandise_revenue: number
+    youtube_premium_revenue: number
+    revenue_change: number
+    revenue_change_percent: number
+}
+
+export interface RevenueGoal {
+    id: string
+    user_id: string
+    account_id?: string
+    name: string
+    description?: string
+    target_amount: number
+    currency: string
+    period_type: string
+    start_date: string
+    end_date: string
+    current_amount: number
     progress_percentage: number
     forecast_amount?: number
     forecast_probability?: number
+    status: string
+    achieved_at?: string
+    notify_at_percentage?: number[]
+    last_notification_percentage?: number
+    created_at: string
+    updated_at: string
 }
 
 export interface RevenueTrend {
     date: string
     amount: number
     source: string
+}
+
+export interface MonthlyRevenueSummary {
+    month: number
+    year: number
+    total_revenue: number
+    ad_revenue: number
+    membership_revenue: number
+    super_chat_revenue: number
+    super_sticker_revenue: number
+    merchandise_revenue: number
+    youtube_premium_revenue: number
 }
 
 export interface TopEarningVideo {
@@ -92,16 +155,25 @@ export interface TopEarningVideo {
     published_at: string
 }
 
-export interface TaxReport {
+export interface TaxReportResponse {
     year: number
     total_revenue: number
-    total_ads: number
-    total_memberships: number
-    total_super_chat: number
-    total_merchandise: number
-    total_youtube_premium: number
-    tax_withheld: number
-    net_earnings: number
+    accounts: TaxReportSummary[]
+    generated_at: string
+    file_path?: string
+    currency: string
+}
+
+export interface TaxReportSummary {
+    account_id: string
+    channel_title?: string
+    total_revenue: number
+    ad_revenue: number
+    membership_revenue: number
+    super_chat_revenue: number
+    super_sticker_revenue: number
+    merchandise_revenue: number
+    youtube_premium_revenue: number
     currency: string
 }
 
@@ -199,13 +271,62 @@ export const analyticsApi = {
         return await apiClient.get(`/analytics/reports/${reportId}`)
     },
 
-    // ============ Revenue ============
+    // ============ Revenue (using backend /revenue endpoints) ============
+    async getRevenueDashboard(params: {
+        start_date: string
+        end_date: string
+        account_ids?: string[]
+        user_id: string
+    }): Promise<RevenueDashboardResponse> {
+        return await apiClient.post("/revenue/dashboard", {
+            start_date: params.start_date,
+            end_date: params.end_date,
+            account_ids: params.account_ids,
+        }, { params: { user_id: params.user_id } })
+    },
+
+    // Helper to convert dashboard response to simple breakdown
     async getRevenueOverview(params?: {
         account_id?: string
         period?: "7d" | "30d" | "90d" | "1y"
+        user_id?: string
     }): Promise<RevenueBreakdown> {
         try {
-            return await apiClient.get("/analytics/revenue/overview", params)
+            // Calculate date range based on period
+            const endDate = new Date()
+            const startDate = new Date()
+            switch (params?.period) {
+                case "7d":
+                    startDate.setDate(startDate.getDate() - 7)
+                    break
+                case "30d":
+                    startDate.setDate(startDate.getDate() - 30)
+                    break
+                case "90d":
+                    startDate.setDate(startDate.getDate() - 90)
+                    break
+                case "1y":
+                    startDate.setFullYear(startDate.getFullYear() - 1)
+                    break
+                default:
+                    startDate.setDate(startDate.getDate() - 30)
+            }
+
+            const response = await apiClient.post("/revenue/dashboard", {
+                start_date: startDate.toISOString().split("T")[0],
+                end_date: endDate.toISOString().split("T")[0],
+                account_ids: params?.account_id ? [params.account_id] : undefined,
+            }, { params: { user_id: params?.user_id || "current" } })
+
+            return {
+                total: response.total_revenue || 0,
+                ads: response.ad_revenue || 0,
+                memberships: response.membership_revenue || 0,
+                super_chat: response.super_chat_revenue || 0,
+                super_stickers: response.super_sticker_revenue || 0,
+                merchandise: response.merchandise_revenue || 0,
+                youtube_premium: response.youtube_premium_revenue || 0,
+            }
         } catch (error) {
             return {
                 total: 0,
@@ -219,46 +340,64 @@ export const analyticsApi = {
         }
     },
 
-    async getRevenueTrends(params?: {
-        account_id?: string
-        start_date?: string
-        end_date?: string
-    }): Promise<RevenueTrend[]> {
+    async getMonthlyBreakdown(params: {
+        year: number
+        account_ids?: string[]
+    }): Promise<MonthlyRevenueSummary[]> {
         try {
-            return await apiClient.get("/analytics/revenue/trends", params)
+            return await apiClient.get("/revenue/monthly-breakdown", {
+                year: params.year,
+                account_ids: params.account_ids,
+            })
         } catch (error) {
             return []
         }
     },
 
-    async getRevenueGoals(): Promise<RevenueGoal[]> {
+    async getRevenueGoals(userId: string, activeOnly: boolean = false): Promise<RevenueGoal[]> {
         try {
-            return await apiClient.get("/analytics/revenue/goals")
+            return await apiClient.get("/revenue/goals", {
+                user_id: userId,
+                active_only: activeOnly,
+            })
         } catch (error) {
             return []
         }
     },
 
-    async createRevenueGoal(data: {
+    async createRevenueGoal(userId: string, data: {
         name: string
+        description?: string
         target_amount: number
+        currency?: string
+        period_type: "daily" | "weekly" | "monthly" | "yearly" | "custom"
         start_date: string
         end_date: string
+        account_id?: string
+        notify_at_percentage?: number[]
     }): Promise<RevenueGoal> {
-        return await apiClient.post("/analytics/revenue/goals", data)
+        return await apiClient.post("/revenue/goals", data, {
+            params: { user_id: userId },
+        })
     },
 
     async updateRevenueGoal(goalId: string, data: Partial<{
         name: string
+        description: string
         target_amount: number
-        start_date: string
         end_date: string
+        status: string
+        notify_at_percentage: number[]
     }>): Promise<RevenueGoal> {
-        return await apiClient.patch(`/analytics/revenue/goals/${goalId}`, data)
+        return await apiClient.patch(`/revenue/goals/${goalId}`, data)
     },
 
     async deleteRevenueGoal(goalId: string): Promise<void> {
-        return await apiClient.delete(`/analytics/revenue/goals/${goalId}`)
+        return await apiClient.delete(`/revenue/goals/${goalId}`)
+    },
+
+    async refreshGoalProgress(goalId: string): Promise<RevenueGoal> {
+        return await apiClient.post(`/revenue/goals/${goalId}/refresh`)
     },
 
     async getTopEarningVideos(params?: {
@@ -267,6 +406,8 @@ export const analyticsApi = {
         limit?: number
     }): Promise<TopEarningVideo[]> {
         try {
+            // This would need a separate endpoint - for now return empty
+            // Backend doesn't have this specific endpoint yet
             return await apiClient.get("/analytics/revenue/top-videos", params)
         } catch (error) {
             return []
@@ -276,24 +417,40 @@ export const analyticsApi = {
     async getMonthlyRevenueTrends(params?: {
         account_id?: string
         year?: number
-    }): Promise<RevenueTrend[]> {
+    }): Promise<MonthlyRevenueSummary[]> {
         try {
-            return await apiClient.get("/analytics/revenue/monthly-trends", params)
+            return await apiClient.get("/revenue/monthly-breakdown", {
+                year: params?.year || new Date().getFullYear(),
+                account_ids: params?.account_id ? [params.account_id] : undefined,
+            })
         } catch (error) {
             return []
         }
     },
 
-    async getTaxReport(year: number): Promise<TaxReport | null> {
-        try {
-            return await apiClient.get(`/analytics/revenue/tax/${year}`)
-        } catch (error) {
-            return null
-        }
+    async generateTaxReport(userId: string, params: {
+        year: number
+        account_ids?: string[]
+        format?: "csv" | "pdf"
+    }): Promise<TaxReportResponse> {
+        return await apiClient.post("/revenue/tax-report", {
+            year: params.year,
+            account_ids: params.account_ids,
+            format: params.format || "csv",
+        }, { params: { user_id: userId } })
     },
 
-    async exportTaxReport(year: number, format: "pdf" | "csv"): Promise<{ download_url: string }> {
-        return await apiClient.get(`/analytics/revenue/tax/${year}/export`, { format })
+    async exportTaxReport(userId: string, params: {
+        year: number
+        account_ids?: string[]
+    }): Promise<Blob> {
+        return await apiClient.post("/revenue/tax-report/export", {
+            year: params.year,
+            account_ids: params.account_ids,
+        }, {
+            params: { user_id: userId },
+            responseType: "blob",
+        })
     },
 }
 

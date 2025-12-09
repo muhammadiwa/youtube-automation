@@ -22,12 +22,28 @@ import {
     AlertCircle,
     Loader2,
 } from "lucide-react";
-import analyticsApi, { TaxReport } from "@/lib/api/analytics";
+import analyticsApi, { TaxReportResponse } from "@/lib/api/analytics";
+import { useAuth } from "@/components/providers/auth-provider";
+
+// Local interface for display purposes (aggregated from backend response)
+interface TaxReportDisplay {
+    year: number
+    total_revenue: number
+    total_ads: number
+    total_memberships: number
+    total_super_chat: number
+    total_merchandise: number
+    total_youtube_premium: number
+    tax_withheld: number
+    net_earnings: number
+    currency: string
+}
 
 export default function TaxReportsPage() {
+    const { user } = useAuth();
     const currentYear = new Date().getFullYear();
     const [selectedYear, setSelectedYear] = useState<string>(currentYear.toString());
-    const [taxReport, setTaxReport] = useState<TaxReport | null>(null);
+    const [taxReport, setTaxReport] = useState<TaxReportDisplay | null>(null);
     const [loading, setLoading] = useState(true);
     const [exporting, setExporting] = useState(false);
 
@@ -35,37 +51,58 @@ export default function TaxReportsPage() {
     const availableYears = Array.from({ length: 5 }, (_, i) => currentYear - i);
 
     useEffect(() => {
-        loadTaxReport();
-    }, [selectedYear]);
+        if (user?.id) {
+            loadTaxReport();
+        }
+    }, [selectedYear, user]);
 
     const loadTaxReport = async () => {
+        if (!user?.id) return;
+
         setLoading(true);
         try {
-            const data = await analyticsApi.getTaxReport(parseInt(selectedYear));
-            setTaxReport(data || generateMockTaxReport(parseInt(selectedYear)));
+            const response = await analyticsApi.generateTaxReport(user.id, {
+                year: parseInt(selectedYear),
+            });
+
+            // Aggregate data from all accounts
+            const aggregated = aggregateTaxReport(response);
+            setTaxReport(aggregated);
         } catch (error) {
             console.error("Failed to load tax report:", error);
-            setTaxReport(generateMockTaxReport(parseInt(selectedYear)));
+            setTaxReport(null);
         } finally {
             setLoading(false);
         }
     };
 
-    const generateMockTaxReport = (year: number): TaxReport => {
-        const isCurrentYear = year === currentYear;
-        const multiplier = isCurrentYear ? 0.9 : 1;
+    // Aggregate tax report from multiple accounts
+    const aggregateTaxReport = (response: TaxReportResponse): TaxReportDisplay => {
+        const totals = response.accounts.reduce((acc, account) => ({
+            total_revenue: acc.total_revenue + account.total_revenue,
+            total_ads: acc.total_ads + account.ad_revenue,
+            total_memberships: acc.total_memberships + account.membership_revenue,
+            total_super_chat: acc.total_super_chat + account.super_chat_revenue,
+            total_merchandise: acc.total_merchandise + account.merchandise_revenue,
+            total_youtube_premium: acc.total_youtube_premium + account.youtube_premium_revenue,
+        }), {
+            total_revenue: 0,
+            total_ads: 0,
+            total_memberships: 0,
+            total_super_chat: 0,
+            total_merchandise: 0,
+            total_youtube_premium: 0,
+        });
+
+        // Estimate tax withheld (15% standard rate)
+        const taxWithheld = totals.total_revenue * 0.15;
 
         return {
-            year,
-            total_revenue: Math.floor(45000 * multiplier),
-            total_ads: Math.floor(32000 * multiplier),
-            total_memberships: Math.floor(5500 * multiplier),
-            total_super_chat: Math.floor(3200 * multiplier),
-            total_merchandise: Math.floor(2800 * multiplier),
-            total_youtube_premium: Math.floor(1500 * multiplier),
-            tax_withheld: Math.floor(6750 * multiplier),
-            net_earnings: Math.floor(38250 * multiplier),
-            currency: "USD",
+            year: response.year,
+            ...totals,
+            tax_withheld: taxWithheld,
+            net_earnings: totals.total_revenue - taxWithheld,
+            currency: response.currency,
         };
     };
 
@@ -78,15 +115,26 @@ export default function TaxReportsPage() {
     };
 
     const handleExport = async (format: "pdf" | "csv") => {
+        if (!user?.id) return;
+
         setExporting(true);
         try {
-            const result = await analyticsApi.exportTaxReport(parseInt(selectedYear), format);
-            if (result.download_url) {
-                window.open(result.download_url, "_blank");
-            }
+            const blob = await analyticsApi.exportTaxReport(user.id, {
+                year: parseInt(selectedYear),
+            });
+
+            // Create download link
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `tax_report_${selectedYear}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
         } catch (error) {
-            // For demo, show alert
-            alert(`Tax report for ${selectedYear} would be exported as ${format.toUpperCase()}`);
+            console.error("Failed to export tax report:", error);
+            alert("Failed to export tax report. Please try again.");
         } finally {
             setExporting(false);
         }
