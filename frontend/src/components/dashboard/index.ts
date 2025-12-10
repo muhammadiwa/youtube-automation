@@ -20,3 +20,4 @@ export {
     StrikeStatusMiniCard,
     InlineStrikeWarning,
 } from "./strike-alerts";
+export { ChannelTile } from "./channel-tile";

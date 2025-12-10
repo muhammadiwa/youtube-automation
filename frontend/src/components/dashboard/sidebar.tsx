@@ -18,6 +18,8 @@ import {
     DollarSign,
     Target,
     AlertTriangle,
+    ListTodo,
+    Monitor,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -35,6 +37,8 @@ const navigation = [
     { name: "Revenue", href: "/dashboard/revenue", icon: DollarSign },
     { name: "Competitors", href: "/dashboard/competitors", icon: Target },
     { name: "Strikes", href: "/dashboard/strikes", icon: AlertTriangle },
+    { name: "Monitoring", href: "/dashboard/monitoring", icon: Monitor },
+    { name: "Jobs", href: "/dashboard/jobs", icon: ListTodo },
     { name: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 
@@ -98,6 +102,14 @@ export function Sidebar({ className }: SidebarProps) {
         // Handle strikes routes - check if pathname starts with /dashboard/strikes
         if (href.startsWith("/dashboard/strikes")) {
             return pathname.startsWith("/dashboard/strikes");
+        }
+        // Handle jobs routes - check if pathname starts with /dashboard/jobs
+        if (href.startsWith("/dashboard/jobs")) {
+            return pathname.startsWith("/dashboard/jobs");
+        }
+        // Handle monitoring routes
+        if (href.startsWith("/dashboard/monitoring")) {
+            return pathname.startsWith("/dashboard/monitoring");
         }
         return pathname.startsWith(href);
     };
