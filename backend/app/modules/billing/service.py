@@ -22,6 +22,7 @@ from app.modules.billing.models import (
     PLAN_LIMITS,
 )
 from app.modules.billing.repository import (
+    PlanRepository,
     SubscriptionRepository,
     UsageRepository,
     InvoiceRepository,
@@ -70,6 +71,7 @@ class BillingService:
 
     def __init__(self, session: AsyncSession):
         self.session = session
+        self.plan_repo = PlanRepository(session)
         self.subscription_repo = SubscriptionRepository(session)
         self.usage_repo = UsageRepository(session)
         self.invoice_repo = InvoiceRepository(session)
@@ -95,12 +97,26 @@ class BillingService:
         )
 
     def get_all_plan_features(self) -> PlanComparisonResponse:
-        """Get features for all plan tiers for comparison."""
+        """Get features for all plan tiers for comparison (legacy method)."""
         plans = [
             self.get_plan_features(tier.value)
             for tier in PlanTier
         ]
         return PlanComparisonResponse(plans=plans)
+
+    async def get_plans_from_db(self) -> list[dict]:
+        """Get all active plans from database.
+        
+        Requirements: 28.1 - Plan tiers with feature limits
+        Returns plans in format suitable for frontend display.
+        """
+        plans = await self.plan_repo.get_all_active()
+        return [plan.to_dict() for plan in plans]
+
+    async def get_plan_by_slug(self, slug: str) -> Optional[dict]:
+        """Get a specific plan by slug."""
+        plan = await self.plan_repo.get_by_slug(slug)
+        return plan.to_dict() if plan else None
 
     async def check_feature_access(
         self,

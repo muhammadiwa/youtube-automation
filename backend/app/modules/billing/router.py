@@ -50,12 +50,23 @@ router = APIRouter(prefix="/billing", tags=["billing"])
 
 # ==================== Plan Information (28.1) ====================
 
-@router.get("/plans", response_model=PlanComparisonResponse)
+@router.get("/plans")
 async def get_all_plans(
     session: AsyncSession = Depends(get_session),
 ):
-    """Get all available plan tiers with features and limits."""
+    """Get all available plan tiers with features and limits.
+    
+    Returns plans from database if available, otherwise falls back to static config.
+    """
     service = BillingService(session)
+    
+    # Try to get plans from database first
+    plans = await service.get_plans_from_db()
+    
+    if plans:
+        return {"plans": plans}
+    
+    # Fallback to static plan features
     return service.get_all_plan_features()
 
 

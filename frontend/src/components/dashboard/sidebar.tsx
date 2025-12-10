@@ -20,6 +20,7 @@ import {
     AlertTriangle,
     ListTodo,
     Monitor,
+    Wallet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -39,6 +40,7 @@ const navigation = [
     { name: "Strikes", href: "/dashboard/strikes", icon: AlertTriangle },
     { name: "Monitoring", href: "/dashboard/monitoring", icon: Monitor },
     { name: "Jobs", href: "/dashboard/jobs", icon: ListTodo },
+    { name: "Billing", href: "/dashboard/billing", icon: Wallet },
     { name: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 
@@ -114,6 +116,10 @@ export function Sidebar({ className }: SidebarProps) {
         // Handle settings routes
         if (href.startsWith("/dashboard/settings")) {
             return pathname.startsWith("/dashboard/settings");
+        }
+        // Handle billing routes
+        if (href.startsWith("/dashboard/billing")) {
+            return pathname.startsWith("/dashboard/billing");
         }
         return pathname.startsWith(href);
     };

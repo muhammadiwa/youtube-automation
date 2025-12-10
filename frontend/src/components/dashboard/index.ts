@@ -20,3 +20,5 @@ export {
     InlineStrikeWarning,
 } from "./strike-alerts";
 export { ChannelTile } from "./channel-tile";
+export { PaymentGatewaySelector } from "./payment-gateway-selector";
+export { PaymentRetryModal } from "./payment-retry-modal";

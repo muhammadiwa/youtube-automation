@@ -457,6 +457,92 @@ class Invoice(Base):
         return f"<Invoice(id={self.id}, number={self.invoice_number}, status={self.status})>"
 
 
+class Plan(Base):
+    """Subscription plan model.
+    
+    Requirements: 28.1 - Plan tiers with feature limits
+    Stores plan information in database for dynamic management.
+    """
+
+    __tablename__ = "plans"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    
+    # Plan identification
+    slug: Mapped[str] = mapped_column(
+        String(50), nullable=False, unique=True, index=True
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Pricing (in cents for precision)
+    price_monthly: Mapped[int] = mapped_column(Integer, default=0)  # in cents
+    price_yearly: Mapped[int] = mapped_column(Integer, default=0)   # in cents
+    currency: Mapped[str] = mapped_column(String(3), default="USD")
+    
+    # Limits
+    max_accounts: Mapped[int] = mapped_column(Integer, default=1)  # -1 for unlimited
+    max_videos_per_month: Mapped[int] = mapped_column(Integer, default=5)
+    max_streams_per_month: Mapped[int] = mapped_column(Integer, default=0)
+    max_storage_gb: Mapped[int] = mapped_column(Integer, default=1)
+    max_bandwidth_gb: Mapped[int] = mapped_column(Integer, default=5)
+    ai_generations_per_month: Mapped[int] = mapped_column(Integer, default=0)
+    api_calls_per_month: Mapped[int] = mapped_column(Integer, default=1000)
+    encoding_minutes_per_month: Mapped[int] = mapped_column(Integer, default=60)
+    concurrent_streams: Mapped[int] = mapped_column(Integer, default=1)
+    
+    # Features (JSON array of feature slugs)
+    features: Mapped[list] = mapped_column(JSON, default=list)
+    
+    # Display features (JSON array of {name, included} for UI)
+    display_features: Mapped[list] = mapped_column(JSON, default=list)
+    
+    # Stripe integration
+    stripe_price_id_monthly: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    stripe_price_id_yearly: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    stripe_product_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    
+    # Status
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_popular: Mapped[bool] = mapped_column(Boolean, default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    def __repr__(self) -> str:
+        return f"<Plan(id={self.id}, slug={self.slug}, name={self.name})>"
+
+    def to_dict(self) -> dict:
+        """Convert plan to dictionary for API response."""
+        return {
+            "id": str(self.id),
+            "slug": self.slug,
+            "name": self.name,
+            "description": self.description,
+            "price_monthly": self.price_monthly / 100,  # Convert cents to dollars
+            "price_yearly": self.price_yearly / 100,
+            "currency": self.currency,
+            "features": self.display_features or [],
+            "limits": {
+                "max_accounts": self.max_accounts,
+                "max_videos_per_month": self.max_videos_per_month,
+                "max_streams_per_month": self.max_streams_per_month,
+                "max_storage_gb": self.max_storage_gb,
+                "max_bandwidth_gb": self.max_bandwidth_gb,
+                "ai_generations_per_month": self.ai_generations_per_month,
+            },
+            "is_popular": self.is_popular,
+        }
+
+
 class PaymentMethod(Base):
     """User payment method model.
     

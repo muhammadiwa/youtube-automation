@@ -16,12 +16,63 @@ from app.modules.billing.models import (
     UsageAggregate,
     Invoice,
     PaymentMethod,
+    Plan,
     PlanTier,
     SubscriptionStatus,
     UsageResourceType,
     InvoiceStatus,
     PLAN_LIMITS,
 )
+
+
+class PlanRepository:
+    """Repository for plan operations."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def get_all_active(self) -> list[Plan]:
+        """Get all active plans ordered by sort_order."""
+        result = await self.session.execute(
+            select(Plan)
+            .where(Plan.is_active == True)
+            .order_by(Plan.sort_order)
+        )
+        return list(result.scalars().all())
+
+    async def get_by_slug(self, slug: str) -> Optional[Plan]:
+        """Get plan by slug."""
+        result = await self.session.execute(
+            select(Plan).where(Plan.slug == slug)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_id(self, plan_id: uuid.UUID) -> Optional[Plan]:
+        """Get plan by ID."""
+        result = await self.session.execute(
+            select(Plan).where(Plan.id == plan_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def create(self, **kwargs) -> Plan:
+        """Create a new plan."""
+        plan = Plan(**kwargs)
+        self.session.add(plan)
+        await self.session.commit()
+        await self.session.refresh(plan)
+        return plan
+
+    async def update(self, plan_id: uuid.UUID, **kwargs) -> Optional[Plan]:
+        """Update a plan."""
+        plan = await self.get_by_id(plan_id)
+        if not plan:
+            return None
+        for key, value in kwargs.items():
+            if hasattr(plan, key):
+                setattr(plan, key, value)
+        await self.session.commit()
+        await self.session.refresh(plan)
+        return plan
 
 
 class SubscriptionRepository:

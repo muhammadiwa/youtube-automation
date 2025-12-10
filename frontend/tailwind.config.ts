@@ -94,6 +94,14 @@ const config: Config = {
 					from: { height: "var(--radix-accordion-content-height)" },
 					to: { height: "0" },
 				},
+				"border-snake": {
+					"0%, 100%": { backgroundPosition: "0% 50%" },
+					"50%": { backgroundPosition: "100% 50%" },
+				},
+				"rotate-gradient": {
+					"0%": { transform: "rotate(0deg)" },
+					"100%": { transform: "rotate(360deg)" },
+				},
 				"fade-in": {
 					from: { opacity: "0" },
 					to: { opacity: "1" },
@@ -130,6 +138,8 @@ const config: Config = {
 			animation: {
 				"accordion-down": "accordion-down 0.2s ease-out",
 				"accordion-up": "accordion-up 0.2s ease-out",
+				"border-snake": "border-snake 3s ease infinite",
+				"rotate-gradient": "rotate-gradient 3s linear infinite",
 				"fade-in": "fade-in 0.2s ease-out",
 				"fade-out": "fade-out 0.2s ease-out",
 				"slide-in-from-top": "slide-in-from-top 0.3s ease-out",
