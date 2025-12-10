@@ -34,14 +34,11 @@ export interface NotificationPreference {
     user_id: string
     event_type: NotificationType
     email_enabled: boolean
-    push_enabled: boolean
-    sms_enabled: boolean
-    slack_enabled: boolean
     telegram_enabled: boolean
 }
 
 export interface NotificationChannel {
-    type: "email" | "sms" | "slack" | "telegram"
+    type: "email" | "telegram"
     enabled: boolean
     config?: Record<string, string>
 }
@@ -118,9 +115,6 @@ export const notificationsApi = {
                 user_id: "",
                 event_type: type,
                 email_enabled: true,
-                push_enabled: true,
-                sms_enabled: false,
-                slack_enabled: false,
                 telegram_enabled: false,
             }))
         }
@@ -130,9 +124,6 @@ export const notificationsApi = {
         eventType: NotificationType,
         data: Partial<{
             email_enabled: boolean
-            push_enabled: boolean
-            sms_enabled: boolean
-            slack_enabled: boolean
             telegram_enabled: boolean
         }>
     ): Promise<NotificationPreference> {
@@ -142,9 +133,6 @@ export const notificationsApi = {
     async updateAllPreferences(
         data: Partial<{
             email_enabled: boolean
-            push_enabled: boolean
-            sms_enabled: boolean
-            slack_enabled: boolean
             telegram_enabled: boolean
         }>
     ): Promise<NotificationPreference[]> {
@@ -154,29 +142,29 @@ export const notificationsApi = {
     // ============ Channels ============
     async getChannels(): Promise<NotificationChannel[]> {
         try {
-            return await apiClient.get("/notifications/channels")
-        } catch (error) {
+            const channels = await apiClient.get<NotificationChannel[]>("/notifications/channels")
+            // Filter to only return email and telegram
+            return channels.filter(c => c.type === "email" || c.type === "telegram")
+        } catch {
             return [
                 { type: "email", enabled: true },
-                { type: "sms", enabled: false },
-                { type: "slack", enabled: false },
                 { type: "telegram", enabled: false },
             ]
         }
     },
 
     async configureChannel(
-        channelType: "email" | "sms" | "slack" | "telegram",
+        channelType: "email" | "telegram",
         config: Record<string, string>
     ): Promise<NotificationChannel> {
         return await apiClient.post(`/notifications/channels/${channelType}`, config)
     },
 
-    async testChannel(channelType: "email" | "sms" | "slack" | "telegram"): Promise<{ success: boolean; message: string }> {
+    async testChannel(channelType: "email" | "telegram"): Promise<{ success: boolean; message: string }> {
         return await apiClient.post(`/notifications/channels/${channelType}/test`)
     },
 
-    async disableChannel(channelType: "email" | "sms" | "slack" | "telegram"): Promise<void> {
+    async disableChannel(channelType: "email" | "telegram"): Promise<void> {
         return await apiClient.delete(`/notifications/channels/${channelType}`)
     },
 }

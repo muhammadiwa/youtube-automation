@@ -111,6 +111,10 @@ export function Sidebar({ className }: SidebarProps) {
         if (href.startsWith("/dashboard/monitoring")) {
             return pathname.startsWith("/dashboard/monitoring");
         }
+        // Handle settings routes
+        if (href.startsWith("/dashboard/settings")) {
+            return pathname.startsWith("/dashboard/settings");
+        }
         return pathname.startsWith(href);
     };
 

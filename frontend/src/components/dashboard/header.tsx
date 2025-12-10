@@ -16,7 +16,6 @@ import { Input } from "@/components/ui/input";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { MobileSidebar } from "./sidebar";
 import { NotificationCenter } from "./notification-center";
-import { NotificationPreferencesModal } from "./notification-preferences-modal";
 import { StrikeAlertBadge } from "./strike-alerts";
 import { useAuth } from "@/hooks/use-auth";
 import { useRouter } from "next/navigation";
@@ -29,7 +28,6 @@ interface HeaderProps {
 export function Header({ breadcrumbs }: HeaderProps) {
     const { user, logout } = useAuth();
     const router = useRouter();
-    const [preferencesOpen, setPreferencesOpen] = useState(false);
 
     const handleLogout = async () => {
         await logout();
@@ -101,7 +99,7 @@ export function Header({ breadcrumbs }: HeaderProps) {
 
                         {/* Notifications */}
                         <NotificationCenter
-                            onOpenPreferences={() => setPreferencesOpen(true)}
+                            onOpenPreferences={() => router.push("/dashboard/settings/notifications")}
                         />
 
                         {/* User Menu */}
@@ -170,11 +168,6 @@ export function Header({ breadcrumbs }: HeaderProps) {
                 </div>
             </header>
 
-            {/* Notification Preferences Modal */}
-            <NotificationPreferencesModal
-                open={preferencesOpen}
-                onOpenChange={setPreferencesOpen}
-            />
         </>
     );
 }
