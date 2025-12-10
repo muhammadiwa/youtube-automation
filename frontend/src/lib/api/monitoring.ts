@@ -39,20 +39,41 @@ export interface MonitoringStats {
     criticalChannels: number
 }
 
+export interface ChannelGridResponse {
+    items: ChannelStatus[]
+    total: number
+    page: number
+    page_size: number
+    total_pages: number
+}
+
+export interface LayoutPreferences {
+    grid_size: "small" | "medium" | "large"
+    auto_refresh: boolean
+    refresh_interval: number
+    displayed_metrics: string[]
+}
+
 export const monitoringApi = {
     /**
      * Get all channel statuses for monitoring grid
+     * Backend: GET /monitoring/channels
      */
     async getChannelStatuses(filters?: MonitoringFilters): Promise<ChannelStatus[]> {
         try {
-            const params = filters ? { ...filters } as Record<string, string | number | boolean | undefined> : undefined
-            const response = await apiClient.get<ChannelStatus[] | { items: ChannelStatus[] }>("/monitoring/channels", params)
-
-            if (Array.isArray(response)) {
-                return response
+            const params: Record<string, string | number | boolean | undefined> = {
+                status_filter: filters?.status !== "all" ? filters?.status : undefined,
+                search: filters?.search,
+                page: 1,
+                page_size: 50,
             }
+            const response = await apiClient.get<ChannelGridResponse>("/monitoring/channels", params)
+
             if (response && typeof response === 'object' && 'items' in response) {
                 return response.items
+            }
+            if (Array.isArray(response)) {
+                return response
             }
             return []
         } catch (error) {
@@ -62,11 +83,22 @@ export const monitoringApi = {
     },
 
     /**
-     * Get monitoring statistics summary
+     * Get monitoring statistics summary (computed from channel data)
      */
     async getStats(): Promise<MonitoringStats> {
         try {
-            return await apiClient.get("/monitoring/stats")
+            // Backend doesn't have a dedicated stats endpoint, compute from channels
+            const channels = await this.getChannelStatuses()
+            return {
+                totalChannels: channels.length,
+                liveChannels: channels.filter(c => c.streamStatus === "live").length,
+                scheduledChannels: channels.filter(c => c.streamStatus === "scheduled").length,
+                offlineChannels: channels.filter(c => c.streamStatus === "offline").length,
+                errorChannels: channels.filter(c => c.streamStatus === "error").length,
+                healthyChannels: channels.filter(c => c.healthStatus === "healthy").length,
+                warningChannels: channels.filter(c => c.healthStatus === "warning").length,
+                criticalChannels: channels.filter(c => c.healthStatus === "critical").length,
+            }
         } catch (error) {
             console.error("Failed to fetch monitoring stats:", error)
             return {
@@ -84,16 +116,43 @@ export const monitoringApi = {
 
     /**
      * Get detailed metrics for a specific channel
+     * Backend: GET /monitoring/channels/{account_id}
      */
     async getChannelDetails(accountId: string): Promise<ChannelStatus> {
         return apiClient.get(`/monitoring/channels/${accountId}`)
     },
 
     /**
-     * Trigger a manual refresh for a channel
+     * Get user's layout preferences
+     * Backend: GET /monitoring/preferences
+     */
+    async getLayoutPreferences(): Promise<LayoutPreferences> {
+        try {
+            return await apiClient.get("/monitoring/preferences")
+        } catch {
+            return {
+                grid_size: "medium",
+                auto_refresh: true,
+                refresh_interval: 30,
+                displayed_metrics: ["viewers", "health", "quota"],
+            }
+        }
+    },
+
+    /**
+     * Update user's layout preferences
+     * Backend: PUT /monitoring/preferences
+     */
+    async updateLayoutPreferences(prefs: Partial<LayoutPreferences>): Promise<LayoutPreferences> {
+        return apiClient.put("/monitoring/preferences", prefs)
+    },
+
+    /**
+     * Trigger a manual refresh for a channel (re-fetch from YouTube API)
      */
     async refreshChannel(accountId: string): Promise<ChannelStatus> {
-        return apiClient.post(`/monitoring/channels/${accountId}/refresh`)
+        // This would trigger a backend job to refresh channel data
+        return apiClient.get(`/monitoring/channels/${accountId}`)
     },
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { DashboardLayout } from "@/components/dashboard/dashboard-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -45,10 +45,10 @@ import {
     ChevronLeft,
     ChevronRight,
 } from "lucide-react";
-import { Job, JobType } from "@/lib/api/jobs";
+import { jobsApi, Job, JobType } from "@/lib/api/jobs";
 import { formatDistanceToNow } from "date-fns";
 
-const JOB_TYPE_LABELS: Record<JobType, string> = {
+const JOB_TYPE_LABELS: Record<string, string> = {
     video_upload: "Video Upload",
     video_transcode: "Video Transcode",
     stream_start: "Stream Start",
@@ -59,75 +59,44 @@ const JOB_TYPE_LABELS: Record<JobType, string> = {
     notification_send: "Notification Send",
 };
 
-// Mock DLQ jobs
-const mockDLQJobs: Job[] = [
-    {
-        id: "dlq-001",
-        type: "stream_start",
-        payload: { stream_id: "str-001", channel: "Gaming Channel" },
-        priority: 1,
-        attempts: 3,
-        max_attempts: 3,
-        status: "dlq",
-        error: "Connection timeout: Unable to establish RTMP connection after 3 attempts",
-        created_at: new Date(Date.now() - 86400000).toISOString(),
-        started_at: new Date(Date.now() - 86300000).toISOString(),
-    },
-    {
-        id: "dlq-002",
-        type: "analytics_sync",
-        payload: { account_id: "acc-001", date_range: "last_30_days" },
-        priority: 5,
-        attempts: 3,
-        max_attempts: 3,
-        status: "dlq",
-        error: "API rate limit exceeded: YouTube API quota exhausted for today",
-        created_at: new Date(Date.now() - 172800000).toISOString(),
-    },
-    {
-        id: "dlq-003",
-        type: "video_transcode",
-        payload: { video_id: "vid-999", resolution: "4k" },
-        priority: 2,
-        attempts: 3,
-        max_attempts: 3,
-        status: "dlq",
-        error: "FFmpeg error: Unsupported codec in source file",
-        created_at: new Date(Date.now() - 259200000).toISOString(),
-    },
-    {
-        id: "dlq-004",
-        type: "notification_send",
-        payload: { user_id: "usr-123", type: "sms", phone: "+1234567890" },
-        priority: 4,
-        attempts: 3,
-        max_attempts: 3,
-        status: "dlq",
-        error: "SMS gateway error: Invalid phone number format",
-        created_at: new Date(Date.now() - 345600000).toISOString(),
-    },
-];
-
-
 export default function DLQPage() {
-    const [jobs, setJobs] = useState<Job[]>(mockDLQJobs);
+    const [jobs, setJobs] = useState<Job[]>([]);
+    const [total, setTotal] = useState(0);
     const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
     const [selectedJob, setSelectedJob] = useState<Job | null>(null);
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true);
     const [requeueLoading, setRequeueLoading] = useState<string | null>(null);
     const [bulkRequeueLoading, setBulkRequeueLoading] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
-    const pageSize = 10;
+    const pageSize = 20;
 
-    const totalPages = Math.ceil(jobs.length / pageSize);
-    const paginatedJobs = jobs.slice(
-        (currentPage - 1) * pageSize,
-        currentPage * pageSize
-    );
+    const totalPages = Math.ceil(total / pageSize);
+
+    // Fetch DLQ jobs from API
+    const fetchDLQJobs = useCallback(async () => {
+        try {
+            const offset = (currentPage - 1) * pageSize;
+            const response = await jobsApi.getDLQJobs(pageSize, offset);
+            setJobs(response.items);
+            setTotal(response.total);
+        } catch (error) {
+            console.error("Failed to fetch DLQ jobs:", error);
+        }
+    }, [currentPage]);
+
+    // Initial load
+    useEffect(() => {
+        const loadData = async () => {
+            setLoading(true);
+            await fetchDLQJobs();
+            setLoading(false);
+        };
+        loadData();
+    }, [fetchDLQJobs]);
 
     const handleSelectAll = (checked: boolean) => {
         if (checked) {
-            setSelectedJobs(new Set(paginatedJobs.map((j) => j.id)));
+            setSelectedJobs(new Set(jobs.map((j) => j.id)));
         } else {
             setSelectedJobs(new Set());
         }
@@ -146,14 +115,15 @@ export default function DLQPage() {
     const handleRequeue = async (jobId: string) => {
         setRequeueLoading(jobId);
         try {
-            // In production: await jobsApi.requeueJob(jobId);
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-            setJobs((prev) => prev.filter((job) => job.id !== jobId));
+            await jobsApi.requeueJob(jobId);
+            await fetchDLQJobs();
             setSelectedJobs((prev) => {
                 const newSet = new Set(prev);
                 newSet.delete(jobId);
                 return newSet;
             });
+        } catch (error) {
+            console.error("Failed to requeue job:", error);
         } finally {
             setRequeueLoading(null);
         }
@@ -163,10 +133,11 @@ export default function DLQPage() {
         if (selectedJobs.size === 0) return;
         setBulkRequeueLoading(true);
         try {
-            // In production: await jobsApi.bulkRequeueJobs(Array.from(selectedJobs));
-            await new Promise((resolve) => setTimeout(resolve, 1500));
-            setJobs((prev) => prev.filter((job) => !selectedJobs.has(job.id)));
+            await jobsApi.bulkRequeueJobs(Array.from(selectedJobs));
+            await fetchDLQJobs();
             setSelectedJobs(new Set());
+        } catch (error) {
+            console.error("Failed to bulk requeue jobs:", error);
         } finally {
             setBulkRequeueLoading(false);
         }
@@ -174,12 +145,8 @@ export default function DLQPage() {
 
     const handleRefresh = async () => {
         setLoading(true);
-        try {
-            // In production: const data = await jobsApi.getDLQJobs(currentPage, pageSize);
-            await new Promise((resolve) => setTimeout(resolve, 500));
-        } finally {
-            setLoading(false);
-        }
+        await fetchDLQJobs();
+        setLoading(false);
     };
 
     return (
@@ -248,11 +215,15 @@ export default function DLQPage() {
                     <CardHeader>
                         <CardTitle className="flex items-center gap-2">
                             <Inbox className="h-5 w-5" />
-                            Failed Jobs ({jobs.length})
+                            Failed Jobs ({total})
                         </CardTitle>
                     </CardHeader>
                     <CardContent>
-                        {jobs.length === 0 ? (
+                        {loading ? (
+                            <div className="flex items-center justify-center py-12">
+                                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                            </div>
+                        ) : jobs.length === 0 ? (
                             <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
                                 <Inbox className="h-12 w-12 mb-4" />
                                 <p className="text-lg font-medium">DLQ is empty</p>
@@ -265,10 +236,7 @@ export default function DLQPage() {
                                         <TableRow>
                                             <TableHead className="w-12">
                                                 <Checkbox
-                                                    checked={
-                                                        paginatedJobs.length > 0 &&
-                                                        paginatedJobs.every((j) => selectedJobs.has(j.id))
-                                                    }
+                                                    checked={jobs.length > 0 && jobs.every((j) => selectedJobs.has(j.id))}
                                                     onCheckedChange={handleSelectAll}
                                                 />
                                             </TableHead>
@@ -281,28 +249,22 @@ export default function DLQPage() {
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {paginatedJobs.map((job) => (
+                                        {jobs.map((job) => (
                                             <TableRow key={job.id}>
                                                 <TableCell>
                                                     <Checkbox
                                                         checked={selectedJobs.has(job.id)}
-                                                        onCheckedChange={(checked) =>
-                                                            handleSelectJob(job.id, checked as boolean)
-                                                        }
+                                                        onCheckedChange={(checked) => handleSelectJob(job.id, checked as boolean)}
                                                     />
                                                 </TableCell>
                                                 <TableCell className="font-mono text-sm">
-                                                    {job.id}
+                                                    {job.id.slice(0, 8)}...
                                                 </TableCell>
                                                 <TableCell>
-                                                    <span className="text-sm">
-                                                        {JOB_TYPE_LABELS[job.type]}
-                                                    </span>
+                                                    <span className="text-sm">{JOB_TYPE_LABELS[job.type] || job.type}</span>
                                                 </TableCell>
                                                 <TableCell className="max-w-xs">
-                                                    <p className="text-sm text-red-500 truncate">
-                                                        {job.error}
-                                                    </p>
+                                                    <p className="text-sm text-red-500 truncate">{job.error}</p>
                                                 </TableCell>
                                                 <TableCell>
                                                     <Badge variant="secondary" className="bg-red-500/10 text-red-500">
@@ -311,19 +273,12 @@ export default function DLQPage() {
                                                 </TableCell>
                                                 <TableCell>
                                                     <span className="text-sm text-muted-foreground">
-                                                        {formatDistanceToNow(new Date(job.created_at), {
-                                                            addSuffix: true,
-                                                        })}
+                                                        {formatDistanceToNow(new Date(job.created_at), { addSuffix: true })}
                                                     </span>
                                                 </TableCell>
                                                 <TableCell className="text-right">
                                                     <div className="flex items-center justify-end gap-1">
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            className="h-8 w-8"
-                                                            onClick={() => setSelectedJob(job)}
-                                                        >
+                                                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSelectedJob(job)}>
                                                             <Eye className="h-4 w-4" />
                                                         </Button>
                                                         <Button
@@ -350,9 +305,7 @@ export default function DLQPage() {
                                 {totalPages > 1 && (
                                     <div className="flex items-center justify-between mt-4 pt-4 border-t">
                                         <p className="text-sm text-muted-foreground">
-                                            Showing {(currentPage - 1) * pageSize + 1} to{" "}
-                                            {Math.min(currentPage * pageSize, jobs.length)} of{" "}
-                                            {jobs.length} jobs
+                                            Page {currentPage} of {totalPages} ({total} total)
                                         </p>
                                         <div className="flex items-center gap-2">
                                             <Button
@@ -363,9 +316,7 @@ export default function DLQPage() {
                                             >
                                                 <ChevronLeft className="h-4 w-4" />
                                             </Button>
-                                            <span className="text-sm">
-                                                Page {currentPage} of {totalPages}
-                                            </span>
+                                            <span className="text-sm">Page {currentPage} of {totalPages}</span>
                                             <Button
                                                 variant="outline"
                                                 size="icon"
@@ -388,16 +339,14 @@ export default function DLQPage() {
                     <DialogContent className="max-w-lg">
                         <DialogHeader>
                             <DialogTitle>Job Error Details</DialogTitle>
-                            <DialogDescription>
-                                {selectedJob?.id}
-                            </DialogDescription>
+                            <DialogDescription>{selectedJob?.id}</DialogDescription>
                         </DialogHeader>
                         {selectedJob && (
                             <div className="space-y-4">
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
                                         <p className="text-sm text-muted-foreground">Type</p>
-                                        <p className="font-medium">{JOB_TYPE_LABELS[selectedJob.type]}</p>
+                                        <p className="font-medium">{JOB_TYPE_LABELS[selectedJob.type] || selectedJob.type}</p>
                                     </div>
                                     <div>
                                         <p className="text-sm text-muted-foreground">Priority</p>
@@ -405,15 +354,11 @@ export default function DLQPage() {
                                     </div>
                                     <div>
                                         <p className="text-sm text-muted-foreground">Attempts</p>
-                                        <p className="font-medium">
-                                            {selectedJob.attempts}/{selectedJob.max_attempts}
-                                        </p>
+                                        <p className="font-medium">{selectedJob.attempts}/{selectedJob.max_attempts}</p>
                                     </div>
                                     <div>
                                         <p className="text-sm text-muted-foreground">Created</p>
-                                        <p className="font-medium text-sm">
-                                            {new Date(selectedJob.created_at).toLocaleString()}
-                                        </p>
+                                        <p className="font-medium text-sm">{new Date(selectedJob.created_at).toLocaleString()}</p>
                                     </div>
                                 </div>
 
@@ -431,6 +376,15 @@ export default function DLQPage() {
                                     </div>
                                 </div>
 
+                                {selectedJob.error_details && (
+                                    <div>
+                                        <p className="text-sm text-muted-foreground mb-2">Error Details</p>
+                                        <pre className="bg-red-500/5 p-3 rounded-lg text-xs overflow-auto max-h-32 text-red-500">
+                                            {JSON.stringify(selectedJob.error_details, null, 2)}
+                                        </pre>
+                                    </div>
+                                )}
+
                                 <div className="flex gap-2">
                                     <Button
                                         className="flex-1 gap-2"
@@ -442,35 +396,6 @@ export default function DLQPage() {
                                         <RotateCcw className="h-4 w-4" />
                                         Reprocess Job
                                     </Button>
-                                    <AlertDialog>
-                                        <AlertDialogTrigger asChild>
-                                            <Button variant="outline" className="gap-2">
-                                                <Trash2 className="h-4 w-4" />
-                                                Delete
-                                            </Button>
-                                        </AlertDialogTrigger>
-                                        <AlertDialogContent>
-                                            <AlertDialogHeader>
-                                                <AlertDialogTitle>Delete Job?</AlertDialogTitle>
-                                                <AlertDialogDescription>
-                                                    This will permanently remove the job from the DLQ.
-                                                    This action cannot be undone.
-                                                </AlertDialogDescription>
-                                            </AlertDialogHeader>
-                                            <AlertDialogFooter>
-                                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                                <AlertDialogAction
-                                                    className="bg-red-500 hover:bg-red-600"
-                                                    onClick={() => {
-                                                        setJobs((prev) => prev.filter((j) => j.id !== selectedJob.id));
-                                                        setSelectedJob(null);
-                                                    }}
-                                                >
-                                                    Delete
-                                                </AlertDialogAction>
-                                            </AlertDialogFooter>
-                                        </AlertDialogContent>
-                                    </AlertDialog>
                                 </div>
                             </div>
                         )}
