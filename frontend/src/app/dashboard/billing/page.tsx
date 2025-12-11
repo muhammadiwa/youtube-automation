@@ -58,6 +58,8 @@ import {
     Gift,
     Star,
     CreditCard,
+    ChevronLeft,
+    ChevronRight,
 } from "lucide-react"
 import billingApi, {
     Subscription,
@@ -149,6 +151,8 @@ function BillingContent() {
     const [warnings, setWarnings] = useState<UsageWarning[]>([])
     const [invoices, setInvoices] = useState<Invoice[]>([])
     const [dateFilter, setDateFilter] = useState<string>("all")
+    const [currentPage, setCurrentPage] = useState(1)
+    const itemsPerPage = 10
 
     useEffect(() => {
         if (tabParam && ["subscription", "usage", "history"].includes(tabParam)) setActiveTab(tabParam)
@@ -226,6 +230,18 @@ function BillingContent() {
         if (dateFilter === "1y") return invoiceDate >= new Date(now.setFullYear(now.getFullYear() - 1))
         return true
     })
+
+    // Pagination logic
+    const totalPages = Math.ceil(filteredInvoices.length / itemsPerPage)
+    const paginatedInvoices = filteredInvoices.slice(
+        (currentPage - 1) * itemsPerPage,
+        currentPage * itemsPerPage
+    )
+
+    // Reset to page 1 when filter changes
+    useEffect(() => {
+        setCurrentPage(1)
+    }, [dateFilter])
 
     if (loading) {
         return (
@@ -620,7 +636,7 @@ function BillingContent() {
                                             </TableRow>
                                         </TableHeader>
                                         <TableBody>
-                                            {filteredInvoices.map((invoice) => (
+                                            {paginatedInvoices.map((invoice) => (
                                                 <TableRow key={invoice.id} className="hover:bg-muted/30">
                                                     <TableCell>
                                                         <div className="flex items-center gap-3">
@@ -654,6 +670,53 @@ function BillingContent() {
                                         </TableBody>
                                     </Table>
                                 </div>
+
+                                {/* Pagination */}
+                                {filteredInvoices.length > 0 && (
+                                    <div className="flex items-center justify-between mt-4">
+                                        <p className="text-sm text-muted-foreground">
+                                            Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, filteredInvoices.length)} of {filteredInvoices.length} transactions
+                                        </p>
+                                        <div className="flex items-center gap-2">
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                                disabled={currentPage === 1}
+                                                className="rounded-lg"
+                                            >
+                                                <ChevronLeft className="h-4 w-4 mr-1" />
+                                                Previous
+                                            </Button>
+                                            <div className="flex items-center gap-1">
+                                                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                                                    <Button
+                                                        key={page}
+                                                        variant={currentPage === page ? "default" : "outline"}
+                                                        size="sm"
+                                                        onClick={() => setCurrentPage(page)}
+                                                        className={cn(
+                                                            "w-8 h-8 p-0 rounded-lg",
+                                                            currentPage === page && "bg-primary text-primary-foreground"
+                                                        )}
+                                                    >
+                                                        {page}
+                                                    </Button>
+                                                ))}
+                                            </div>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                                disabled={currentPage === totalPages}
+                                                className="rounded-lg"
+                                            >
+                                                Next
+                                                <ChevronRight className="h-4 w-4 ml-1" />
+                                            </Button>
+                                        </div>
+                                    </div>
+                                )}
                             </CardContent>
                         </Card>
                     </TabsContent>
