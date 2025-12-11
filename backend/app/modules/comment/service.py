@@ -158,6 +158,28 @@ class CommentService:
                     break
 
             await self.session.commit()
+            
+            # Send notification if there are new comments
+            if new_comments > 0:
+                try:
+                    import logging
+                    from app.modules.notification.integration import NotificationIntegrationService
+                    from app.modules.account.repository import YouTubeAccountRepository
+                    
+                    account_repo = YouTubeAccountRepository(self.session)
+                    account = await account_repo.get_by_id(account_id)
+                    if account:
+                        notification_service = NotificationIntegrationService(self.session)
+                        await notification_service.notify_comment_received(
+                            user_id=account.user_id,
+                            video_title=f"{new_comments} new comments",
+                            comment_author="Multiple authors",
+                            comment_preview=f"You have {new_comments} new comments to review",
+                            video_id=str(account_id),
+                            requires_moderation=False,
+                        )
+                except Exception as e:
+                    logging.getLogger(__name__).error(f"Failed to send comment notification: {e}")
 
             return CommentSyncStatus(
                 account_id=account_id,

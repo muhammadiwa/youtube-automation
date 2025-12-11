@@ -150,6 +150,26 @@ def upload_video_task(self: VideoUploadTask, video_id: str) -> dict:
                 video.youtube_id = f"yt_{video_id[:8]}"  # Simulated YouTube ID
                 video.last_upload_error = None
                 await session.commit()
+                
+                # Send upload success notification
+                try:
+                    from app.modules.notification.integration import NotificationIntegrationService
+                    from app.modules.account.repository import YouTubeAccountRepository
+                    
+                    account_repo = YouTubeAccountRepository(session)
+                    account = await account_repo.get_by_id(video.account_id)
+                    if account:
+                        notification_service = NotificationIntegrationService(session)
+                        await notification_service.notify_video_uploaded(
+                            user_id=account.user_id,
+                            video_title=video.title,
+                            channel_name=account.channel_title,
+                            video_id=str(video.id),
+                            youtube_video_id=video.youtube_id,
+                        )
+                except Exception as notif_error:
+                    import logging
+                    logging.getLogger(__name__).error(f"Failed to send upload notification: {notif_error}")
 
                 return {
                     "status": "success",
@@ -161,6 +181,25 @@ def upload_video_task(self: VideoUploadTask, video_id: str) -> dict:
                 video.status = VideoStatus.FAILED.value
                 video.last_upload_error = str(e)
                 await session.commit()
+                
+                # Send upload failed notification
+                try:
+                    from app.modules.notification.integration import NotificationIntegrationService
+                    from app.modules.account.repository import YouTubeAccountRepository
+                    
+                    account_repo = YouTubeAccountRepository(session)
+                    account = await account_repo.get_by_id(video.account_id)
+                    if account:
+                        notification_service = NotificationIntegrationService(session)
+                        await notification_service.notify_video_processing_failed(
+                            user_id=account.user_id,
+                            video_title=video.title,
+                            video_id=str(video.id),
+                            error_message=str(e),
+                        )
+                except Exception as notif_error:
+                    import logging
+                    logging.getLogger(__name__).error(f"Failed to send upload failed notification: {notif_error}")
 
                 # Check if we should retry
                 attempt = self.request.retries + 1

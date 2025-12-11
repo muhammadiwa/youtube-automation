@@ -52,6 +52,10 @@ from app.modules.stream.schemas import (
 )
 from app.modules.stream.youtube_api import YouTubeLiveStreamingClient, YouTubeAPIError
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class StreamServiceError(Exception):
     """Base exception for stream service errors."""
@@ -718,6 +722,23 @@ class StreamService:
         await self.event_repository.set_status(event, LiveEventStatus.LIVE)
 
         await self.session.commit()
+        
+        # Send notification
+        try:
+            from app.modules.notification.integration import NotificationIntegrationService
+            account = await self.account_repository.get_by_id(event.account_id)
+            if account:
+                notification_service = NotificationIntegrationService(self.session)
+                await notification_service.notify_stream_started(
+                    user_id=account.user_id,
+                    stream_title=event.title,
+                    channel_name=account.channel_title,
+                    stream_id=str(event.id),
+                    youtube_url=f"https://youtube.com/watch?v={event.youtube_broadcast_id}" if event.youtube_broadcast_id else None,
+                )
+        except Exception as e:
+            logger.error(f"Failed to send stream started notification: {e}")
+        
         return session
 
     async def stop_stream(
@@ -743,13 +764,34 @@ class StreamService:
 
         # Get active session
         active_session = await self.session_repository.get_active_session(event.id)
+        duration_minutes = 0
         if active_session:
+            if active_session.started_at:
+                from datetime import datetime
+                duration_minutes = int((datetime.utcnow() - active_session.started_at).total_seconds() / 60)
             await self.session_repository.end_session(active_session, end_reason=reason)
 
         # Update event status
         await self.event_repository.set_status(event, LiveEventStatus.ENDED)
 
         await self.session.commit()
+        
+        # Send notification
+        try:
+            from app.modules.notification.integration import NotificationIntegrationService
+            account = await self.account_repository.get_by_id(event.account_id)
+            if account:
+                notification_service = NotificationIntegrationService(self.session)
+                await notification_service.notify_stream_ended(
+                    user_id=account.user_id,
+                    stream_title=event.title,
+                    channel_name=account.channel_title,
+                    stream_id=str(event.id),
+                    duration_minutes=duration_minutes,
+                    peak_viewers=active_session.peak_viewers if active_session and hasattr(active_session, 'peak_viewers') else None,
+                )
+        except Exception as e:
+            logger.error(f"Failed to send stream ended notification: {e}")
 
     async def handle_disconnection(
         self,
@@ -789,6 +831,21 @@ class StreamService:
         session.connection_status = ConnectionStatus.DISCONNECTED.value
         if error:
             session.last_error = error
+
+        # Send disconnection notification
+        try:
+            from app.modules.notification.integration import NotificationIntegrationService
+            account = await self.account_repository.get_by_id(event.account_id)
+            if account:
+                notification_service = NotificationIntegrationService(self.session)
+                await notification_service.notify_stream_disconnected(
+                    user_id=account.user_id,
+                    stream_title=event.title,
+                    channel_name=account.channel_title,
+                    stream_id=str(event.id),
+                )
+        except Exception as e:
+            logger.error(f"Failed to send stream disconnected notification: {e}")
 
         # Check if auto-restart is enabled
         if not event.enable_auto_start:

@@ -415,6 +415,115 @@ async def get_delivery_stats(
     )
 
 
+# ==================== Notification Channels ====================
+
+@router.get("/channels")
+async def get_notification_channels(
+    db: AsyncSession = Depends(get_db),
+):
+    """Get available notification channels and their status.
+    
+    Returns list of channels with their enabled status.
+    """
+    # Return available channels
+    # In production, this would check actual configuration status
+    channels = [
+        {
+            "type": "email",
+            "enabled": True,
+            "config": {}
+        },
+        {
+            "type": "telegram",
+            "enabled": False,
+            "config": {}
+        }
+    ]
+    return channels
+
+
+@router.post("/channels/{channel_type}")
+async def configure_channel(
+    channel_type: str,
+    config: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Configure a notification channel.
+    
+    Args:
+        channel_type: Type of channel (email, telegram)
+        config: Channel-specific configuration
+    """
+    # Validate channel type
+    valid_channels = ["email", "telegram", "slack", "sms"]
+    if channel_type not in valid_channels:
+        raise HTTPException(status_code=400, detail=f"Invalid channel type: {channel_type}")
+    
+    # In production, save config to database
+    # For now, return success
+    return {
+        "type": channel_type,
+        "enabled": True,
+        "config": config
+    }
+
+
+@router.post("/channels/{channel_type}/test")
+async def test_channel(
+    channel_type: str,
+    service: NotificationService = Depends(get_notification_service),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a test notification to verify channel configuration.
+    
+    Args:
+        channel_type: Type of channel to test (email, telegram)
+    """
+    from app.modules.notification.channels import (
+        EmailChannel,
+        TelegramChannel,
+    )
+    
+    # Get test recipient from request or use default
+    test_recipient = "test@example.com"
+    
+    if channel_type == "email":
+        channel = EmailChannel()
+        result = await channel.deliver(
+            recipient=test_recipient,
+            title="Test Notification",
+            message="This is a test notification from YouTube Automation Platform.",
+        )
+    elif channel_type == "telegram":
+        channel = TelegramChannel()
+        result = await channel.deliver(
+            recipient="test_chat_id",
+            title="Test Notification",
+            message="This is a test notification from YouTube Automation Platform.",
+        )
+    else:
+        return {"success": False, "message": f"Channel {channel_type} not supported for testing"}
+    
+    return {
+        "success": result.success,
+        "message": "Test notification sent!" if result.success else result.error or "Failed to send"
+    }
+
+
+@router.delete("/channels/{channel_type}")
+async def disable_channel(
+    channel_type: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Disable a notification channel.
+    
+    Args:
+        channel_type: Type of channel to disable
+    """
+    # In production, update database to disable channel
+    return {"message": f"Channel {channel_type} disabled"}
+
+
 # ==================== Batch Processing (23.3) ====================
 
 @router.post("/batches/{user_id}/process")

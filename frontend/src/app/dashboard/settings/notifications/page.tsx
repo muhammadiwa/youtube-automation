@@ -22,19 +22,39 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { apiClient } from "@/lib/api/client"
 
 type NotificationType =
+    // Stream events
     | "stream_started"
     | "stream_ended"
     | "stream_error"
+    | "stream_disconnected"
+    | "stream_reconnected"
+    // Video events
     | "upload_complete"
     | "upload_failed"
+    // Account events
     | "quota_warning"
     | "token_expiring"
+    | "token_expired"
+    // Channel events
     | "strike_detected"
+    | "strike_resolved"
     | "revenue_alert"
     | "competitor_update"
-    | "system_alert"
     | "comment_received"
     | "subscriber_milestone"
+    // System events
+    | "system_alert"
+    | "security_alert"
+    | "backup_completed"
+    | "backup_failed"
+    // Payment/Billing events
+    | "payment_success"
+    | "payment_failed"
+    | "subscription_activated"
+    | "subscription_cancelled"
+    | "subscription_expiring"
+    | "subscription_expired"
+    | "subscription_renewed"
 
 interface NotificationPreference {
     id: string
@@ -42,12 +62,6 @@ interface NotificationPreference {
     event_type: NotificationType
     email_enabled: boolean
     telegram_enabled: boolean
-}
-
-interface NotificationChannelData {
-    type: "email" | "telegram"
-    enabled: boolean
-    config?: Record<string, string>
 }
 
 interface ChannelState {
@@ -58,19 +72,40 @@ interface ChannelState {
     config?: Record<string, string>
 }
 
-const EVENT_TYPES: { type: NotificationType; label: string; description: string }[] = [
-    { type: "stream_started", label: "Stream Started", description: "When a live stream begins" },
-    { type: "stream_ended", label: "Stream Ended", description: "When a live stream ends" },
-    { type: "stream_error", label: "Stream Error", description: "When a stream encounters an error" },
-    { type: "upload_complete", label: "Upload Complete", description: "When a video upload finishes" },
-    { type: "upload_failed", label: "Upload Failed", description: "When a video upload fails" },
-    { type: "quota_warning", label: "Quota Warning", description: "When API quota is running low" },
-    { type: "token_expiring", label: "Token Expiring", description: "When OAuth token is about to expire" },
-    { type: "strike_detected", label: "Strike Detected", description: "When a strike is detected on your channel" },
-    { type: "revenue_alert", label: "Revenue Alert", description: "Significant changes in revenue" },
-    { type: "competitor_update", label: "Competitor Update", description: "When competitors publish new content" },
-    { type: "comment_received", label: "Comment Received", description: "When new comments need attention" },
-    { type: "subscriber_milestone", label: "Subscriber Milestone", description: "When you reach subscriber milestones" },
+const EVENT_TYPES: { type: NotificationType; label: string; description: string; category: string }[] = [
+    // Stream events
+    { type: "stream_started", label: "Stream Started", description: "When a live stream begins", category: "Streaming" },
+    { type: "stream_ended", label: "Stream Ended", description: "When a live stream ends", category: "Streaming" },
+    { type: "stream_error", label: "Stream Error", description: "When a stream encounters an error", category: "Streaming" },
+    { type: "stream_disconnected", label: "Stream Disconnected", description: "When a stream loses connection", category: "Streaming" },
+    { type: "stream_reconnected", label: "Stream Reconnected", description: "When a stream reconnects successfully", category: "Streaming" },
+    // Video events
+    { type: "upload_complete", label: "Upload Complete", description: "When a video upload finishes", category: "Videos" },
+    { type: "upload_failed", label: "Upload Failed", description: "When a video upload fails", category: "Videos" },
+    // Account events
+    { type: "quota_warning", label: "Quota Warning", description: "When API quota is running low", category: "Account" },
+    { type: "token_expiring", label: "Token Expiring", description: "When OAuth token is about to expire", category: "Account" },
+    { type: "token_expired", label: "Token Expired", description: "When OAuth token has expired", category: "Account" },
+    // Channel events
+    { type: "strike_detected", label: "Strike Detected", description: "When a strike is detected on your channel", category: "Channel" },
+    { type: "strike_resolved", label: "Strike Resolved", description: "When a strike is resolved", category: "Channel" },
+    { type: "revenue_alert", label: "Revenue Alert", description: "Significant changes in revenue", category: "Channel" },
+    { type: "competitor_update", label: "Competitor Update", description: "When competitors publish new content", category: "Channel" },
+    { type: "comment_received", label: "Comment Received", description: "When new comments need attention", category: "Channel" },
+    { type: "subscriber_milestone", label: "Subscriber Milestone", description: "When you reach subscriber milestones", category: "Channel" },
+    // System events
+    { type: "system_alert", label: "System Alert", description: "Important system notifications", category: "System" },
+    { type: "security_alert", label: "Security Alert", description: "Security-related notifications", category: "System" },
+    { type: "backup_completed", label: "Backup Completed", description: "When a backup completes successfully", category: "System" },
+    { type: "backup_failed", label: "Backup Failed", description: "When a backup fails", category: "System" },
+    // Billing events
+    { type: "payment_success", label: "Payment Success", description: "When a payment is completed successfully", category: "Billing" },
+    { type: "payment_failed", label: "Payment Failed", description: "When a payment fails", category: "Billing" },
+    { type: "subscription_activated", label: "Subscription Activated", description: "When your subscription is activated", category: "Billing" },
+    { type: "subscription_cancelled", label: "Subscription Cancelled", description: "When your subscription is cancelled", category: "Billing" },
+    { type: "subscription_expiring", label: "Subscription Expiring", description: "When your subscription is about to expire", category: "Billing" },
+    { type: "subscription_expired", label: "Subscription Expired", description: "When your subscription has expired", category: "Billing" },
+    { type: "subscription_renewed", label: "Subscription Renewed", description: "When your subscription is renewed", category: "Billing" },
 ]
 
 const DEFAULT_PREFERENCES: NotificationPreference[] = EVENT_TYPES.map((event, index) => ({
@@ -80,6 +115,9 @@ const DEFAULT_PREFERENCES: NotificationPreference[] = EVENT_TYPES.map((event, in
     email_enabled: true,
     telegram_enabled: false,
 }))
+
+// Group events by category for display
+const CATEGORIES = ["Streaming", "Videos", "Account", "Channel", "System", "Billing"] as const
 
 export default function NotificationSettingsPage() {
     const [channels, setChannels] = useState<ChannelState[]>([
@@ -316,20 +354,32 @@ export default function NotificationSettingsPage() {
                                 <div className="font-medium text-center flex items-center justify-center gap-2"><Mail className="h-4 w-4" /><span>Email</span></div>
                                 <div className="font-medium text-center flex items-center justify-center gap-2"><Send className="h-4 w-4" /><span>Telegram</span></div>
                             </div>
-                            {EVENT_TYPES.map((event) => {
-                                const pref = preferences.find((p) => p.event_type === event.type)
+                            {/* Group events by category */}
+                            {CATEGORIES.map((category) => {
+                                const categoryEvents = EVENT_TYPES.filter(e => e.category === category)
+                                if (categoryEvents.length === 0) return null
                                 return (
-                                    <div key={event.type} className="grid grid-cols-[1fr,100px,100px] gap-4 py-3 border-b last:border-0 hover:bg-muted/50 rounded">
-                                        <div>
-                                            <p className="font-medium">{event.label}</p>
-                                            <p className="text-sm text-muted-foreground">{event.description}</p>
+                                    <div key={category}>
+                                        <div className="py-2 px-2 bg-muted/30 rounded-md mb-2 mt-4 first:mt-0">
+                                            <p className="text-sm font-semibold text-muted-foreground">{category}</p>
                                         </div>
-                                        <div className="flex justify-center items-center">
-                                            <Switch checked={pref?.email_enabled || false} onCheckedChange={(checked) => handleTogglePreference(event.type, "email_enabled", checked)} disabled={!isChannelEnabled("email")} />
-                                        </div>
-                                        <div className="flex justify-center items-center">
-                                            <Switch checked={pref?.telegram_enabled || false} onCheckedChange={(checked) => handleTogglePreference(event.type, "telegram_enabled", checked)} disabled={!isChannelEnabled("telegram")} />
-                                        </div>
+                                        {categoryEvents.map((event) => {
+                                            const pref = preferences.find((p) => p.event_type === event.type)
+                                            return (
+                                                <div key={event.type} className="grid grid-cols-[1fr,100px,100px] gap-4 py-3 border-b last:border-0 hover:bg-muted/50 rounded">
+                                                    <div>
+                                                        <p className="font-medium">{event.label}</p>
+                                                        <p className="text-sm text-muted-foreground">{event.description}</p>
+                                                    </div>
+                                                    <div className="flex justify-center items-center">
+                                                        <Switch checked={pref?.email_enabled || false} onCheckedChange={(checked) => handleTogglePreference(event.type, "email_enabled", checked)} disabled={!isChannelEnabled("email")} />
+                                                    </div>
+                                                    <div className="flex justify-center items-center">
+                                                        <Switch checked={pref?.telegram_enabled || false} onCheckedChange={(checked) => handleTogglePreference(event.type, "telegram_enabled", checked)} disabled={!isChannelEnabled("telegram")} />
+                                                    </div>
+                                                </div>
+                                            )
+                                        })}
                                     </div>
                                 )
                             })}

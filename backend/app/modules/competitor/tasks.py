@@ -219,15 +219,30 @@ async def _send_content_notification(content_id: str):
 async def _send_notification(user_id: uuid.UUID, data: dict):
     """Send notification to user.
 
-    This is a placeholder that should integrate with the notification service.
+    Integrates with the notification service to send competitor updates.
 
     Args:
         user_id: User UUID
         data: Notification data
     """
-    # TODO: Integrate with notification service
-    # For now, just log the notification
-    print(f"Notification for user {user_id}: {data}")
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        from app.core.database import async_session_maker
+        from app.modules.notification.integration import NotificationIntegrationService
+        
+        async with async_session_maker() as session:
+            notification_service = NotificationIntegrationService(session)
+            await notification_service.notify_competitor_update(
+                user_id=user_id,
+                competitor_name=data.get("competitor_name", "Unknown"),
+                update_type=data.get("content_type", "new_content"),
+                details=data.get("title", "New content published"),
+            )
+            logger.info(f"Competitor notification sent to user {user_id}")
+    except Exception as e:
+        logger.error(f"Failed to send competitor notification: {e}")
 
 
 @celery_app.task(

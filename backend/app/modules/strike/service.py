@@ -140,6 +140,9 @@ class StrikeService:
         youtube_strike_ids = {s.strike_id for s in youtube_strikes if s.strike_id}
         local_strikes = await self.strike_repository.get_active_strikes(account_id)
         
+        import logging
+        logger = logging.getLogger(__name__)
+        
         for local_strike in local_strikes:
             if (
                 local_strike.youtube_strike_id
@@ -149,6 +152,19 @@ class StrikeService:
                     local_strike, StrikeStatus.RESOLVED
                 )
                 resolved_strikes += 1
+                
+                # Send strike resolved notification
+                try:
+                    from app.modules.notification.integration import NotificationIntegrationService
+                    notification_service = NotificationIntegrationService(self.session)
+                    await notification_service.notify_strike_resolved(
+                        user_id=account.user_id,
+                        channel_name=account.channel_title,
+                        strike_type=local_strike.strike_type,
+                        reason=local_strike.reason,
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to send strike resolved notification: {e}")
 
         # Update account strike count
         active_count = await self.strike_repository.count_active_strikes(account_id)
@@ -181,6 +197,9 @@ class StrikeService:
         Returns:
             Strike: Created strike
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         strike = await self.strike_repository.create(
             account_id=request.account_id,
             youtube_strike_id=request.youtube_strike_id,
@@ -197,6 +216,25 @@ class StrikeService:
         )
 
         await self.session.commit()
+        
+        # Send strike detected notification
+        try:
+            from app.modules.notification.integration import NotificationIntegrationService
+            account = await self.account_repository.get_by_id(request.account_id)
+            if account:
+                notification_service = NotificationIntegrationService(self.session)
+                await notification_service.notify_strike_detected(
+                    user_id=account.user_id,
+                    channel_name=account.channel_title,
+                    strike_type=request.strike_type.value,
+                    severity=request.severity.value,
+                    reason=request.reason,
+                    affected_video_title=request.affected_video_title,
+                    expires_at=request.expires_at,
+                )
+        except Exception as e:
+            logger.error(f"Failed to send strike detected notification: {e}")
+        
         return strike
 
     async def get_strike(self, strike_id: uuid.UUID) -> Optional[Strike]:

@@ -82,6 +82,21 @@ class EventType(str, Enum):
     SUBSCRIPTION_EXPIRING = "subscription.expiring"
     SUBSCRIPTION_EXPIRED = "subscription.expired"
     SUBSCRIPTION_RENEWED = "subscription.renewed"
+    
+    # Comment events
+    COMMENT_RECEIVED = "comment.received"
+    COMMENT_MODERATION_REQUIRED = "comment.moderation_required"
+    
+    # Competitor events
+    COMPETITOR_UPDATE = "competitor.update"
+    
+    # Channel events
+    SUBSCRIBER_MILESTONE = "channel.subscriber_milestone"
+    REVENUE_ALERT = "channel.revenue_alert"
+    
+    # Backup events
+    BACKUP_COMPLETED = "backup.completed"
+    BACKUP_FAILED = "backup.failed"
 
 
 class NotificationPreference(Base):

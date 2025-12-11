@@ -15,19 +15,31 @@ export interface Notification {
 }
 
 export type NotificationType =
+    // Stream events
     | "stream_started"
     | "stream_ended"
     | "stream_error"
+    | "stream_disconnected"
+    | "stream_reconnected"
+    // Video events
     | "upload_complete"
     | "upload_failed"
+    // Account events
     | "quota_warning"
     | "token_expiring"
+    | "token_expired"
+    // Channel events
     | "strike_detected"
+    | "strike_resolved"
     | "revenue_alert"
     | "competitor_update"
-    | "system_alert"
     | "comment_received"
     | "subscriber_milestone"
+    // System events
+    | "system_alert"
+    | "security_alert"
+    | "backup_completed"
+    | "backup_failed"
     // Payment/Billing notifications
     | "payment_success"
     | "payment_failed"
@@ -104,19 +116,32 @@ export const notificationsApi = {
         } catch (error) {
             // Return default preferences
             const defaultTypes: NotificationType[] = [
+                // Stream events
                 "stream_started",
                 "stream_ended",
                 "stream_error",
+                "stream_disconnected",
+                "stream_reconnected",
+                // Video events
                 "upload_complete",
                 "upload_failed",
+                // Account events
                 "quota_warning",
                 "token_expiring",
+                "token_expired",
+                // Channel events
                 "strike_detected",
+                "strike_resolved",
                 "revenue_alert",
                 "competitor_update",
-                "system_alert",
                 "comment_received",
                 "subscriber_milestone",
+                // System events
+                "system_alert",
+                "security_alert",
+                "backup_completed",
+                "backup_failed",
+                // Billing events
                 "payment_success",
                 "payment_failed",
                 "subscription_activated",

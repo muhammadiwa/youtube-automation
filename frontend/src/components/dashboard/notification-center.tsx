@@ -26,9 +26,20 @@ interface Notification {
 
 // Map API notification type to UI type
 const mapNotificationType = (apiType: string): "info" | "success" | "warning" | "error" => {
-    const successTypes = ["payment_success", "subscription_activated", "subscription_renewed", "upload_complete", "stream_started"];
-    const warningTypes = ["quota_warning", "token_expiring", "subscription_expiring", "subscription_cancelled"];
-    const errorTypes = ["payment_failed", "stream_error", "upload_failed", "strike_detected", "subscription_expired"];
+    const successTypes = [
+        "payment_success", "subscription_activated", "subscription_renewed",
+        "upload_complete", "stream_started", "stream_reconnected",
+        "strike_resolved", "backup_completed", "subscriber_milestone"
+    ];
+    const warningTypes = [
+        "quota_warning", "token_expiring", "subscription_expiring",
+        "subscription_cancelled", "stream_disconnected", "competitor_update"
+    ];
+    const errorTypes = [
+        "payment_failed", "stream_error", "upload_failed", "strike_detected",
+        "subscription_expired", "token_expired", "backup_failed",
+        "system_alert", "security_alert"
+    ];
 
     if (successTypes.includes(apiType)) return "success";
     if (warningTypes.includes(apiType)) return "warning";
