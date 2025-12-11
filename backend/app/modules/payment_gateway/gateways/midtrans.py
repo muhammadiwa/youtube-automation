@@ -82,6 +82,10 @@ class MidtransGateway(PaymentGatewayInterface):
             Response JSON
         """
         async with httpx.AsyncClient() as client:
+            logger.info(f"Midtrans request: {method} {url}")
+            if data:
+                logger.info(f"Midtrans request data: {data}")
+            
             response = await client.request(
                 method=method,
                 url=url,
@@ -92,7 +96,15 @@ class MidtransGateway(PaymentGatewayInterface):
                 },
                 json=data,
             )
-            response.raise_for_status()
+            
+            logger.info(f"Midtrans response status: {response.status_code}")
+            logger.info(f"Midtrans response body: {response.text}")
+            
+            if response.status_code >= 400:
+                error_detail = response.text
+                logger.error(f"Midtrans API error: {response.status_code} - {error_detail}")
+                raise Exception(f"Midtrans API error: {response.status_code} - {error_detail}")
+            
             return response.json() if response.content else {}
     
     async def create_payment(self, data: CreatePaymentDTO) -> PaymentResult:
@@ -105,11 +117,18 @@ class MidtransGateway(PaymentGatewayInterface):
             PaymentResult with snap token and redirect URL
         """
         try:
+            logger.info(f"Creating Midtrans payment: order_id={data.order_id}, amount={data.amount}, currency={data.currency}")
+            
+            # Validate amount - Midtrans requires minimum 10000 IDR
+            amount_idr = int(data.amount)
+            if amount_idr < 10000:
+                raise ValueError(f"Amount {amount_idr} IDR is below minimum 10000 IDR")
+            
             # Build transaction details
             transaction_data = {
                 "transaction_details": {
                     "order_id": data.order_id,
-                    "gross_amount": int(data.amount),  # Midtrans uses integer for IDR
+                    "gross_amount": amount_idr,  # Midtrans uses integer for IDR
                 },
                 "customer_details": {},
             }
@@ -128,11 +147,13 @@ class MidtransGateway(PaymentGatewayInterface):
             else:
                 transaction_data["enabled_payments"] = self.SUPPORTED_METHODS
             
-            # Add callbacks
+            # Add callbacks with order_id for verification
             if data.success_url or data.cancel_url:
                 transaction_data["callbacks"] = {}
                 if data.success_url:
-                    transaction_data["callbacks"]["finish"] = data.success_url
+                    separator = "&" if "?" in data.success_url else "?"
+                    finish_url = f"{data.success_url}{separator}order_id={data.order_id}"
+                    transaction_data["callbacks"]["finish"] = finish_url
             
             # Add metadata
             if data.metadata:
@@ -157,7 +178,9 @@ class MidtransGateway(PaymentGatewayInterface):
             )
             
         except Exception as e:
+            import traceback
             logger.error(f"Midtrans create_payment error: {e}")
+            logger.error(f"Midtrans create_payment traceback: {traceback.format_exc()}")
             return PaymentResult(
                 payment_id=data.order_id,
                 status=PaymentStatus.FAILED.value,

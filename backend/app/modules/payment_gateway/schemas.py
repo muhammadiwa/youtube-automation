@@ -100,6 +100,7 @@ class GatewayPublicInfo(BaseModel):
     supported_payment_methods: list[str]
     min_amount: float
     max_amount: Optional[float]
+    is_default: bool = False
 
 
 # ==================== Payment Transaction Schemas ====================
@@ -124,6 +125,7 @@ class PaymentResponse(BaseModel):
     checkout_url: Optional[str] = None
     snap_token: Optional[str] = None
     client_secret: Optional[str] = None
+    error_message: Optional[str] = None
 
 
 class PaymentStatusResponse(BaseModel):

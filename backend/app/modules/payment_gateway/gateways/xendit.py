@@ -104,9 +104,12 @@ class XenditGateway(PaymentGatewayInterface):
             if data.customer_name:
                 invoice_data["customer"] = {"given_names": data.customer_name}
             
-            # Add callbacks
+            # Note: Xendit will append invoice_id to success URL automatically
+            # But we also add external_id (our order_id) for backup
             if data.success_url:
-                invoice_data["success_redirect_url"] = data.success_url
+                separator = "&" if "?" in data.success_url else "?"
+                success_url = f"{data.success_url}{separator}external_id={data.order_id}"
+                invoice_data["success_redirect_url"] = success_url
             if data.cancel_url:
                 invoice_data["failure_redirect_url"] = data.cancel_url
             

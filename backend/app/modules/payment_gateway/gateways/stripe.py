@@ -101,12 +101,18 @@ class StripeGateway(PaymentGatewayInterface):
                 "quantity": 1,
             }]
             
+            # Add session_id placeholder to success URL for verification
+            success_url = data.success_url
+            if success_url:
+                separator = "&" if "?" in success_url else "?"
+                success_url = f"{success_url}{separator}session_id={{CHECKOUT_SESSION_ID}}"
+            
             # Build session parameters
             session_params = {
                 "payment_method_types": data.payment_methods or ["card"],
                 "line_items": line_items,
                 "mode": "payment",
-                "success_url": data.success_url,
+                "success_url": success_url,
                 "cancel_url": data.cancel_url,
                 "client_reference_id": data.order_id,
             }

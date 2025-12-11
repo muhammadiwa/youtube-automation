@@ -485,17 +485,25 @@ async def initialize_default_gateways(
 
 @payment_router.get("/gateways", response_model=list[GatewayPublicInfo])
 async def list_available_gateways(
-    currency: str = "USD",
+    currency: Optional[str] = None,
     session: AsyncSession = Depends(get_session),
 ):
-    """List available payment gateways for a currency.
+    """List available payment gateways.
     
     Requirements: 30.3 - Display only enabled payment gateways
+    
+    Args:
+        currency: Optional currency filter. If not provided, returns all enabled gateways.
     
     Returns public information about enabled gateways.
     """
     service = PaymentService(session)
-    configs = await service.get_available_gateways(currency)
+    
+    if currency:
+        configs = await service.get_available_gateways(currency)
+    else:
+        # Get all enabled gateways
+        configs = await service.gateway_manager.get_enabled_gateways()
     
     return [
         GatewayPublicInfo(
@@ -505,6 +513,7 @@ async def list_available_gateways(
             supported_payment_methods=c.supported_payment_methods,
             min_amount=c.min_amount,
             max_amount=c.max_amount,
+            is_default=c.is_default,
         )
         for c in configs
     ]
@@ -522,6 +531,10 @@ async def create_payment(
     
     Creates a payment transaction and processes it through the selected gateway.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Creating payment: user_id={user_id}, amount={data.amount}, currency={data.currency}, gateway={data.preferred_gateway}")
+    
     service = PaymentService(session)
     
     try:
@@ -547,6 +560,7 @@ async def create_payment(
             gateway_provider=transaction.gateway_provider,
             status=transaction.status,
             checkout_url=transaction.checkout_url,
+            error_message=transaction.error_message,
         )
     except ValueError as e:
         raise HTTPException(
@@ -560,6 +574,74 @@ from pydantic import BaseModel
 
 class PayPalVerifyRequest(BaseModel):
     order_id: str
+
+
+class CurrencyConversionResponse(BaseModel):
+    from_currency: str
+    to_currency: str
+    amount: float
+    converted_amount: float
+    exchange_rate: float
+
+
+# ==================== Currency Conversion ====================
+
+@payment_router.get("/currency/convert")
+async def convert_currency_endpoint(
+    amount: float,
+    from_currency: str = "USD",
+    to_currency: str = "IDR",
+):
+    """Convert amount between currencies.
+    
+    Useful for displaying prices in local currency when using gateways
+    that only support specific currencies (e.g., Midtrans for IDR).
+    
+    Args:
+        amount: Amount to convert
+        from_currency: Source currency (default: USD)
+        to_currency: Target currency (default: IDR)
+        
+    Returns:
+        Converted amount and exchange rate
+    """
+    from app.modules.payment_gateway.currency import convert_currency, get_exchange_rate
+    
+    rate = await get_exchange_rate(from_currency.upper(), to_currency.upper())
+    converted = await convert_currency(amount, from_currency.upper(), to_currency.upper())
+    
+    return CurrencyConversionResponse(
+        from_currency=from_currency.upper(),
+        to_currency=to_currency.upper(),
+        amount=amount,
+        converted_amount=converted,
+        exchange_rate=rate,
+    )
+
+
+@payment_router.get("/currency/rate")
+async def get_exchange_rate_endpoint(
+    from_currency: str = "USD",
+    to_currency: str = "IDR",
+):
+    """Get exchange rate between currencies.
+    
+    Args:
+        from_currency: Source currency (default: USD)
+        to_currency: Target currency (default: IDR)
+        
+    Returns:
+        Exchange rate
+    """
+    from app.modules.payment_gateway.currency import get_exchange_rate
+    
+    rate = await get_exchange_rate(from_currency.upper(), to_currency.upper())
+    
+    return {
+        "from_currency": from_currency.upper(),
+        "to_currency": to_currency.upper(),
+        "rate": rate,
+    }
 
 
 # ==================== IMPORTANT: Specific routes MUST be defined BEFORE parameterized routes ====================
@@ -619,6 +701,137 @@ async def verify_paypal_payment(
     
     try:
         transaction = await service.verify_paypal_by_order_id(data.order_id)
+        await session.commit()
+        
+        return PaymentTransactionResponse(
+            id=transaction.id,
+            user_id=transaction.user_id,
+            subscription_id=transaction.subscription_id,
+            gateway_provider=transaction.gateway_provider,
+            gateway_payment_id=transaction.gateway_payment_id,
+            amount=transaction.amount,
+            currency=transaction.currency,
+            status=transaction.status,
+            payment_method=transaction.payment_method,
+            description=transaction.description,
+            error_message=transaction.error_message,
+            attempt_count=transaction.attempt_count,
+            created_at=transaction.created_at,
+            completed_at=transaction.completed_at,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+class StripeVerifyRequest(BaseModel):
+    session_id: str
+
+
+@payment_router.post("/stripe/verify", response_model=PaymentTransactionResponse)
+async def verify_stripe_payment(
+    data: StripeVerifyRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Verify Stripe payment by session ID.
+    
+    This endpoint is called when user returns from Stripe Checkout.
+    Stripe redirects with session_id in the success URL.
+    """
+    service = PaymentService(session)
+    
+    try:
+        transaction = await service.verify_by_gateway_id(data.session_id)
+        await session.commit()
+        
+        return PaymentTransactionResponse(
+            id=transaction.id,
+            user_id=transaction.user_id,
+            subscription_id=transaction.subscription_id,
+            gateway_provider=transaction.gateway_provider,
+            gateway_payment_id=transaction.gateway_payment_id,
+            amount=transaction.amount,
+            currency=transaction.currency,
+            status=transaction.status,
+            payment_method=transaction.payment_method,
+            description=transaction.description,
+            error_message=transaction.error_message,
+            attempt_count=transaction.attempt_count,
+            created_at=transaction.created_at,
+            completed_at=transaction.completed_at,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+class MidtransVerifyRequest(BaseModel):
+    order_id: str
+
+
+@payment_router.post("/midtrans/verify", response_model=PaymentTransactionResponse)
+async def verify_midtrans_payment(
+    data: MidtransVerifyRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Verify Midtrans payment by order ID.
+    
+    This endpoint is called when user returns from Midtrans Snap.
+    Midtrans redirects with order_id in the finish URL.
+    """
+    service = PaymentService(session)
+    
+    try:
+        # For Midtrans, order_id is our transaction ID
+        transaction_id = uuid.UUID(data.order_id)
+        transaction = await service.verify_payment(transaction_id)
+        await session.commit()
+        
+        return PaymentTransactionResponse(
+            id=transaction.id,
+            user_id=transaction.user_id,
+            subscription_id=transaction.subscription_id,
+            gateway_provider=transaction.gateway_provider,
+            gateway_payment_id=transaction.gateway_payment_id,
+            amount=transaction.amount,
+            currency=transaction.currency,
+            status=transaction.status,
+            payment_method=transaction.payment_method,
+            description=transaction.description,
+            error_message=transaction.error_message,
+            attempt_count=transaction.attempt_count,
+            created_at=transaction.created_at,
+            completed_at=transaction.completed_at,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+class XenditVerifyRequest(BaseModel):
+    invoice_id: str
+
+
+@payment_router.post("/xendit/verify", response_model=PaymentTransactionResponse)
+async def verify_xendit_payment(
+    data: XenditVerifyRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Verify Xendit payment by invoice ID.
+    
+    This endpoint is called when user returns from Xendit Invoice.
+    Xendit redirects with invoice_id in the success URL.
+    """
+    service = PaymentService(session)
+    
+    try:
+        transaction = await service.verify_by_gateway_id(data.invoice_id)
         await session.commit()
         
         return PaymentTransactionResponse(

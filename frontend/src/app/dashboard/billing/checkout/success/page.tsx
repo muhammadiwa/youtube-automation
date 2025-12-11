@@ -15,10 +15,21 @@ function SuccessContent() {
 
     // Our payment_id from redirect
     const paymentId = searchParams.get("payment_id")
+
     // PayPal returns with 'token' parameter (which is the order ID)
     const paypalToken = searchParams.get("token")
     // PayPal also returns PayerID when approved
     const paypalPayerId = searchParams.get("PayerID")
+
+    // Stripe returns with session_id
+    const stripeSessionId = searchParams.get("session_id")
+
+    // Midtrans returns with order_id and transaction_status
+    const midtransOrderId = searchParams.get("order_id")
+    const midtransStatus = searchParams.get("transaction_status")
+
+    // Xendit returns with invoice_id, id, or external_id
+    const xenditInvoiceId = searchParams.get("invoice_id") || searchParams.get("id") || searchParams.get("external_id")
 
     const plan = searchParams.get("plan")
     const cycle = searchParams.get("cycle")
@@ -26,12 +37,26 @@ function SuccessContent() {
     const [verifying, setVerifying] = useState(false)
     const [verified, setVerified] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const [gatewayUsed, setGatewayUsed] = useState<string | null>(null)
 
     useEffect(() => {
-        // PayPal returns with token parameter - we need to find our transaction
+        // Determine which gateway was used and verify accordingly
         if (paypalToken && paypalPayerId) {
             // PayPal approved - verify and capture
+            setGatewayUsed("paypal")
             verifyPayPalPayment(paypalToken)
+        } else if (stripeSessionId) {
+            // Stripe checkout completed
+            setGatewayUsed("stripe")
+            verifyStripePayment(stripeSessionId)
+        } else if (midtransOrderId) {
+            // Midtrans payment completed
+            setGatewayUsed("midtrans")
+            verifyMidtransPayment(midtransOrderId)
+        } else if (xenditInvoiceId) {
+            // Xendit payment completed
+            setGatewayUsed("xendit")
+            verifyXenditPayment(xenditInvoiceId)
         } else if (paymentId) {
             // Direct payment_id - verify normally
             verifyPayment(paymentId)
@@ -39,7 +64,7 @@ function SuccessContent() {
             // No payment_id means direct success (mock mode or already verified)
             setVerified(true)
         }
-    }, [paymentId, paypalToken, paypalPayerId])
+    }, [paymentId, paypalToken, paypalPayerId, stripeSessionId, midtransOrderId, xenditInvoiceId])
 
     const verifyPayment = async (transactionId: string) => {
         setVerifying(true)
@@ -77,13 +102,11 @@ function SuccessContent() {
         setError(null)
 
         try {
-            // For PayPal, we need to find the transaction by PayPal order ID and verify/capture it
             const result = await billingApi.verifyPayPalPayment(paypalOrderId)
 
             if (result.status === "completed") {
                 setVerified(true)
             } else if (result.status === "pending") {
-                // Still processing
                 setVerified(true)
             } else if (result.status === "failed") {
                 setError("Payment capture failed. Please contact support.")
@@ -92,8 +115,93 @@ function SuccessContent() {
             }
         } catch (err: any) {
             console.error("PayPal verification error:", err)
-            // If verification fails, redirect to failed page
             router.push(`/dashboard/billing/checkout/failed?plan=${plan}&reason=verification_failed`)
+        } finally {
+            setVerifying(false)
+        }
+    }
+
+    const verifyStripePayment = async (sessionId: string) => {
+        setVerifying(true)
+        setError(null)
+
+        try {
+            const result = await billingApi.verifyStripePayment(sessionId)
+
+            if (result.status === "completed") {
+                setVerified(true)
+            } else if (result.status === "pending") {
+                setVerified(true)
+            } else if (result.status === "failed") {
+                setError("Payment verification failed. Please contact support.")
+            } else {
+                setVerified(true)
+            }
+        } catch (err: any) {
+            console.error("Stripe verification error:", err)
+            // For Stripe, if verification fails, still show success (webhook will handle it)
+            setVerified(true)
+        } finally {
+            setVerifying(false)
+        }
+    }
+
+    const verifyMidtransPayment = async (orderId: string) => {
+        setVerifying(true)
+        setError(null)
+
+        try {
+            const result = await billingApi.verifyMidtransPayment(orderId)
+
+            if (result.status === "completed") {
+                setVerified(true)
+            } else if (result.status === "pending") {
+                // Midtrans might still be processing
+                setVerified(true)
+            } else if (result.status === "failed") {
+                setError("Payment verification failed. Please contact support.")
+            } else {
+                setVerified(true)
+            }
+        } catch (err: any) {
+            console.error("Midtrans verification error:", err)
+            // For Midtrans, if verification fails, still show success (notification will handle it)
+            setVerified(true)
+        } finally {
+            setVerifying(false)
+        }
+    }
+
+    const verifyXenditPayment = async (invoiceIdOrExternalId: string) => {
+        setVerifying(true)
+        setError(null)
+
+        try {
+            // Check if it's a UUID (external_id = our transaction ID) or Xendit invoice ID
+            const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invoiceIdOrExternalId)
+
+            let result
+            if (isUUID) {
+                // It's our transaction ID, use generic verify
+                result = await billingApi.verifyPayment(invoiceIdOrExternalId)
+            } else {
+                // It's Xendit invoice ID
+                result = await billingApi.verifyXenditPayment(invoiceIdOrExternalId)
+            }
+
+            if (result.status === "completed") {
+                setVerified(true)
+            } else if (result.status === "pending") {
+                setVerified(true)
+            } else if (result.status === "failed") {
+                setError("Payment verification failed. Please contact support.")
+            } else {
+                setVerified(true)
+            }
+        } catch (err: any) {
+            console.error("Xendit verification error:", err)
+            // For Xendit, if verification fails, still show success (callback will handle it)
+            setVerified(true)
         } finally {
             setVerifying(false)
         }
@@ -150,6 +258,12 @@ function SuccessContent() {
                                 <Button onClick={() => {
                                     if (paypalToken && paypalPayerId) {
                                         verifyPayPalPayment(paypalToken)
+                                    } else if (stripeSessionId) {
+                                        verifyStripePayment(stripeSessionId)
+                                    } else if (midtransOrderId) {
+                                        verifyMidtransPayment(midtransOrderId)
+                                    } else if (xenditInvoiceId) {
+                                        verifyXenditPayment(xenditInvoiceId)
                                     } else if (paymentId) {
                                         verifyPayment(paymentId)
                                     }

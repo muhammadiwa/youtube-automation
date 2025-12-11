@@ -93,6 +93,8 @@ function CheckoutContent() {
     const [loading, setLoading] = useState(true)
     const [processing, setProcessing] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const [convertedPrice, setConvertedPrice] = useState<{ amount: number; currency: string; rate: number } | null>(null)
+    const [convertingCurrency, setConvertingCurrency] = useState(false)
 
     // Ensure user ID is set in apiClient when user is available
     useEffect(() => {
@@ -118,7 +120,7 @@ function CheckoutContent() {
         try {
             const [plans, gatewayList] = await Promise.all([
                 billingApi.getPlans(),
-                billingApi.getEnabledGateways("USD"),
+                billingApi.getEnabledGateways(), // Get all enabled gateways, no currency filter
             ])
 
             console.log("Loaded plans:", plans)
@@ -134,7 +136,8 @@ function CheckoutContent() {
 
             setGateways(gatewayList)
             if (gatewayList.length > 0 && !selectedGateway) {
-                const defaultGateway = gatewayList.find(g => g.provider === "stripe") || gatewayList[0]
+                // Find default gateway first, then fallback to first gateway
+                const defaultGateway = gatewayList.find(g => g.is_default) || gatewayList[0]
                 setSelectedGateway(defaultGateway.provider)
             }
         } catch (error) {
@@ -144,6 +147,44 @@ function CheckoutContent() {
             setLoading(false)
         }
     }
+
+    // Convert currency when gateway changes (for gateways that don't support USD)
+    useEffect(() => {
+        const convertPrice = async () => {
+            if (!plan || !selectedGateway) return
+
+            const gateway = gateways.find(g => g.provider === selectedGateway)
+            if (!gateway) return
+
+            // Check if gateway supports USD
+            const supportsUSD = gateway.supported_currencies.includes("USD")
+
+            if (!supportsUSD && gateway.supported_currencies.length > 0) {
+                // Need to convert to gateway's currency
+                const targetCurrency = gateway.supported_currencies[0] // Use first supported currency
+                const price = cycle === "monthly" ? plan.price_monthly : plan.price_yearly
+
+                setConvertingCurrency(true)
+                try {
+                    const result = await billingApi.convertCurrency(price, "USD", targetCurrency)
+                    setConvertedPrice({
+                        amount: result.converted_amount,
+                        currency: targetCurrency,
+                        rate: result.exchange_rate,
+                    })
+                } catch (err) {
+                    console.error("Currency conversion failed:", err)
+                    setConvertedPrice(null)
+                } finally {
+                    setConvertingCurrency(false)
+                }
+            } else {
+                setConvertedPrice(null)
+            }
+        }
+
+        convertPrice()
+    }, [selectedGateway, plan, cycle, gateways])
 
     const handleCheckout = async () => {
         if (!plan || !selectedGateway || !agreeTerms) return
@@ -161,14 +202,33 @@ function CheckoutContent() {
         setError(null)
 
         try {
-            const price = cycle === "monthly" ? plan.price_monthly : plan.price_yearly
+            const basePrice = cycle === "monthly" ? plan.price_monthly : plan.price_yearly
             const baseUrl = window.location.origin
+
+            // Determine amount and currency based on gateway support
+            // If gateway doesn't support USD and we have converted price, use that
+            let paymentAmount = basePrice
+            let paymentCurrency = "USD"
+
+            if (convertedPrice) {
+                paymentAmount = convertedPrice.amount
+                paymentCurrency = convertedPrice.currency
+            }
+
+            // Debug logging
+            console.log("Creating payment:", {
+                amount: paymentAmount,
+                currency: paymentCurrency,
+                gateway: selectedGateway,
+                convertedPrice,
+                userId: user.id,
+            })
 
             // Note: For PayPal, the success_url will have additional params added by PayPal (token, PayerID)
             // We include plan and cycle for display purposes
             const session = await billingApi.createPayment({
-                amount: price,
-                currency: "USD",
+                amount: paymentAmount,
+                currency: paymentCurrency,
                 description: `${plan.name} Plan - ${cycle} subscription`,
                 preferred_gateway: selectedGateway,
                 success_url: `${baseUrl}/dashboard/billing/checkout/success?plan=${plan.slug}&cycle=${cycle}`,
@@ -177,12 +237,14 @@ function CheckoutContent() {
                     plan_id: plan.id,
                     plan_slug: plan.slug,
                     billing_cycle: cycle,
+                    original_amount_usd: basePrice, // Store original USD amount for reference
                 },
             })
 
             // Check if payment failed
             if (session.status === "failed") {
-                setError("Payment processing failed. Please try a different payment method or contact support.")
+                const errorMsg = session.error_message || "Payment processing failed. Please try a different payment method or contact support."
+                setError(errorMsg)
                 setProcessing(false)
                 return
             }
@@ -205,10 +267,12 @@ function CheckoutContent() {
         }
     }
 
-    const formatPrice = (price: number) => {
-        return new Intl.NumberFormat("en-US", {
+    const formatPrice = (price: number, currency: string = "USD") => {
+        return new Intl.NumberFormat(currency === "IDR" ? "id-ID" : "en-US", {
             style: "currency",
-            currency: "USD",
+            currency: currency,
+            minimumFractionDigits: currency === "IDR" ? 0 : 2,
+            maximumFractionDigits: currency === "IDR" ? 0 : 2,
         }).format(price)
     }
 
@@ -482,6 +546,29 @@ function CheckoutContent() {
                                     <span>{formatPrice(price)}</span>
                                 </div>
 
+                                {/* Show converted price for non-USD gateways */}
+                                {convertingCurrency && (
+                                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        <span>Converting currency...</span>
+                                    </div>
+                                )}
+                                {convertedPrice && !convertingCurrency && (
+                                    <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                                        <div className="flex items-center justify-between text-sm">
+                                            <span className="text-amber-600 dark:text-amber-400">
+                                                Charged in {convertedPrice.currency}
+                                            </span>
+                                            <span className="font-semibold text-amber-600 dark:text-amber-400">
+                                                {formatPrice(convertedPrice.amount, convertedPrice.currency)}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground mt-1">
+                                            Rate: 1 USD = {convertedPrice.rate.toLocaleString()} {convertedPrice.currency}
+                                        </p>
+                                    </div>
+                                )}
+
                                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                     <Clock className="h-4 w-4" />
                                     <span>
@@ -528,7 +615,7 @@ function CheckoutContent() {
                                         "hover:opacity-90"
                                     )}
                                     size="lg"
-                                    disabled={!selectedGateway || processing || gateways.length === 0 || !agreeTerms}
+                                    disabled={!selectedGateway || processing || convertingCurrency || gateways.length === 0 || !agreeTerms}
                                     onClick={handleCheckout}
                                 >
                                     {processing ? (
@@ -536,10 +623,17 @@ function CheckoutContent() {
                                             <Loader2 className="h-5 w-5 mr-2 animate-spin" />
                                             Processing...
                                         </>
+                                    ) : convertingCurrency ? (
+                                        <>
+                                            <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                                            Converting...
+                                        </>
                                     ) : (
                                         <>
                                             <Lock className="h-5 w-5 mr-2" />
-                                            Pay {formatPrice(price)}
+                                            Pay {convertedPrice
+                                                ? formatPrice(convertedPrice.amount, convertedPrice.currency)
+                                                : formatPrice(price)}
                                         </>
                                     )}
                                 </Button>

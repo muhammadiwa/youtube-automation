@@ -28,6 +28,7 @@ export interface GatewayPublicInfo {
     supported_payment_methods: string[]
     min_amount: number
     max_amount?: number
+    is_default?: boolean
 }
 
 export interface GatewayStatistics {
@@ -56,6 +57,7 @@ export interface CheckoutSession {
     checkout_url?: string
     gateway_provider: GatewayProvider
     status: "pending" | "completed" | "failed" | "cancelled"
+    error_message?: string
 }
 
 export interface PaymentResult {
@@ -367,14 +369,41 @@ export const billingApi = {
     },
 
     // ============ Payment Gateways (Public) ============
-    async getEnabledGateways(currency: string = "USD"): Promise<GatewayPublicInfo[]> {
+    async getEnabledGateways(currency?: string): Promise<GatewayPublicInfo[]> {
         try {
-            const response = await apiClient.get<GatewayPublicInfo[]>("/payments/gateways", { currency })
+            const params = currency ? { currency } : {}
+            const response = await apiClient.get<GatewayPublicInfo[]>("/payments/gateways", params)
             return response || []
         } catch (error) {
             console.error("Failed to fetch gateways:", error)
             return []
         }
+    },
+
+    // ============ Currency Conversion ============
+    async convertCurrency(amount: number, fromCurrency: string = "USD", toCurrency: string = "IDR"): Promise<{
+        from_currency: string
+        to_currency: string
+        amount: number
+        converted_amount: number
+        exchange_rate: number
+    }> {
+        return await apiClient.get("/payments/currency/convert", {
+            amount,
+            from_currency: fromCurrency,
+            to_currency: toCurrency,
+        })
+    },
+
+    async getExchangeRate(fromCurrency: string = "USD", toCurrency: string = "IDR"): Promise<{
+        from_currency: string
+        to_currency: string
+        rate: number
+    }> {
+        return await apiClient.get("/payments/currency/rate", {
+            from_currency: fromCurrency,
+            to_currency: toCurrency,
+        })
     },
 
     async createPayment(data: {
@@ -401,6 +430,18 @@ export const billingApi = {
 
     async verifyPayPalPayment(paypalOrderId: string): Promise<CheckoutSession> {
         return await apiClient.post(`/payments/paypal/verify`, { order_id: paypalOrderId })
+    },
+
+    async verifyStripePayment(sessionId: string): Promise<CheckoutSession> {
+        return await apiClient.post(`/payments/stripe/verify`, { session_id: sessionId })
+    },
+
+    async verifyMidtransPayment(orderId: string): Promise<CheckoutSession> {
+        return await apiClient.post(`/payments/midtrans/verify`, { order_id: orderId })
+    },
+
+    async verifyXenditPayment(invoiceId: string): Promise<CheckoutSession> {
+        return await apiClient.post(`/payments/xendit/verify`, { invoice_id: invoiceId })
     },
 
     async getAlternativeGateways(paymentId: string): Promise<GatewayPublicInfo[]> {

@@ -707,6 +707,32 @@ class PaymentService:
         # Use the standard verify_payment which handles PayPal capture
         return await self.verify_payment(transaction.id)
     
+    async def verify_by_gateway_id(
+        self,
+        gateway_payment_id: str
+    ) -> PaymentTransaction:
+        """Verify payment by gateway payment ID.
+        
+        This is a generic method that works for Stripe (session_id), 
+        Xendit (invoice_id), etc.
+        
+        Args:
+            gateway_payment_id: Gateway-specific payment ID
+            
+        Returns:
+            Updated transaction
+        """
+        # Find transaction by gateway payment ID
+        transaction = await self.transaction_repo.get_transaction_by_gateway_id(
+            gateway_payment_id
+        )
+        
+        if not transaction:
+            raise ValueError(f"Transaction with gateway ID {gateway_payment_id} not found")
+        
+        # Use the standard verify_payment
+        return await self.verify_payment(transaction.id)
+    
     async def _update_transaction_from_verification(
         self,
         transaction_id: uuid.UUID,

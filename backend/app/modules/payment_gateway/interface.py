@@ -309,4 +309,22 @@ def decrypt_credential(ciphertext: str) -> Optional[str]:
     """
     if not ciphertext:
         return None
-    return kms_decrypt_simple(ciphertext)
+    
+    # Try to decrypt
+    result = kms_decrypt_simple(ciphertext)
+    
+    # If decryption fails, check if it's a plain text credential (for backward compatibility)
+    if result is None:
+        # Check if it looks like a plain text API key (not encrypted)
+        # Midtrans keys start with SB- (sandbox) or Mid- (production)
+        # Stripe keys start with sk_ or pk_
+        # PayPal keys are alphanumeric
+        if (ciphertext.startswith(('SB-', 'Mid-', 'sk_', 'pk_', 'xnd_')) or 
+            (len(ciphertext) > 20 and ciphertext.isalnum())):
+            import logging
+            logging.getLogger(__name__).warning(
+                "Credential appears to be unencrypted. Please re-configure the gateway."
+            )
+            return ciphertext
+    
+    return result
