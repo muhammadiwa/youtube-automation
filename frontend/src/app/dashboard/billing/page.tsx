@@ -250,37 +250,33 @@ function BillingContent() {
 
     return (
         <DashboardLayout breadcrumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Billing" }]}>
-            <div className="space-y-8">
-                {/* Hero Header */}
-                <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700 p-8 text-white">
-                    <div className="absolute inset-0 bg-grid-white/10 [mask-image:linear-gradient(0deg,transparent,rgba(255,255,255,0.5))]" />
-                    <div className="absolute -top-24 -right-24 h-64 w-64 rounded-full bg-white/10 blur-3xl" />
-                    <div className="absolute -bottom-24 -left-24 h-64 w-64 rounded-full bg-white/10 blur-3xl" />
-                    <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-                        <div className="space-y-2">
-                            <div className="flex items-center gap-3">
-                                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/20 backdrop-blur-sm">
-                                    <Wallet className="h-6 w-6" />
-                                </div>
-                                <div>
-                                    <h1 className="text-2xl font-bold">Billing & Subscription</h1>
-                                    <p className="text-white/70">Manage your plan, usage, and payments</p>
-                                </div>
-                            </div>
-                        </div>
-                        {subscription && (
-                            <div className="flex items-center gap-4 bg-white/10 backdrop-blur-sm rounded-xl p-4">
-                                <div className={`flex h-14 w-14 items-center justify-center rounded-xl bg-gradient-to-br ${getPlanGradient(subscription.plan)} shadow-lg`}>
-                                    {(() => { const Icon = getPlanIcon(subscription.plan); return <Icon className="h-7 w-7 text-white" /> })()}
-                                </div>
-                                <div>
-                                    <p className="text-sm text-white/70">Current Plan</p>
-                                    <p className="text-xl font-bold capitalize">{subscription.plan}</p>
-                                    <p className="text-xs text-white/60">Renews {new Date(subscription.current_period_end).toLocaleDateString()}</p>
-                                </div>
-                            </div>
-                        )}
+            <div className="space-y-6">
+                {/* Header - Simple style like monitoring */}
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h1 className="text-3xl font-bold flex items-center gap-2">
+                            <Wallet className="h-8 w-8" />
+                            Billing & Subscription
+                        </h1>
+                        <p className="text-muted-foreground">
+                            Manage your plan, usage, and payments
+                        </p>
                     </div>
+                    {subscription && (
+                        <div className="flex items-center gap-3 bg-muted/50 rounded-xl px-4 py-3">
+                            <div className={cn("flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br", getPlanGradient(subscription.plan))}>
+                                {(() => { const Icon = getPlanIcon(subscription.plan); return <Icon className="h-5 w-5 text-white" /> })()}
+                            </div>
+                            <div>
+                                <p className="text-xs text-muted-foreground">Current Plan</p>
+                                <p className="font-semibold capitalize">{subscription.plan}</p>
+                            </div>
+                            <Badge variant="outline" className="ml-2">
+                                <Calendar className="h-3 w-3 mr-1" />
+                                Renews {new Date(subscription.current_period_end).toLocaleDateString()}
+                            </Badge>
+                        </div>
+                    )}
                 </div>
 
                 {/* Modern Tabs */}
