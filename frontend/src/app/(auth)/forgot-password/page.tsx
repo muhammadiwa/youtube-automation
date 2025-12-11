@@ -23,7 +23,7 @@ export default function ForgotPasswordPage() {
         try {
             await authApi.requestPasswordReset({ email })
             setIsSubmitted(true)
-        } catch (err) {
+        } catch {
             // Don't reveal if email exists or not for security
             setIsSubmitted(true)
         } finally {
@@ -50,7 +50,7 @@ export default function ForgotPasswordPage() {
                     </motion.div>
                     <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-3">Check your email</h2>
                     <p className="text-gray-600 dark:text-gray-400 text-base sm:text-lg mb-2">
-                        If an account exists for <strong className="text-gray-900 dark:text-white">{email}</strong>, you'll receive a password reset link shortly.
+                        If an account exists for <strong className="text-gray-900 dark:text-white">{email}</strong>, you&apos;ll receive a password reset link shortly.
                     </p>
                     <p className="text-sm text-gray-500 dark:text-gray-500 mb-8">
                         The link will expire in 1 hour.
@@ -102,7 +102,7 @@ export default function ForgotPasswordPage() {
                     {/* Welcome Text */}
                     <div className="mb-8">
                         <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-2">Forgot password?</h2>
-                        <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400">No worries, we'll send you reset instructions</p>
+                        <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400">No worries, we&apos;ll send you reset instructions</p>
                     </div>
 
                     {/* Form */}
@@ -176,7 +176,7 @@ export default function ForgotPasswordPage() {
                             <div>
                                 <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">Security tip</h3>
                                 <p className="text-xs text-gray-600 dark:text-gray-400">
-                                    For security reasons, we won't reveal whether an email exists in our system. Check your inbox and spam folder.
+                                    For security reasons, we won&apos;t reveal whether an email exists in our system. Check your inbox and spam folder.
                                 </p>
                             </div>
                         </div>

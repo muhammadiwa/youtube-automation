@@ -40,7 +40,7 @@ export default function DashboardPage() {
                         Welcome back, {user?.name || "User"}! 👋
                     </h1>
                     <p className="text-muted-foreground">
-                        Here's what's happening with your channels today.
+                        Here&apos;s what&apos;s happening with your channels today.
                     </p>
                 </div>
 

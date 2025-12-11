@@ -4,7 +4,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import { useRouter } from "next/navigation"
 import apiClient from "@/lib/api/client"
 import authApi from "@/lib/api/auth"
-import type { AuthUser, AuthState, LoginCredentials, RegisterData, AuthTokens } from "@/types/auth"
+import type { AuthState, LoginCredentials, RegisterData, AuthTokens } from "@/types/auth"
 
 const TOKEN_KEY = "auth_access_token"
 const REFRESH_TOKEN_KEY = "auth_refresh_token"

@@ -146,7 +146,7 @@ export function PaymentRetryModal({
 
                                 return (
                                     <Card
-                                        key={gateway.id}
+                                        key={gateway.provider}
                                         className={cn(
                                             "border cursor-pointer transition-all duration-200",
                                             isSelected

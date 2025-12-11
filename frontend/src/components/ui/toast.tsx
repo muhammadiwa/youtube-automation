@@ -128,7 +128,7 @@ function ToastItem({
 }
 
 // Convenience functions for common toast types
-export function toast(options: Omit<Toast, "id">) {
+export function toast(_options: Omit<Toast, "id">) {
     // This is a placeholder - actual implementation requires context
     console.warn("Toast called outside of ToastProvider context")
 }

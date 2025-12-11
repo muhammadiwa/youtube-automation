@@ -282,7 +282,7 @@ export const analyticsApi = {
             start_date: params.start_date,
             end_date: params.end_date,
             account_ids: params.account_ids,
-        }, { params: { user_id: params.user_id } })
+        })
     },
 
     // Helper to convert dashboard response to simple breakdown
@@ -312,11 +312,11 @@ export const analyticsApi = {
                     startDate.setDate(startDate.getDate() - 30)
             }
 
-            const response = await apiClient.post("/revenue/dashboard", {
+            const response = await apiClient.post<RevenueDashboardResponse>("/revenue/dashboard", {
                 start_date: startDate.toISOString().split("T")[0],
                 end_date: endDate.toISOString().split("T")[0],
                 account_ids: params?.account_id ? [params.account_id] : undefined,
-            }, { params: { user_id: params?.user_id || "current" } })
+            })
 
             return {
                 total: response.total_revenue || 0,
@@ -347,7 +347,6 @@ export const analyticsApi = {
         try {
             return await apiClient.get("/revenue/monthly-breakdown", {
                 year: params.year,
-                account_ids: params.account_ids,
             })
         } catch (error) {
             return []
@@ -365,7 +364,7 @@ export const analyticsApi = {
         }
     },
 
-    async createRevenueGoal(userId: string, data: {
+    async createRevenueGoal(_userId: string, data: {
         name: string
         description?: string
         target_amount: number
@@ -376,9 +375,7 @@ export const analyticsApi = {
         account_id?: string
         notify_at_percentage?: number[]
     }): Promise<RevenueGoal> {
-        return await apiClient.post("/revenue/goals", data, {
-            params: { user_id: userId },
-        })
+        return await apiClient.post("/revenue/goals", data)
     },
 
     async updateRevenueGoal(goalId: string, data: Partial<{
@@ -421,14 +418,13 @@ export const analyticsApi = {
         try {
             return await apiClient.get("/revenue/monthly-breakdown", {
                 year: params?.year || new Date().getFullYear(),
-                account_ids: params?.account_id ? [params.account_id] : undefined,
             })
         } catch (error) {
             return []
         }
     },
 
-    async generateTaxReport(userId: string, params: {
+    async generateTaxReport(_userId: string, params: {
         year: number
         account_ids?: string[]
         format?: "csv" | "pdf"
@@ -437,19 +433,16 @@ export const analyticsApi = {
             year: params.year,
             account_ids: params.account_ids,
             format: params.format || "csv",
-        }, { params: { user_id: userId } })
+        })
     },
 
-    async exportTaxReport(userId: string, params: {
+    async exportTaxReport(_userId: string, params: {
         year: number
         account_ids?: string[]
     }): Promise<Blob> {
         return await apiClient.post("/revenue/tax-report/export", {
             year: params.year,
             account_ids: params.account_ids,
-        }, {
-            params: { user_id: userId },
-            responseType: "blob",
         })
     },
 }

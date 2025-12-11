@@ -8,11 +8,9 @@ import {
     Webhook,
     ChevronRight,
     Settings,
-    Database,
-    Download,
 } from "lucide-react"
 import { DashboardLayout } from "@/components/dashboard"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 
 const settingsLinks = [
     {
@@ -38,18 +36,6 @@ const settingsLinks = [
         description: "Configure webhook endpoints for real-time event notifications",
         href: "/dashboard/settings/webhooks",
         icon: Webhook,
-    },
-    {
-        title: "Backup",
-        description: "Create backups and manage data export",
-        href: "/dashboard/settings/backup",
-        icon: Database,
-    },
-    {
-        title: "Export Data",
-        description: "Export your data in various formats",
-        href: "/dashboard/settings/export",
-        icon: Download,
     },
 ]
 
