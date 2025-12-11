@@ -119,6 +119,22 @@ class NotificationService:
         # Create notification logs for each channel
         for channel in target_channels:
             recipient = self._get_recipient_for_channel(channel, preference)
+            
+            # If no recipient from preference, try to get from user profile for email
+            if not recipient and channel == NotificationChannel.EMAIL.value:
+                # Try to get user email from auth module
+                try:
+                    from sqlalchemy import select
+                    from app.modules.auth.models import User
+                    result = await self.session.execute(
+                        select(User.email).where(User.id == request.user_id)
+                    )
+                    user_email = result.scalar_one_or_none()
+                    if user_email:
+                        recipient = user_email
+                except Exception:
+                    pass  # User table might not exist or have different structure
+            
             if not recipient:
                 continue
             

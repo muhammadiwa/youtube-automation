@@ -28,6 +28,14 @@ export type NotificationType =
     | "system_alert"
     | "comment_received"
     | "subscriber_milestone"
+    // Payment/Billing notifications
+    | "payment_success"
+    | "payment_failed"
+    | "subscription_activated"
+    | "subscription_cancelled"
+    | "subscription_expiring"
+    | "subscription_expired"
+    | "subscription_renewed"
 
 export interface NotificationPreference {
     id: string
@@ -109,6 +117,13 @@ export const notificationsApi = {
                 "system_alert",
                 "comment_received",
                 "subscriber_milestone",
+                "payment_success",
+                "payment_failed",
+                "subscription_activated",
+                "subscription_cancelled",
+                "subscription_expiring",
+                "subscription_expired",
+                "subscription_renewed",
             ]
             return defaultTypes.map((type, index) => ({
                 id: `pref-${index}`,

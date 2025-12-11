@@ -38,6 +38,193 @@ def get_notification_service(db: AsyncSession = Depends(get_db)) -> Notification
     return NotificationService(db)
 
 
+# ==================== User Notifications (Frontend API) ====================
+
+@router.get("")
+async def get_notifications(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    unread_only: bool = Query(False),
+    type: Optional[str] = Query(None),
+    service: NotificationService = Depends(get_notification_service),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get notifications for the current user.
+    
+    Returns notifications from notification_logs table.
+    """
+    from sqlalchemy import select, func, desc
+    from app.modules.notification.models import NotificationLog
+    
+    # For now, show all notifications (no user filter)
+    # In production, this should filter by authenticated user
+    user_id = None
+    
+    # Build query
+    query = select(NotificationLog).order_by(desc(NotificationLog.created_at))
+    
+    if user_id:
+        query = query.where(NotificationLog.user_id == user_id)
+    
+    if unread_only:
+        query = query.where(NotificationLog.acknowledged == False)
+    
+    if type:
+        query = query.where(NotificationLog.event_type == type)
+    
+    # Get total count
+    count_query = select(func.count()).select_from(NotificationLog)
+    if user_id:
+        count_query = count_query.where(NotificationLog.user_id == user_id)
+    
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+    
+    # Get unread count
+    unread_query = select(func.count()).select_from(NotificationLog).where(NotificationLog.acknowledged == False)
+    if user_id:
+        unread_query = unread_query.where(NotificationLog.user_id == user_id)
+    
+    unread_result = await db.execute(unread_query)
+    unread_count = unread_result.scalar() or 0
+    
+    # Apply pagination
+    offset = (page - 1) * page_size
+    query = query.offset(offset).limit(page_size)
+    
+    result = await db.execute(query)
+    logs = result.scalars().all()
+    
+    # Map to response format
+    items = [
+        {
+            "id": str(log.id),
+            "user_id": str(log.user_id),
+            "type": log.event_type.replace(".", "_") if log.event_type else "system_alert",
+            "title": log.title,
+            "message": log.message,
+            "priority": log.priority,
+            "read": log.acknowledged,
+            "action_url": log.payload.get("action_url") if log.payload else None,
+            "metadata": log.payload,
+            "created_at": log.created_at.isoformat() if log.created_at else None,
+        }
+        for log in logs
+    ]
+    
+    return {
+        "items": items,
+        "total": total,
+        "unread_count": unread_count,
+    }
+
+
+@router.get("/unread/count")
+async def get_unread_count(
+    service: NotificationService = Depends(get_notification_service),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get count of unread notifications."""
+    from sqlalchemy import select, func
+    from app.modules.notification.models import NotificationLog
+    
+    query = select(func.count()).select_from(NotificationLog).where(NotificationLog.acknowledged == False)
+    result = await db.execute(query)
+    count = result.scalar() or 0
+    
+    return {"count": count}
+
+
+@router.post("/{notification_id}/read")
+async def mark_notification_as_read(
+    notification_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark a notification as read."""
+    from sqlalchemy import select
+    from app.modules.notification.models import NotificationLog
+    
+    result = await db.execute(
+        select(NotificationLog).where(NotificationLog.id == notification_id)
+    )
+    log = result.scalar_one_or_none()
+    
+    if not log:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    
+    log.acknowledged = True
+    log.acknowledged_at = datetime.utcnow()
+    await db.commit()
+    
+    return {
+        "id": str(log.id),
+        "user_id": str(log.user_id),
+        "type": log.event_type.replace(".", "_") if log.event_type else "system_alert",
+        "title": log.title,
+        "message": log.message,
+        "priority": log.priority,
+        "read": log.acknowledged,
+        "created_at": log.created_at.isoformat() if log.created_at else None,
+    }
+
+
+@router.post("/read-all")
+async def mark_all_notifications_as_read(
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark all notifications as read."""
+    from sqlalchemy import update
+    from app.modules.notification.models import NotificationLog
+    
+    await db.execute(
+        update(NotificationLog)
+        .where(NotificationLog.acknowledged == False)
+        .values(acknowledged=True, acknowledged_at=datetime.utcnow())
+    )
+    await db.commit()
+    
+    return {"message": "All notifications marked as read"}
+
+
+@router.delete("/{notification_id}")
+async def delete_notification(
+    notification_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a notification."""
+    from sqlalchemy import select, delete
+    from app.modules.notification.models import NotificationLog
+    
+    result = await db.execute(
+        select(NotificationLog).where(NotificationLog.id == notification_id)
+    )
+    log = result.scalar_one_or_none()
+    
+    if not log:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    
+    await db.execute(
+        delete(NotificationLog).where(NotificationLog.id == notification_id)
+    )
+    await db.commit()
+    
+    return {"message": "Notification deleted"}
+
+
+@router.delete("/clear")
+async def clear_all_notifications(
+    db: AsyncSession = Depends(get_db),
+):
+    """Clear all notifications."""
+    from sqlalchemy import delete
+    from app.modules.notification.models import NotificationLog
+    
+    await db.execute(delete(NotificationLog))
+    await db.commit()
+    
+    return {"message": "All notifications cleared"}
+
+
 # ==================== Send Notifications (23.1) ====================
 
 @router.post("/send", response_model=NotificationSendResponse)

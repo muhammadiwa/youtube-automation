@@ -73,6 +73,15 @@ class EventType(str, Enum):
     # System events
     SYSTEM_ERROR = "system.error"
     SECURITY_ALERT = "security.alert"
+    
+    # Payment/Billing events
+    PAYMENT_SUCCESS = "payment.success"
+    PAYMENT_FAILED = "payment.failed"
+    SUBSCRIPTION_ACTIVATED = "subscription.activated"
+    SUBSCRIPTION_CANCELLED = "subscription.cancelled"
+    SUBSCRIPTION_EXPIRING = "subscription.expiring"
+    SUBSCRIPTION_EXPIRED = "subscription.expired"
+    SUBSCRIPTION_RENEWED = "subscription.renewed"
 
 
 class NotificationPreference(Base):

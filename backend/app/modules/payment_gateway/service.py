@@ -517,6 +517,28 @@ class PaymentService:
                 transaction.amount, 
                 success=False
             )
+            
+            # Send payment failed notification
+            try:
+                from app.modules.billing.notifications import BillingNotificationService
+                notification_service = BillingNotificationService(self.session)
+                
+                # Get plan name from metadata
+                metadata = transaction.payment_metadata or {}
+                plan_slug = metadata.get("plan_slug", "")
+                plan_names = {"free": "Free", "basic": "Basic", "pro": "Pro", "enterprise": "Enterprise"}
+                plan_name = plan_names.get(plan_slug, plan_slug.title() if plan_slug else "Subscription")
+                
+                await notification_service.notify_payment_failed(
+                    user_id=transaction.user_id,
+                    amount=transaction.amount,
+                    currency=transaction.currency,
+                    plan_name=plan_name,
+                    error_message=result.error_message,
+                    gateway=config.provider,
+                )
+            except Exception as notif_error:
+                logger.error(f"Failed to send payment failed notification: {notif_error}")
         else:
             await self.transaction_repo.update_transaction(
                 transaction_id,
@@ -794,6 +816,7 @@ class PaymentService:
         from datetime import timedelta
         from sqlalchemy import select
         from app.modules.billing.models import Subscription, SubscriptionStatus
+        from app.modules.billing.notifications import BillingNotificationService
         
         logger.info(f"Activating subscription for transaction {transaction.id}")
         logger.info(f"Transaction metadata: {transaction.payment_metadata}")
@@ -869,6 +892,44 @@ class PaymentService:
                     subscription_id=subscription_id
                 )
                 logger.info(f"Successfully linked transaction to subscription")
+            
+            # Send notifications
+            try:
+                notification_service = BillingNotificationService(self.session)
+                
+                # Get plan name from slug
+                plan_names = {
+                    "free": "Free",
+                    "basic": "Basic",
+                    "pro": "Pro",
+                    "enterprise": "Enterprise",
+                }
+                plan_name = plan_names.get(plan_slug, plan_slug.title())
+                
+                # Send payment success notification
+                await notification_service.notify_payment_success(
+                    user_id=transaction.user_id,
+                    amount=transaction.amount,
+                    currency=transaction.currency,
+                    plan_name=plan_name,
+                    billing_cycle=billing_cycle,
+                    payment_id=str(transaction.id),
+                    gateway=transaction.gateway_provider,
+                )
+                
+                # Send subscription activated notification
+                await notification_service.notify_subscription_activated(
+                    user_id=transaction.user_id,
+                    plan_name=plan_name,
+                    billing_cycle=billing_cycle,
+                    expires_at=period_end,
+                )
+                
+                logger.info(f"Sent billing notifications for user {transaction.user_id}")
+            except Exception as notif_error:
+                # Don't fail the subscription activation if notification fails
+                logger.error(f"Failed to send billing notifications: {notif_error}")
+                
         except Exception as e:
             logger.error(f"Error in subscription activation: {e}")
             raise

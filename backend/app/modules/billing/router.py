@@ -746,3 +746,92 @@ async def handle_stripe_webhook(
     service = StripePaymentService(session)
     result = await service.handle_webhook_event(event)
     return result
+
+
+# ==================== Admin: Billing Tasks ====================
+
+@router.post("/admin/run-tasks")
+async def run_billing_background_tasks(
+    session: AsyncSession = Depends(get_session),
+):
+    """Run billing background tasks manually.
+    
+    This endpoint is for admin use to manually trigger:
+    - Check and notify expiring subscriptions
+    - Process expired subscriptions
+    
+    Should normally be run via scheduler.
+    """
+    from app.modules.billing.tasks import run_billing_tasks
+    
+    summary = await run_billing_tasks(session)
+    return {
+        "success": True,
+        "message": "Billing tasks completed",
+        **summary,
+    }
+
+
+@router.post("/admin/send-test-notification/{user_id}")
+async def send_test_billing_notification(
+    user_id: uuid.UUID,
+    notification_type: str = Query(..., description="Type: payment_success, payment_failed, subscription_activated, subscription_expiring, subscription_expired"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Send a test billing notification to a user.
+    
+    For testing notification delivery.
+    """
+    from app.modules.billing.notifications import BillingNotificationService
+    from datetime import datetime, timedelta
+    
+    notification_service = BillingNotificationService(session)
+    
+    if notification_type == "payment_success":
+        await notification_service.notify_payment_success(
+            user_id=user_id,
+            amount=29.99,
+            currency="USD",
+            plan_name="Pro",
+            billing_cycle="monthly",
+            payment_id="test-payment-id",
+            gateway="stripe",
+        )
+    elif notification_type == "payment_failed":
+        await notification_service.notify_payment_failed(
+            user_id=user_id,
+            amount=29.99,
+            currency="USD",
+            plan_name="Pro",
+            error_message="Card declined",
+            gateway="stripe",
+        )
+    elif notification_type == "subscription_activated":
+        await notification_service.notify_subscription_activated(
+            user_id=user_id,
+            plan_name="Pro",
+            billing_cycle="monthly",
+            expires_at=datetime.utcnow() + timedelta(days=30),
+        )
+    elif notification_type == "subscription_expiring":
+        await notification_service.notify_subscription_expiring(
+            user_id=user_id,
+            plan_name="Pro",
+            expires_at=datetime.utcnow() + timedelta(days=3),
+            days_remaining=3,
+        )
+    elif notification_type == "subscription_expired":
+        await notification_service.notify_subscription_expired(
+            user_id=user_id,
+            plan_name="Pro",
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown notification type: {notification_type}",
+        )
+    
+    return {
+        "success": True,
+        "message": f"Test notification '{notification_type}' sent to user {user_id}",
+    }
