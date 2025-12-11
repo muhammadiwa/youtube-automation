@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import localFont from "next/font/local";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { AuthProvider } from "@/components/providers/auth-provider";
+import { ApiErrorProvider } from "@/components/providers/api-error-provider";
 import { ToastProvider } from "@/components/ui/toast";
 import "./globals.css";
 
@@ -39,7 +40,9 @@ export default function RootLayout({
         >
           <AuthProvider>
             <ToastProvider>
-              {children}
+              <ApiErrorProvider>
+                {children}
+              </ApiErrorProvider>
             </ToastProvider>
           </AuthProvider>
         </ThemeProvider>
