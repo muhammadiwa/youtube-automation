@@ -122,6 +122,28 @@ class PayPalGateway(PaymentGatewayInterface):
         Returns:
             PaymentResult with order ID and approval URL
         """
+        # Check if credentials are configured
+        if not self.api_key or not self.api_secret:
+            logger.warning("PayPal credentials not configured")
+            
+            # In sandbox mode without credentials, return a mock success for testing
+            if self.is_sandbox:
+                import uuid
+                mock_order_id = f"PAYPAL_MOCK_{uuid.uuid4().hex[:16].upper()}"
+                return PaymentResult(
+                    payment_id=mock_order_id,
+                    status=PaymentStatus.PENDING.value,
+                    checkout_url=data.success_url,  # Redirect to success for testing
+                    gateway_response={"mock": True, "message": "Sandbox mode - credentials not configured"},
+                )
+            else:
+                return PaymentResult(
+                    payment_id=data.order_id,
+                    status=PaymentStatus.FAILED.value,
+                    error_message="PayPal credentials not configured. Please configure API keys in admin panel.",
+                    error_code="credentials_not_configured",
+                )
+        
         try:
             order_data = {
                 "intent": "CAPTURE",
@@ -359,6 +381,32 @@ class PayPalGateway(PaymentGatewayInterface):
                 payment_id=order_id,
                 status=status,
                 gateway_response=response,
+            )
+            
+        except httpx.HTTPStatusError as e:
+            # If capture fails, check if order is already completed
+            logger.warning(f"PayPal capture_order HTTP error: {e.response.status_code}")
+            
+            # Order might already be captured - check current status
+            try:
+                order_response = await self._make_request("GET", f"/v2/checkout/orders/{order_id}")
+                current_status = order_response.get("status", "")
+                
+                if current_status == "COMPLETED":
+                    # Order was already captured successfully
+                    logger.info(f"PayPal order {order_id} was already captured")
+                    return PaymentResult(
+                        payment_id=order_id,
+                        status=PaymentStatus.COMPLETED.value,
+                        gateway_response=order_response,
+                    )
+            except Exception:
+                pass
+            
+            return PaymentResult(
+                payment_id=order_id,
+                status=PaymentStatus.FAILED.value,
+                error_message=str(e),
             )
             
         except Exception as e:

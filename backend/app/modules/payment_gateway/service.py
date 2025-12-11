@@ -616,6 +616,8 @@ class PaymentService:
     ) -> PaymentTransaction:
         """Verify payment status with gateway.
         
+        For PayPal, this will also capture the order if it's approved.
+        
         Args:
             transaction_id: Transaction ID
             
@@ -626,6 +628,11 @@ class PaymentService:
         if not transaction or not transaction.gateway_payment_id:
             raise ValueError(f"Transaction {transaction_id} not found or not processed")
         
+        # If transaction is already completed, just return it
+        if transaction.status == PaymentStatus.COMPLETED.value:
+            logger.info(f"Transaction {transaction_id} is already completed")
+            return transaction
+        
         config = await self.gateway_repo.get_config_by_provider(
             transaction.gateway_provider
         )
@@ -633,8 +640,81 @@ class PaymentService:
             raise ValueError(f"Gateway {transaction.gateway_provider} not found")
         
         gateway = PaymentGatewayFactory.create(config)
+        
+        # For PayPal, we need to capture the order after user approval
+        if transaction.gateway_provider == "paypal":
+            from app.modules.payment_gateway.gateways.paypal import PayPalGateway
+            if isinstance(gateway, PayPalGateway):
+                # First check order status
+                verification = await gateway.verify_payment(transaction.gateway_payment_id)
+                
+                # If order is already completed, no need to capture
+                if verification.status == PaymentStatus.COMPLETED.value:
+                    return await self._update_transaction_from_verification(
+                        transaction_id, config, transaction, verification
+                    )
+                
+                # If order is approved but not captured, capture it
+                if verification.status == PaymentStatus.PENDING.value:
+                    capture_result = await gateway.capture_order(transaction.gateway_payment_id)
+                    if capture_result.status == PaymentStatus.COMPLETED.value:
+                        verification.status = PaymentStatus.COMPLETED.value
+                        verification.gateway_response = capture_result.gateway_response
+                    elif capture_result.status == PaymentStatus.FAILED.value:
+                        # Don't mark as failed immediately - check order status again
+                        recheck = await gateway.verify_payment(transaction.gateway_payment_id)
+                        if recheck.status == PaymentStatus.COMPLETED.value:
+                            verification.status = PaymentStatus.COMPLETED.value
+                            verification.gateway_response = recheck.gateway_response
+                        else:
+                            verification.status = PaymentStatus.FAILED.value
+                        
+                return await self._update_transaction_from_verification(
+                    transaction_id, config, transaction, verification
+                )
+        
         verification = await gateway.verify_payment(transaction.gateway_payment_id)
         
+        return await self._update_transaction_from_verification(
+            transaction_id, config, transaction, verification
+        )
+    
+    async def verify_paypal_by_order_id(
+        self,
+        paypal_order_id: str
+    ) -> PaymentTransaction:
+        """Verify and capture PayPal payment by order ID.
+        
+        This is called when user returns from PayPal with the order token.
+        
+        Args:
+            paypal_order_id: PayPal order ID (token parameter from return URL)
+            
+        Returns:
+            Updated transaction
+        """
+        # Find transaction by PayPal order ID
+        transaction = await self.transaction_repo.get_transaction_by_gateway_id(
+            paypal_order_id
+        )
+        
+        if not transaction:
+            raise ValueError(f"Transaction with PayPal order {paypal_order_id} not found")
+        
+        if transaction.gateway_provider != "paypal":
+            raise ValueError(f"Transaction is not a PayPal payment")
+        
+        # Use the standard verify_payment which handles PayPal capture
+        return await self.verify_payment(transaction.id)
+    
+    async def _update_transaction_from_verification(
+        self,
+        transaction_id: uuid.UUID,
+        config: PaymentGatewayConfig,
+        transaction: PaymentTransaction,
+        verification,
+    ) -> PaymentTransaction:
+        """Update transaction based on verification result."""
         # Update transaction status
         if verification.status == PaymentStatus.COMPLETED.value:
             await self.transaction_repo.mark_completed(
@@ -649,6 +729,13 @@ class PaymentService:
                 transaction.amount, 
                 success=True
             )
+            
+            # Create or update subscription based on payment metadata
+            try:
+                await self._activate_subscription_from_payment(transaction)
+            except Exception as e:
+                logger.error(f"Failed to activate subscription for transaction {transaction_id}: {e}")
+            
         elif verification.status == PaymentStatus.FAILED.value:
             await self.transaction_repo.mark_failed(
                 transaction_id,
@@ -668,6 +755,97 @@ class PaymentService:
             )
         
         return await self.transaction_repo.get_transaction(transaction_id)
+    
+    async def _activate_subscription_from_payment(
+        self,
+        transaction: PaymentTransaction
+    ) -> None:
+        """Create or update subscription after successful payment.
+        
+        Args:
+            transaction: Completed payment transaction
+        """
+        from datetime import timedelta
+        from sqlalchemy import select
+        from app.modules.billing.models import Subscription, SubscriptionStatus
+        
+        logger.info(f"Activating subscription for transaction {transaction.id}")
+        logger.info(f"Transaction metadata: {transaction.payment_metadata}")
+        logger.info(f"Transaction description: {transaction.description}")
+        
+        # Get plan info from transaction metadata
+        metadata = transaction.payment_metadata or {}
+        plan_slug = metadata.get("plan_slug")
+        billing_cycle = metadata.get("billing_cycle")
+        
+        # If billing_cycle not in metadata, try to detect from description
+        if not billing_cycle:
+            description = transaction.description or ""
+            if "yearly" in description.lower() or "annual" in description.lower():
+                billing_cycle = "yearly"
+            else:
+                billing_cycle = "monthly"
+            logger.info(f"Detected billing_cycle from description: {billing_cycle}")
+        
+        logger.info(f"Plan slug: {plan_slug}, Billing cycle: {billing_cycle}")
+        
+        if not plan_slug:
+            logger.warning(f"No plan_slug in transaction {transaction.id} metadata: {metadata}")
+            return
+        
+        # Calculate subscription period
+        now = datetime.utcnow()
+        if billing_cycle == "yearly":
+            period_end = now + timedelta(days=365)
+        else:
+            period_end = now + timedelta(days=30)
+        
+        # Check if user already has a subscription
+        result = await self.session.execute(
+            select(Subscription).where(Subscription.user_id == transaction.user_id)
+        )
+        existing_sub = result.scalar_one_or_none()
+        
+        subscription_id = None
+        
+        try:
+            if existing_sub:
+                # Update existing subscription
+                existing_sub.plan_tier = plan_slug
+                existing_sub.billing_cycle = billing_cycle
+                existing_sub.status = SubscriptionStatus.ACTIVE.value
+                existing_sub.current_period_start = now
+                existing_sub.current_period_end = period_end
+                existing_sub.cancel_at_period_end = False
+                existing_sub.canceled_at = None
+                subscription_id = existing_sub.id
+                logger.info(f"Updated subscription {subscription_id} for user {transaction.user_id} to plan {plan_slug} ({billing_cycle})")
+            else:
+                # Create new subscription
+                new_sub = Subscription(
+                    user_id=transaction.user_id,
+                    plan_tier=plan_slug,
+                    billing_cycle=billing_cycle,
+                    status=SubscriptionStatus.ACTIVE.value,
+                    current_period_start=now,
+                    current_period_end=period_end,
+                )
+                self.session.add(new_sub)
+                await self.session.flush()  # Get the ID
+                subscription_id = new_sub.id
+                logger.info(f"Created subscription {subscription_id} for user {transaction.user_id} with plan {plan_slug} ({billing_cycle})")
+            
+            # Update transaction with subscription_id
+            if subscription_id:
+                logger.info(f"Updating transaction {transaction.id} with subscription_id {subscription_id}")
+                await self.transaction_repo.update_transaction(
+                    transaction.id,
+                    subscription_id=subscription_id
+                )
+                logger.info(f"Successfully linked transaction to subscription")
+        except Exception as e:
+            logger.error(f"Error in subscription activation: {e}")
+            raise
     
     async def handle_webhook(
         self,

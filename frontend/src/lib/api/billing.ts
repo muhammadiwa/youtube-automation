@@ -97,7 +97,8 @@ export interface Plan {
 export interface Subscription {
     id: string
     user_id: string
-    plan: PlanTier
+    plan_tier: PlanTier  // Backend returns plan_tier, not plan
+    billing_cycle: "monthly" | "yearly"
     status: "active" | "cancelled" | "expired" | "past_due"
     current_period_start: string
     current_period_end: string
@@ -144,6 +145,24 @@ export interface Invoice {
     paid_at?: string
     pdf_url?: string
     created_at: string
+    gateway_provider?: GatewayProvider
+}
+
+// ============ Payment Transaction Types ============
+export interface PaymentTransaction {
+    id: string
+    user_id: string
+    gateway_provider: GatewayProvider
+    gateway_payment_id?: string
+    amount: number
+    currency: string
+    status: "pending" | "completed" | "failed" | "cancelled" | "refunded"
+    payment_method?: string
+    description?: string
+    error_message?: string
+    attempt_count: number
+    created_at: string
+    completed_at?: string
 }
 
 // ============ Payment Method Types ============
@@ -277,20 +296,34 @@ export const billingApi = {
         return await apiClient.post(`/billing/usage/${userId}/export?start_date=${startDate}&end_date=${endDate}`)
     },
 
-    // ============ Invoices ============
+    // ============ Payment History (Transactions) ============
     async getInvoices(): Promise<Invoice[]> {
+        // Get payment transactions and map to Invoice format for display
         try {
-            const userId = getCurrentUserId()
-            const response = await apiClient.get<{ invoices: Invoice[] } | Invoice[]>(`/billing/invoices/${userId}`)
-            if (response && typeof response === "object" && "invoices" in response) {
-                return response.invoices || []
-            }
-            if (Array.isArray(response)) {
-                return response
-            }
-            return []
+            const transactions = await this.getPaymentTransactions()
+            return transactions.map(tx => ({
+                id: tx.id,
+                number: tx.description || `Payment ${tx.id.slice(0, 8)}`,
+                amount: tx.amount,
+                currency: tx.currency,
+                status: tx.status === "completed" ? "paid" : tx.status === "pending" ? "open" : "void",
+                due_date: tx.created_at,
+                paid_at: tx.completed_at,
+                created_at: tx.created_at,
+                gateway_provider: tx.gateway_provider,
+            }))
         } catch (error) {
-            console.error("Failed to fetch invoices:", error)
+            console.error("Failed to fetch payment history:", error)
+            return []
+        }
+    },
+
+    async getPaymentTransactions(): Promise<PaymentTransaction[]> {
+        try {
+            const response = await apiClient.get<PaymentTransaction[]>("/payments/history", { includeUserId: true })
+            return response || []
+        } catch (error) {
+            console.error("Failed to fetch payment transactions:", error)
             return []
         }
     },
@@ -354,7 +387,8 @@ export const billingApi = {
         cancel_url: string
         metadata?: Record<string, any>
     }): Promise<CheckoutSession> {
-        return await apiClient.post("/payments", data)
+        // This endpoint requires X-User-ID header which is automatically added by apiClient
+        return await apiClient.post("/payments", data, { includeUserId: true })
     },
 
     async getPaymentStatus(paymentId: string): Promise<CheckoutSession> {
@@ -363,6 +397,10 @@ export const billingApi = {
 
     async verifyPayment(paymentId: string): Promise<CheckoutSession> {
         return await apiClient.post(`/payments/${paymentId}/verify`)
+    },
+
+    async verifyPayPalPayment(paypalOrderId: string): Promise<CheckoutSession> {
+        return await apiClient.post(`/payments/paypal/verify`, { order_id: paypalOrderId })
     },
 
     async getAlternativeGateways(paymentId: string): Promise<GatewayPublicInfo[]> {

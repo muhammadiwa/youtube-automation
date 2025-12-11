@@ -555,70 +555,93 @@ async def create_payment(
         )
 
 
-@payment_router.get("/{payment_id}", response_model=PaymentTransactionResponse)
-async def get_payment(
-    payment_id: uuid.UUID,
-    session: AsyncSession = Depends(get_session),
-):
-    """Get payment transaction details.
-    
-    Requirements: 30.6 - Transaction tracking
-    """
-    service = PaymentService(session)
-    transaction = await service.get_transaction(payment_id)
-    
-    if not transaction:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Payment {payment_id} not found",
-        )
-    
-    return PaymentTransactionResponse(
-        id=transaction.id,
-        user_id=transaction.user_id,
-        subscription_id=transaction.subscription_id,
-        gateway_provider=transaction.gateway_provider,
-        gateway_payment_id=transaction.gateway_payment_id,
-        amount=transaction.amount,
-        currency=transaction.currency,
-        status=transaction.status,
-        payment_method=transaction.payment_method,
-        description=transaction.description,
-        error_message=transaction.error_message,
-        attempt_count=transaction.attempt_count,
-        created_at=transaction.created_at,
-        completed_at=transaction.completed_at,
-    )
+from pydantic import BaseModel
 
 
-@payment_router.get("/{payment_id}/status", response_model=PaymentStatusResponse)
-async def get_payment_status(
-    payment_id: uuid.UUID,
+class PayPalVerifyRequest(BaseModel):
+    order_id: str
+
+
+# ==================== IMPORTANT: Specific routes MUST be defined BEFORE parameterized routes ====================
+
+@payment_router.get("/history", response_model=list[PaymentTransactionResponse])
+async def get_payment_history(
+    user_id: uuid.UUID = Header(..., alias="X-User-ID"),
+    limit: int = 50,
+    offset: int = 0,
     session: AsyncSession = Depends(get_session),
 ):
-    """Get payment status.
+    """Get payment history for a user.
     
-    Requirements: 30.4 - Payment status tracking
+    Returns list of payment transactions for the authenticated user.
     """
     service = PaymentService(session)
-    transaction = await service.get_transaction(payment_id)
+    transactions = await service.get_user_transactions(user_id, limit, offset)
     
-    if not transaction:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Payment {payment_id} not found",
+    return [
+        PaymentTransactionResponse(
+            id=tx.id,
+            user_id=tx.user_id,
+            subscription_id=tx.subscription_id,
+            gateway_provider=tx.gateway_provider,
+            gateway_payment_id=tx.gateway_payment_id,
+            amount=tx.amount,
+            currency=tx.currency,
+            status=tx.status,
+            payment_method=tx.payment_method,
+            description=tx.description,
+            error_message=tx.error_message,
+            attempt_count=tx.attempt_count,
+            created_at=tx.created_at,
+            completed_at=tx.completed_at,
         )
+        for tx in transactions
+    ]
+
+
+@payment_router.post("/paypal/verify", response_model=PaymentTransactionResponse)
+async def verify_paypal_payment(
+    data: PayPalVerifyRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Verify and capture PayPal payment by order ID.
     
-    return PaymentStatusResponse(
-        payment_id=transaction.id,
-        gateway_provider=transaction.gateway_provider,
-        status=transaction.status,
-        amount=transaction.amount,
-        currency=transaction.currency,
-        created_at=transaction.created_at,
-        completed_at=transaction.completed_at,
-        error_message=transaction.error_message,
-    )
+    This endpoint is called when user returns from PayPal approval page.
+    PayPal returns with 'token' parameter which is the order ID.
+    
+    This will:
+    1. Find the transaction by PayPal order ID (gateway_payment_id)
+    2. Verify the order status with PayPal
+    3. Capture the order if approved
+    4. Update transaction status
+    """
+    service = PaymentService(session)
+    
+    try:
+        transaction = await service.verify_paypal_by_order_id(data.order_id)
+        await session.commit()
+        
+        return PaymentTransactionResponse(
+            id=transaction.id,
+            user_id=transaction.user_id,
+            subscription_id=transaction.subscription_id,
+            gateway_provider=transaction.gateway_provider,
+            gateway_payment_id=transaction.gateway_payment_id,
+            amount=transaction.amount,
+            currency=transaction.currency,
+            status=transaction.status,
+            payment_method=transaction.payment_method,
+            description=transaction.description,
+            error_message=transaction.error_message,
+            attempt_count=transaction.attempt_count,
+            created_at=transaction.created_at,
+            completed_at=transaction.completed_at,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
 
 
 @payment_router.post("/{payment_id}/verify", response_model=PaymentTransactionResponse)
@@ -755,3 +778,71 @@ async def handle_webhook(
     if transaction:
         return {"status": "processed", "payment_id": str(transaction.id)}
     return {"status": "acknowledged"}
+
+
+# ==================== Parameterized routes MUST be at the end ====================
+
+@payment_router.get("/{payment_id}", response_model=PaymentTransactionResponse)
+async def get_payment(
+    payment_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    """Get payment transaction details.
+    
+    Requirements: 30.6 - Transaction tracking
+    """
+    service = PaymentService(session)
+    transaction = await service.get_transaction(payment_id)
+    
+    if not transaction:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Payment {payment_id} not found",
+        )
+    
+    return PaymentTransactionResponse(
+        id=transaction.id,
+        user_id=transaction.user_id,
+        subscription_id=transaction.subscription_id,
+        gateway_provider=transaction.gateway_provider,
+        gateway_payment_id=transaction.gateway_payment_id,
+        amount=transaction.amount,
+        currency=transaction.currency,
+        status=transaction.status,
+        payment_method=transaction.payment_method,
+        description=transaction.description,
+        error_message=transaction.error_message,
+        attempt_count=transaction.attempt_count,
+        created_at=transaction.created_at,
+        completed_at=transaction.completed_at,
+    )
+
+
+@payment_router.get("/{payment_id}/status", response_model=PaymentStatusResponse)
+async def get_payment_status(
+    payment_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    """Get payment status.
+    
+    Requirements: 30.4 - Payment status tracking
+    """
+    service = PaymentService(session)
+    transaction = await service.get_transaction(payment_id)
+    
+    if not transaction:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Payment {payment_id} not found",
+        )
+    
+    return PaymentStatusResponse(
+        payment_id=transaction.id,
+        gateway_provider=transaction.gateway_provider,
+        status=transaction.status,
+        amount=transaction.amount,
+        currency=transaction.currency,
+        created_at=transaction.created_at,
+        completed_at=transaction.completed_at,
+        error_message=transaction.error_message,
+    )

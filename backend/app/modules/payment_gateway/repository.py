@@ -193,7 +193,7 @@ class PaymentTransactionRepository:
             status=PaymentStatus.PENDING.value,
             success_url=success_url,
             cancel_url=cancel_url,
-            metadata=metadata,
+            payment_metadata=metadata,
         )
         
         self.session.add(transaction)

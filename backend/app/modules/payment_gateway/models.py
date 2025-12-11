@@ -201,7 +201,7 @@ class PaymentTransaction(Base):
     
     # Description and metadata
     description: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    payment_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    payment_metadata: Mapped[Optional[dict]] = mapped_column("metadata", JSON, nullable=True)
     
     # Gateway response data
     gateway_response: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)

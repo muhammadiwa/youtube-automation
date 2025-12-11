@@ -137,6 +137,9 @@ class Subscription(Base):
     )
     
     # Billing period
+    billing_cycle: Mapped[str] = mapped_column(
+        String(20), default="monthly", nullable=False
+    )  # "monthly" or "yearly"
     current_period_start: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

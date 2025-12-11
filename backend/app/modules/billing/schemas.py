@@ -89,6 +89,7 @@ class SubscriptionResponse(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID
     plan_tier: str
+    billing_cycle: str  # "monthly" or "yearly"
     status: str
     current_period_start: datetime
     current_period_end: datetime

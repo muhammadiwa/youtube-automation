@@ -1113,6 +1113,7 @@ class BillingService:
             id=subscription.id,
             user_id=subscription.user_id,
             plan_tier=subscription.plan_tier,
+            billing_cycle=subscription.billing_cycle,
             status=subscription.status,
             current_period_start=subscription.current_period_start,
             current_period_end=subscription.current_period_end,

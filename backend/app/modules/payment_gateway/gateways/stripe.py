@@ -63,6 +63,29 @@ class StripeGateway(PaymentGatewayInterface):
         Returns:
             PaymentResult with session ID and checkout URL
         """
+        # Check if credentials are configured
+        if not self.api_secret:
+            logger.warning("Stripe credentials not configured")
+            
+            # In sandbox mode without credentials, return a mock success for testing
+            if self.is_sandbox:
+                import uuid
+                mock_session_id = f"cs_test_mock_{uuid.uuid4().hex[:16]}"
+                # Redirect to success URL directly for testing
+                return PaymentResult(
+                    payment_id=mock_session_id,
+                    status=PaymentStatus.PENDING.value,
+                    checkout_url=data.success_url,  # Redirect to success for testing
+                    gateway_response={"mock": True, "message": "Sandbox mode - credentials not configured"},
+                )
+            else:
+                return PaymentResult(
+                    payment_id=data.order_id,
+                    status=PaymentStatus.FAILED.value,
+                    error_message="Stripe credentials not configured. Please configure API keys in admin panel.",
+                    error_code="credentials_not_configured",
+                )
+        
         try:
             stripe = self._get_stripe()
             

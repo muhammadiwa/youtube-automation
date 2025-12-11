@@ -43,6 +43,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const fetchUser = useCallback(async () => {
         try {
             const user = await authApi.getCurrentUser()
+            // Store user ID in apiClient for X-User-ID header
+            apiClient.setUserId(user.id)
             setState(prev => ({
                 ...prev,
                 user,
@@ -51,6 +53,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }))
         } catch {
             clearTokens()
+            apiClient.setUserId(null)
             setState(prev => ({
                 ...prev,
                 user: null,
@@ -86,6 +89,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const accessToken = localStorage.getItem(TOKEN_KEY)
         if (accessToken) {
             apiClient.setAccessToken(accessToken)
+            // Also restore user ID from localStorage if available
+            const storedUserId = localStorage.getItem("user_id")
+            if (storedUserId) {
+                apiClient.setUserId(storedUserId)
+            }
             fetchUser()
         } else {
             setState(prev => ({ ...prev, isLoading: false }))
@@ -118,6 +126,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             await authApi.logout()
         } finally {
             clearTokens()
+            apiClient.setUserId(null)
             setState({
                 user: null,
                 isAuthenticated: false,

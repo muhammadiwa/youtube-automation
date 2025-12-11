@@ -33,7 +33,6 @@ import {
 } from "@/components/ui/select"
 import {
     Wallet,
-    CreditCard,
     BarChart3,
     Receipt,
     Check,
@@ -43,7 +42,6 @@ import {
     Building2,
     Sparkles,
     AlertTriangle,
-    ArrowRight,
     Calendar,
     RefreshCw,
     Users,
@@ -52,15 +50,14 @@ import {
     HardDrive,
     Wifi,
     Download,
-    Plus,
-    Trash2,
-    Star,
     Filter,
     Loader2,
     TrendingUp,
     Shield,
     Rocket,
     Gift,
+    Star,
+    CreditCard,
 } from "lucide-react"
 import billingApi, {
     Subscription,
@@ -68,7 +65,6 @@ import billingApi, {
     UsageMetrics,
     UsageWarning,
     Invoice,
-    PaymentMethod,
 } from "@/lib/api/billing"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
@@ -152,9 +148,7 @@ function BillingContent() {
     const [usage, setUsage] = useState<UsageMetrics | null>(null)
     const [warnings, setWarnings] = useState<UsageWarning[]>([])
     const [invoices, setInvoices] = useState<Invoice[]>([])
-    const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
     const [dateFilter, setDateFilter] = useState<string>("all")
-    const [deleteMethodId, setDeleteMethodId] = useState<string | null>(null)
 
     useEffect(() => {
         if (tabParam && ["subscription", "usage", "history"].includes(tabParam)) setActiveTab(tabParam)
@@ -166,21 +160,23 @@ function BillingContent() {
         setLoading(true)
         try {
             // Load all billing data from backend
-            const [sub, planList, usageData, warningsData, invoiceData, methodsData] = await Promise.all([
+            const [sub, planList, usageData, warningsData, invoiceData] = await Promise.all([
                 billingApi.getSubscription(),
                 billingApi.getPlans().catch(() => []),
                 billingApi.getUsage().catch(() => null),
                 billingApi.getUsageWarnings().catch(() => []),
                 billingApi.getInvoices().catch(() => []),
-                billingApi.getPaymentMethods().catch(() => []),
             ])
             setSubscription(sub)
+            // Set billing cycle toggle to match user's current subscription
+            if (sub?.billing_cycle) {
+                setBillingCycle(sub.billing_cycle)
+            }
             // Use backend plans if available, otherwise use default plans for UI display
             setPlans(Array.isArray(planList) && planList.length > 0 ? planList : defaultPlans)
             setUsage(usageData)
             setWarnings(warningsData)
             setInvoices(invoiceData)
-            setPaymentMethods(methodsData)
         } catch (error) {
             console.error("Failed to load billing data:", error)
             // Keep default plans for UI but show empty data for other sections
@@ -188,7 +184,6 @@ function BillingContent() {
             setUsage(null)
             setWarnings([])
             setInvoices([])
-            setPaymentMethods([])
         } finally {
             setLoading(false)
         }
@@ -202,8 +197,6 @@ function BillingContent() {
         finally { setCancelling(false) }
     }
     const handleResumeSubscription = async () => { try { await billingApi.resumeSubscription(); await loadAllData() } catch (error) { console.error("Failed to resume:", error) } }
-    const handleSetDefault = async (methodId: string) => { try { await billingApi.setDefaultPaymentMethod(methodId); await loadAllData() } catch (error) { console.error("Failed:", error) } }
-    const handleDeleteMethod = async () => { if (!deleteMethodId) return; try { await billingApi.removePaymentMethod(deleteMethodId); await loadAllData(); setDeleteMethodId(null) } catch (error) { console.error("Failed:", error) } }
 
     const getPlanIcon = (slug: string) => ({ free: Sparkles, basic: Zap, pro: Crown, enterprise: Building2 }[slug] || Sparkles)
     const getPlanGradient = (slug: string) => ({ free: "from-slate-500 to-slate-600", basic: "from-blue-500 to-cyan-500", pro: "from-violet-500 to-purple-600", enterprise: "from-amber-500 to-orange-500" }[slug] || "from-slate-500 to-slate-600")
@@ -218,8 +211,10 @@ function BillingContent() {
         return <Badge variant="outline" className={cn("capitalize", styles[status] || styles.draft)}>{status}</Badge>
     }
 
-    const currentPlan = subscription?.plan || "free"
-    const isCurrentPlan = (slug: string) => currentPlan === slug
+    const currentPlan = subscription?.plan_tier || "free"
+    const currentBillingCycle = subscription?.billing_cycle || "monthly"
+    // Show "Current" badge only if plan matches AND billing cycle matches
+    const isCurrentPlan = (slug: string) => currentPlan === slug && billingCycle === currentBillingCycle
     const displayPlans = Array.isArray(plans) && plans.length > 0 ? plans : defaultPlans
     // Use actual data from backend - no dummy fallback
     const filteredInvoices = invoices.filter(invoice => {
@@ -264,12 +259,12 @@ function BillingContent() {
                     </div>
                     {subscription && (
                         <div className="flex items-center gap-3 bg-muted/50 rounded-xl px-4 py-3">
-                            <div className={cn("flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br", getPlanGradient(subscription.plan))}>
-                                {(() => { const Icon = getPlanIcon(subscription.plan); return <Icon className="h-5 w-5 text-white" /> })()}
+                            <div className={cn("flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br", getPlanGradient(subscription.plan_tier))}>
+                                {(() => { const Icon = getPlanIcon(subscription.plan_tier); return <Icon className="h-5 w-5 text-white" /> })()}
                             </div>
                             <div>
                                 <p className="text-xs text-muted-foreground">Current Plan</p>
-                                <p className="font-semibold capitalize">{subscription.plan}</p>
+                                <p className="font-semibold capitalize">{subscription.plan_tier} <span className="text-xs text-muted-foreground">({subscription.billing_cycle})</span></p>
                             </div>
                             <Badge variant="outline" className="ml-2">
                                 <Calendar className="h-3 w-3 mr-1" />
@@ -585,74 +580,7 @@ function BillingContent() {
 
                     {/* ==================== HISTORY TAB ==================== */}
                     <TabsContent value="history" className="space-y-6 animate-in fade-in-50 duration-500">
-                        {/* Payment Methods */}
-                        <Card className="border-0 shadow-lg">
-                            <CardHeader>
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
-                                            <CreditCard className="h-5 w-5 text-primary" />
-                                        </div>
-                                        <div>
-                                            <CardTitle className="text-lg">Payment Methods</CardTitle>
-                                            <CardDescription>Manage your saved payment methods</CardDescription>
-                                        </div>
-                                    </div>
-                                    <Button className="gap-2 rounded-xl">
-                                        <Plus className="h-4 w-4" />
-                                        Add New
-                                    </Button>
-                                </div>
-                            </CardHeader>
-                            <CardContent>
-                                {paymentMethods.length === 0 ? (
-                                    <div className="flex flex-col items-center justify-center py-8 text-center">
-                                        <CreditCard className="h-12 w-12 text-muted-foreground/30 mb-3" />
-                                        <p className="text-muted-foreground">No payment methods saved</p>
-                                        <p className="text-sm text-muted-foreground">Add a payment method to manage your subscription</p>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-3">
-                                        {paymentMethods.map((method) => (
-                                            <div key={method.id} className="flex items-center justify-between p-4 rounded-xl border bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 hover:shadow-md transition-all duration-300">
-                                                <div className="flex items-center gap-4">
-                                                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 shadow-lg">
-                                                        <CreditCard className="h-6 w-6 text-white" />
-                                                    </div>
-                                                    <div>
-                                                        <div className="flex items-center gap-2">
-                                                            <p className="font-semibold capitalize">{method.brand || method.type}</p>
-                                                            <span className="text-muted-foreground">•••• {method.last4}</span>
-                                                            {method.is_default && (
-                                                                <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
-                                                                    <Star className="h-3 w-3 mr-1 fill-current" />
-                                                                    Default
-                                                                </Badge>
-                                                            )}
-                                                        </div>
-                                                        {method.exp_month && method.exp_year && (
-                                                            <p className="text-sm text-muted-foreground">Expires {method.exp_month}/{method.exp_year}</p>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                    {!method.is_default && (
-                                                        <Button variant="outline" size="sm" className="rounded-lg" onClick={() => handleSetDefault(method.id)}>
-                                                            Set Default
-                                                        </Button>
-                                                    )}
-                                                    <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-600 hover:bg-red-500/10" onClick={() => setDeleteMethodId(method.id)}>
-                                                        <Trash2 className="h-4 w-4" />
-                                                    </Button>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </CardContent>
-                        </Card>
-
-                        {/* Invoices */}
+                        {/* Payment History */}
                         <Card className="border-0 shadow-lg">
                             <CardHeader>
                                 <div className="flex items-center justify-between">
@@ -661,8 +589,8 @@ function BillingContent() {
                                             <Receipt className="h-5 w-5 text-primary" />
                                         </div>
                                         <div>
-                                            <CardTitle className="text-lg">Invoices</CardTitle>
-                                            <CardDescription>Your billing history</CardDescription>
+                                            <CardTitle className="text-lg">Payment History</CardTitle>
+                                            <CardDescription>Your payment transactions</CardDescription>
                                         </div>
                                     </div>
                                     <Select value={dateFilter} onValueChange={setDateFilter}>
@@ -684,11 +612,11 @@ function BillingContent() {
                                     <Table>
                                         <TableHeader>
                                             <TableRow className="bg-muted/50">
-                                                <TableHead>Invoice</TableHead>
+                                                <TableHead>Description</TableHead>
                                                 <TableHead>Date</TableHead>
+                                                <TableHead>Gateway</TableHead>
                                                 <TableHead>Amount</TableHead>
                                                 <TableHead>Status</TableHead>
-                                                <TableHead className="text-right">Actions</TableHead>
                                             </TableRow>
                                         </TableHeader>
                                         <TableBody>
@@ -703,16 +631,13 @@ function BillingContent() {
                                                         </div>
                                                     </TableCell>
                                                     <TableCell className="text-muted-foreground">{new Date(invoice.created_at).toLocaleDateString()}</TableCell>
+                                                    <TableCell>
+                                                        <Badge variant="outline" className="capitalize">
+                                                            {(invoice as any).gateway_provider || "N/A"}
+                                                        </Badge>
+                                                    </TableCell>
                                                     <TableCell className="font-semibold">{formatCurrency(invoice.amount, invoice.currency)}</TableCell>
                                                     <TableCell>{getStatusBadge(invoice.status)}</TableCell>
-                                                    <TableCell className="text-right">
-                                                        {invoice.pdf_url && (
-                                                            <Button variant="ghost" size="sm" className="gap-2 hover:bg-primary/10" onClick={() => window.open(invoice.pdf_url, "_blank")}>
-                                                                <Download className="h-4 w-4" />
-                                                                Download
-                                                            </Button>
-                                                        )}
-                                                    </TableCell>
                                                 </TableRow>
                                             ))}
                                             {filteredInvoices.length === 0 && (
@@ -720,7 +645,8 @@ function BillingContent() {
                                                     <TableCell colSpan={5} className="text-center py-12">
                                                         <div className="flex flex-col items-center gap-2">
                                                             <Receipt className="h-12 w-12 text-muted-foreground/30" />
-                                                            <p className="text-muted-foreground">No invoices found</p>
+                                                            <p className="text-muted-foreground">No payment history found</p>
+                                                            <p className="text-sm text-muted-foreground">Your payment transactions will appear here</p>
                                                         </div>
                                                     </TableCell>
                                                 </TableRow>
@@ -752,18 +678,7 @@ function BillingContent() {
                     </DialogContent>
                 </Dialog>
 
-                <Dialog open={!!deleteMethodId} onOpenChange={() => setDeleteMethodId(null)}>
-                    <DialogContent className="sm:max-w-md">
-                        <DialogHeader>
-                            <DialogTitle>Remove Payment Method</DialogTitle>
-                            <DialogDescription>Are you sure you want to remove this payment method?</DialogDescription>
-                        </DialogHeader>
-                        <DialogFooter className="gap-2">
-                            <Button variant="outline" onClick={() => setDeleteMethodId(null)}>Cancel</Button>
-                            <Button variant="destructive" onClick={handleDeleteMethod}>Remove</Button>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
+
             </div>
         </DashboardLayout>
     )

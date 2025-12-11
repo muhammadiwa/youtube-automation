@@ -4,11 +4,13 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/a
 
 interface RequestOptions extends RequestInit {
     params?: Record<string, string | number | boolean | undefined>
+    includeUserId?: boolean
 }
 
 class ApiClient {
     private baseUrl: string
     private accessToken: string | null = null
+    private userId: string | null = null
 
     constructor(baseUrl: string) {
         this.baseUrl = baseUrl
@@ -20,6 +22,25 @@ class ApiClient {
 
     getAccessToken(): string | null {
         return this.accessToken
+    }
+
+    setUserId(userId: string | null) {
+        this.userId = userId
+        // Also store in localStorage for persistence
+        if (userId) {
+            localStorage.setItem("user_id", userId)
+        } else {
+            localStorage.removeItem("user_id")
+        }
+    }
+
+    getUserId(): string | null {
+        // Try memory first, then localStorage
+        if (this.userId) return this.userId
+        if (typeof window !== "undefined") {
+            return localStorage.getItem("user_id")
+        }
+        return null
     }
 
     private buildUrl(endpoint: string, params?: Record<string, string | number | boolean | undefined>): string {
@@ -51,7 +72,7 @@ class ApiClient {
     }
 
     async request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-        const { params, ...fetchOptions } = options
+        const { params, includeUserId, ...fetchOptions } = options
         const url = this.buildUrl(endpoint, params)
 
         const headers: HeadersInit = {
@@ -63,6 +84,14 @@ class ApiClient {
             (headers as Record<string, string>)["Authorization"] = `Bearer ${this.accessToken}`
         }
 
+        // Add X-User-ID header if requested or if userId is available
+        if (includeUserId !== false) {
+            const userId = this.getUserId()
+            if (userId) {
+                (headers as Record<string, string>)["X-User-ID"] = userId
+            }
+        }
+
         const response = await fetch(url, {
             ...fetchOptions,
             headers,
@@ -71,14 +100,20 @@ class ApiClient {
         return this.handleResponse<T>(response)
     }
 
-    async get<T>(endpoint: string, params?: Record<string, string | number | boolean | undefined>): Promise<T> {
-        return this.request<T>(endpoint, { method: "GET", params })
+    async get<T>(endpoint: string, options?: Record<string, string | number | boolean | undefined> | { params?: Record<string, string | number | boolean | undefined>; includeUserId?: boolean }): Promise<T> {
+        // Support both simple params object and full options object
+        if (options && ("params" in options || "includeUserId" in options)) {
+            const { params, includeUserId } = options as { params?: Record<string, string | number | boolean | undefined>; includeUserId?: boolean }
+            return this.request<T>(endpoint, { method: "GET", params, includeUserId })
+        }
+        return this.request<T>(endpoint, { method: "GET", params: options as Record<string, string | number | boolean | undefined> })
     }
 
-    async post<T>(endpoint: string, data?: unknown): Promise<T> {
+    async post<T>(endpoint: string, data?: unknown, options?: { includeUserId?: boolean }): Promise<T> {
         return this.request<T>(endpoint, {
             method: "POST",
             body: data ? JSON.stringify(data) : undefined,
+            ...options,
         })
     }
 
