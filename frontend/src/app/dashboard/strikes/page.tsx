@@ -31,6 +31,8 @@ import strikesApi, {
     StrikeStatus,
     StrikeType,
 } from "@/lib/api/strikes";
+import accountsApi from "@/lib/api/accounts";
+import type { YouTubeAccount } from "@/types";
 import {
     AlertTriangle,
     Shield,
@@ -83,6 +85,8 @@ const getRiskLevelConfig = (level: StrikeSummary["risk_level"]) => {
 };
 
 export default function StrikesPage() {
+    const [accounts, setAccounts] = useState<YouTubeAccount[]>([]);
+    const [selectedAccountId, setSelectedAccountId] = useState<string>("");
     const [summaries, setSummaries] = useState<StrikeSummary[]>([]);
     const [strikes, setStrikes] = useState<Strike[]>([]);
     const [selectedStrike, setSelectedStrike] = useState<Strike | null>(null);
@@ -98,21 +102,48 @@ export default function StrikesPage() {
     const [loadingHistory, setLoadingHistory] = useState(false);
 
     useEffect(() => {
-        loadData();
+        loadAccounts();
     }, []);
 
     useEffect(() => {
-        loadStrikes();
-    }, [statusFilter, typeFilter]);
+        if (selectedAccountId) {
+            loadData();
+        }
+    }, [selectedAccountId]);
 
-    const loadData = async () => {
+    useEffect(() => {
+        if (selectedAccountId) {
+            loadStrikes();
+        }
+    }, [statusFilter, typeFilter, selectedAccountId]);
+
+    const loadAccounts = async () => {
         try {
             setLoading(true);
-            const [summariesData, strikesData] = await Promise.all([
-                strikesApi.getStrikeSummaries(),
-                strikesApi.getStrikes(),
+            const data = await accountsApi.getAccounts();
+            const accountList = Array.isArray(data) ? data : [];
+            setAccounts(accountList);
+            // Auto-select first account if available
+            if (accountList.length > 0 && !selectedAccountId) {
+                setSelectedAccountId(accountList[0].id);
+            }
+        } catch (error) {
+            console.error("Failed to load accounts:", error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const loadData = async () => {
+        if (!selectedAccountId) return;
+        try {
+            setLoading(true);
+            const [summaryData, strikesData] = await Promise.all([
+                strikesApi.getAccountStrikeSummary(selectedAccountId).catch(() => null),
+                strikesApi.getStrikes({ account_id: selectedAccountId }),
             ]);
-            setSummaries(summariesData.items || []);
+            // Create summaries array from single account summary
+            setSummaries(summaryData ? [summaryData] : []);
             setStrikes(strikesData.items || []);
         } catch (error) {
             console.error("Failed to load strike data:", error);
@@ -122,8 +153,11 @@ export default function StrikesPage() {
     };
 
     const loadStrikes = async () => {
+        if (!selectedAccountId) return;
         try {
-            const params: { status?: StrikeStatus; type?: StrikeType } = {};
+            const params: { account_id: string; status?: StrikeStatus; type?: StrikeType } = {
+                account_id: selectedAccountId,
+            };
             if (statusFilter !== "all") params.status = statusFilter as StrikeStatus;
             if (typeFilter !== "all") params.type = typeFilter as StrikeType;
             const data = await strikesApi.getStrikes(params);
@@ -134,9 +168,10 @@ export default function StrikesPage() {
     };
 
     const handleSync = async () => {
+        if (!selectedAccountId) return;
         try {
             setSyncing(true);
-            await strikesApi.syncStrikes();
+            await strikesApi.syncStrikes(selectedAccountId);
             await loadData();
         } catch (error) {
             console.error("Failed to sync strikes:", error);
@@ -195,14 +230,28 @@ export default function StrikesPage() {
                             Monitor and manage YouTube strikes across your accounts
                         </p>
                     </div>
-                    <Button
-                        variant="outline"
-                        onClick={handleSync}
-                        disabled={syncing}
-                    >
-                        <RefreshCw className={cn("mr-2 h-4 w-4", syncing && "animate-spin")} />
-                        {syncing ? "Syncing..." : "Sync Strikes"}
-                    </Button>
+                    <div className="flex items-center gap-2">
+                        <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
+                            <SelectTrigger className="w-[200px]">
+                                <SelectValue placeholder="Select account" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {accounts.map((account) => (
+                                    <SelectItem key={account.id} value={account.id}>
+                                        {account.channelTitle || account.channelId}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <Button
+                            variant="outline"
+                            onClick={handleSync}
+                            disabled={syncing || !selectedAccountId}
+                        >
+                            <RefreshCw className={cn("mr-2 h-4 w-4", syncing && "animate-spin")} />
+                            {syncing ? "Syncing..." : "Sync Strikes"}
+                        </Button>
+                    </div>
                 </div>
 
 

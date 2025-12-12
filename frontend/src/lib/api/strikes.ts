@@ -49,12 +49,17 @@ export interface StrikeAlert {
     id: string
     strike_id: string
     account_id: string
-    channel_name: string
-    type: "new_strike" | "appeal_deadline" | "appeal_result" | "strike_resolved" | "risk_warning"
+    alert_type: string  // Backend uses alert_type
     title: string
     message: string
-    severity: "info" | "warning" | "error" | "critical"
-    read: boolean
+    severity: string
+    channels_sent?: string[]
+    delivery_status: string
+    delivered_at?: string
+    delivery_error?: string
+    acknowledged: boolean  // Backend uses acknowledged, not read
+    acknowledged_at?: string
+    acknowledged_by?: string
     created_at: string
 }
 
@@ -92,15 +97,28 @@ export interface PausedStreamsResponse {
 
 export const strikesApi = {
     // ============ Strikes ============
+    // Backend requires account_id - GET /strikes/account/{account_id}
     async getStrikes(params?: {
         account_id?: string
         status?: StrikeStatus
         type?: StrikeType
         page?: number
         page_size?: number
+        include_expired?: boolean
     }): Promise<StrikesResponse> {
         try {
-            return await apiClient.get("/strikes", params)
+            if (!params?.account_id) {
+                // No account_id provided, return empty
+                return { items: [], total: 0 }
+            }
+            const response = await apiClient.get<{ strikes: Strike[]; total: number; active_count: number }>(`/strikes/account/${params.account_id}`, {
+                include_expired: params.include_expired || false,
+            })
+            // Backend returns { strikes: [], total: number, active_count: number }
+            return {
+                items: response.strikes || [],
+                total: response.total || 0,
+            }
         } catch (error) {
             return { items: [], total: 0 }
         }
@@ -110,33 +128,36 @@ export const strikesApi = {
         return await apiClient.get(`/strikes/${strikeId}`)
     },
 
+    // Backend uses /strikes/{strike_id}/timeline instead of /history
     async getStrikeHistory(strikeId: string): Promise<StrikeHistory[]> {
         try {
-            return await apiClient.get(`/strikes/${strikeId}/history`)
+            const response = await apiClient.get<{ events: StrikeHistory[] }>(`/strikes/${strikeId}/timeline`)
+            // Backend returns StrikeTimeline with events array
+            return response.events || []
         } catch (error) {
             return []
         }
     },
 
     // ============ Summaries ============
+    // Backend requires account_id - GET /strikes/account/{account_id}/summary
     async getStrikeSummaries(): Promise<StrikeSummariesResponse> {
-        try {
-            return await apiClient.get("/strikes/summaries")
-        } catch (error) {
-            return { items: [], total: 0 }
-        }
+        // This endpoint doesn't exist in backend - would need to fetch per account
+        // For now return empty
+        return { items: [], total: 0 }
     },
 
     async getAccountStrikeSummary(accountId: string): Promise<StrikeSummary> {
-        return await apiClient.get(`/strikes/summaries/${accountId}`)
+        return await apiClient.get(`/strikes/account/${accountId}/summary`)
     },
 
     // ============ Appeals ============
+    // Backend expects appeal_reason as query param, not body
     async submitAppeal(strikeId: string, data: {
         reason: string
         evidence?: string
     }): Promise<Strike> {
-        return await apiClient.post(`/strikes/${strikeId}/appeal`, data)
+        return await apiClient.post(`/strikes/${strikeId}/appeal?appeal_reason=${encodeURIComponent(data.reason)}`)
     },
 
     // ============ Alerts ============
@@ -165,21 +186,34 @@ export const strikesApi = {
     },
 
     // ============ Paused Streams ============
-    async getPausedStreams(): Promise<PausedStreamsResponse> {
+    // Backend requires account_id - GET /strikes/account/{account_id}/paused-streams
+    async getPausedStreams(accountId?: string): Promise<PausedStreamsResponse> {
         try {
-            return await apiClient.get("/strikes/paused-streams")
+            if (!accountId) {
+                return { items: [], total: 0 }
+            }
+            const response = await apiClient.get<{ paused_streams: PausedStream[]; total: number }>(`/strikes/account/${accountId}/paused-streams`)
+            return {
+                items: response.paused_streams || [],
+                total: response.total || 0,
+            }
         } catch (error) {
             return { items: [], total: 0 }
         }
     },
 
-    async resumeStream(streamId: string): Promise<void> {
-        return await apiClient.post(`/strikes/paused-streams/${streamId}/resume`)
+    // Backend expects user_id and confirmation in body
+    async resumeStream(streamId: string, userId?: string): Promise<void> {
+        return await apiClient.post(`/strikes/paused-streams/${streamId}/resume`, {
+            user_id: userId,
+            confirmation: true,
+        })
     },
 
     // ============ Sync ============
-    async syncStrikes(accountId?: string): Promise<void> {
-        return await apiClient.post("/strikes/sync", { account_id: accountId })
+    // Backend endpoint is POST /strikes/account/{account_id}/sync
+    async syncStrikes(accountId: string): Promise<{ new_strikes: number; updated_strikes: number; errors: string[] }> {
+        return await apiClient.post(`/strikes/account/${accountId}/sync`)
     },
 }
 

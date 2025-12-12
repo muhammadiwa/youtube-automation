@@ -122,7 +122,11 @@ interface PausedStreamsIndicatorProps {
     compact?: boolean;
 }
 
-export function PausedStreamsIndicator({ className, compact = false }: PausedStreamsIndicatorProps) {
+interface PausedStreamsIndicatorPropsExtended extends PausedStreamsIndicatorProps {
+    accountId?: string;
+}
+
+export function PausedStreamsIndicator({ className, compact = false, accountId }: PausedStreamsIndicatorPropsExtended) {
     const [pausedStreams, setPausedStreams] = useState<PausedStream[]>([]);
     const [loading, setLoading] = useState(true);
     const [resumeDialogOpen, setResumeDialogOpen] = useState(false);
@@ -131,13 +135,18 @@ export function PausedStreamsIndicator({ className, compact = false }: PausedStr
     const { addToast } = useToast();
 
     useEffect(() => {
-        loadPausedStreams();
-    }, []);
+        if (accountId) {
+            loadPausedStreams();
+        } else {
+            setLoading(false);
+        }
+    }, [accountId]);
 
     const loadPausedStreams = async () => {
+        if (!accountId) return;
         try {
-            setLoading(false);
-            const data = await strikesApi.getPausedStreams();
+            setLoading(true);
+            const data = await strikesApi.getPausedStreams(accountId);
             setPausedStreams(data.items || []);
         } catch (error) {
             console.error("Failed to load paused streams:", error);
@@ -155,7 +164,9 @@ export function PausedStreamsIndicator({ className, compact = false }: PausedStr
         if (!selectedStream) return;
         try {
             setResuming(true);
-            await strikesApi.resumeStream(selectedStream.id);
+            // Get user ID from localStorage for the resume request
+            const userId = localStorage.getItem("user_id") || undefined;
+            await strikesApi.resumeStream(selectedStream.id, userId);
             addToast({
                 type: "success",
                 title: "Stream Resumed",
