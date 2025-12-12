@@ -98,6 +98,10 @@ router.include_router(payment_gateway_router, prefix="", tags=["admin-payment-ga
 from app.modules.admin.ai_router import router as ai_router
 router.include_router(ai_router, prefix="", tags=["admin-ai"])
 
+# Include backup router
+from app.modules.admin.backup_router import router as backup_router
+router.include_router(backup_router, prefix="/backups", tags=["admin-backups"])
+
 
 # ==================== Admin Access Verification ====================
 

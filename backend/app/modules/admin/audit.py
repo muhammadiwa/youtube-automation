@@ -63,6 +63,17 @@ class AdminAuditEvent(str, Enum):
     
     # Compliance Report events (Requirements 15.5)
     COMPLIANCE_REPORT_GENERATED = "compliance_report_generated"
+    
+    # Backup & Disaster Recovery events (Requirements 18.1-18.5)
+    BACKUP_CREATED = "backup_created"
+    BACKUP_COMPLETED = "backup_completed"
+    BACKUP_FAILED = "backup_failed"
+    BACKUP_SCHEDULE_UPDATED = "backup_schedule_updated"
+    RESTORE_REQUESTED = "restore_requested"
+    RESTORE_APPROVED = "restore_approved"
+    RESTORE_REJECTED = "restore_rejected"
+    RESTORE_COMPLETED = "restore_completed"
+    RESTORE_FAILED = "restore_failed"
 
 
 class AdminAuditEntry(BaseModel):

@@ -150,6 +150,47 @@ async def verify_super_admin(
     return admin
 
 
+def require_super_admin():
+    """Dependency factory for requiring super admin privileges.
+    
+    Returns:
+        Dependency function that verifies super admin status
+    """
+    async def verify_super_admin_permission(
+        request: Request,
+        admin: Admin = Depends(verify_admin_access),
+    ) -> Admin:
+        """Verify admin is a super admin.
+        
+        Args:
+            request: FastAPI request object
+            admin: Admin instance
+            
+        Returns:
+            Admin: Admin instance if super admin
+            
+        Raises:
+            AdminAccessDenied: If admin is not a super admin
+        """
+        if not admin.is_super_admin:
+            AuditLogger.log(
+                action=AuditAction.ADMIN_ACTION,
+                user_id=admin.user_id,
+                details={
+                    "event": "super_admin_required",
+                    "admin_id": str(admin.id),
+                    "path": str(request.url.path),
+                },
+                ip_address=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+            )
+            raise AdminAccessDenied("Super admin privileges required")
+        
+        return admin
+    
+    return verify_super_admin_permission
+
+
 def require_permission(permission: AdminPermission):
     """Dependency factory for requiring specific admin permission.
     

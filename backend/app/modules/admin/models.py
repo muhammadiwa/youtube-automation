@@ -1257,3 +1257,288 @@ class ComplianceReport(Base):
 
     def __repr__(self) -> str:
         return f"<ComplianceReport(id={self.id}, type={self.report_type}, status={self.status})>"
+
+
+# ==================== Backup & Disaster Recovery Models (Requirements 18.1-18.5) ====================
+
+
+class BackupType(str, Enum):
+    """Types of backups.
+    
+    Requirements: 18.1 - Backup status with type
+    """
+    FULL = "full"
+    INCREMENTAL = "incremental"
+    DIFFERENTIAL = "differential"
+
+
+class BackupStatus(str, Enum):
+    """Status of backup operations.
+    
+    Requirements: 18.1 - Backup status tracking
+    """
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    VERIFIED = "verified"
+
+
+class Backup(Base):
+    """Backup model for tracking backup operations.
+    
+    Requirements: 18.1 - Display last backup time, size, and verification status
+    Requirements: 18.2 - Configure frequency, retention period, and storage location
+    Requirements: 18.3 - Create full backup with progress indicator
+    Requirements: 18.4 - Restore with super_admin approval and pre-restore snapshot
+    Requirements: 18.5 - Alert admin on failure and retry with exponential backoff
+    """
+
+    __tablename__ = "admin_backups"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    
+    # Backup type and identification
+    backup_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=BackupType.FULL.value, index=True
+    )
+    name: Mapped[str] = mapped_column(
+        String(255), nullable=False
+    )
+    description: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )
+    
+    # Status tracking
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=BackupStatus.PENDING.value, index=True
+    )
+    progress: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    error_message: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )
+    
+    # Size and location
+    size_bytes: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+    location: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )
+    storage_provider: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="local"
+    )
+    
+    # Verification
+    is_verified: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    verified_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    checksum: Mapped[Optional[str]] = mapped_column(
+        String(128), nullable=True
+    )
+    
+    # Retention
+    retention_days: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+    expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    
+    # Retry tracking (Requirements 18.5)
+    retry_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    max_retries: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=3
+    )
+    next_retry_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    
+    # Admin who initiated
+    initiated_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    is_scheduled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<Backup(id={self.id}, type={self.backup_type}, status={self.status})>"
+
+
+class BackupSchedule(Base):
+    """Backup Schedule model for automated backup configuration.
+    
+    Requirements: 18.2 - Configure frequency, retention period, and storage location
+    """
+
+    __tablename__ = "admin_backup_schedules"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    
+    # Schedule configuration
+    name: Mapped[str] = mapped_column(
+        String(255), nullable=False
+    )
+    backup_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=BackupType.FULL.value
+    )
+    
+    # Frequency (cron expression or simple interval)
+    frequency: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="daily"  # 'hourly', 'daily', 'weekly', 'monthly', or cron
+    )
+    cron_expression: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True
+    )
+    
+    # Retention
+    retention_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=30
+    )
+    max_backups: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+    
+    # Storage
+    storage_provider: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="local"
+    )
+    storage_location: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )
+    
+    # Status
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    last_run_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    next_run_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_backup_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("backups.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    
+    # Admin who configured
+    configured_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    def __repr__(self) -> str:
+        return f"<BackupSchedule(id={self.id}, name={self.name}, frequency={self.frequency})>"
+
+
+class RestoreStatus(str, Enum):
+    """Status of restore operations.
+    
+    Requirements: 18.4 - Restore with super_admin approval
+    """
+    PENDING_APPROVAL = "pending_approval"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    ROLLED_BACK = "rolled_back"
+
+
+class BackupRestore(Base):
+    """Backup Restore model for tracking restore operations.
+    
+    Requirements: 18.4 - Restore with super_admin approval and create pre-restore snapshot
+    """
+
+    __tablename__ = "backup_restores"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    
+    # Source backup
+    backup_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("backups.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    
+    # Pre-restore snapshot
+    pre_restore_snapshot_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("backups.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    
+    # Status tracking
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=RestoreStatus.PENDING_APPROVAL.value, index=True
+    )
+    progress: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    error_message: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )
+    
+    # Approval workflow
+    requested_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    approved_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    approved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    rejection_reason: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<BackupRestore(id={self.id}, backup_id={self.backup_id}, status={self.status})>"
