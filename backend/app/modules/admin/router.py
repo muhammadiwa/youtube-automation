@@ -1,6 +1,7 @@
 """API Router for Admin module.
 
 Requirements: 1.1, 1.2, 1.3, 1.4, 1.5 - Admin Authentication & Authorization
+Requirements: 4.1, 4.2, 4.3, 4.4, 4.5 - Subscription & Revenue Management
 """
 
 import uuid
@@ -52,6 +53,14 @@ from app.modules.admin.schemas import (
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+# Include billing router
+from app.modules.admin.billing_router import router as billing_router
+router.include_router(billing_router, prefix="", tags=["admin-billing"])
+
+# Include promotional router
+from app.modules.admin.promotional_router import router as promotional_router
+router.include_router(promotional_router, prefix="/promotions", tags=["admin-promotions"])
 
 
 # ==================== Admin Access Verification ====================

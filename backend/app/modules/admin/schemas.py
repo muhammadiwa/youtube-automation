@@ -283,3 +283,201 @@ class UserWarning(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ==================== Admin Billing Schemas (Requirements 4.1-4.5) ====================
+
+
+class AdminSubscriptionFilters(BaseModel):
+    """Filters for admin subscription list query."""
+    plan: Optional[str] = Field(None, description="Filter by plan tier")
+    status: Optional[str] = Field(None, description="Filter by subscription status")
+    user_search: Optional[str] = Field(None, description="Search by user email or name")
+
+
+class AdminSubscriptionResponse(BaseModel):
+    """Admin subscription response with user info.
+    
+    Requirements: 4.1 - Display all subscriptions with user, plan, status, dates
+    """
+    id: uuid.UUID
+    user_id: uuid.UUID
+    user_email: Optional[str] = None
+    user_name: Optional[str] = None
+    plan_tier: str
+    status: str
+    billing_cycle: str
+    current_period_start: datetime
+    current_period_end: datetime
+    cancel_at_period_end: bool
+    canceled_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AdminSubscriptionListResponse(BaseModel):
+    """Paginated admin subscription list response."""
+    items: list[AdminSubscriptionResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class SubscriptionUpgradeRequest(BaseModel):
+    """Request to upgrade a subscription.
+    
+    Requirements: 4.2 - Upgrade subscription with prorated billing
+    """
+    new_plan: str = Field(..., description="New plan tier to upgrade to")
+    reason: Optional[str] = Field(None, max_length=500, description="Reason for upgrade")
+
+
+class SubscriptionDowngradeRequest(BaseModel):
+    """Request to downgrade a subscription.
+    
+    Requirements: 4.2 - Downgrade subscription with prorated billing
+    """
+    new_plan: str = Field(..., description="New plan tier to downgrade to")
+    reason: Optional[str] = Field(None, max_length=500, description="Reason for downgrade")
+
+
+class SubscriptionExtendRequest(BaseModel):
+    """Request to extend a subscription.
+    
+    Requirements: 4.3 - Add days to subscription without additional charge
+    """
+    days: int = Field(..., ge=1, le=365, description="Number of days to add")
+    reason: Optional[str] = Field(None, max_length=500, description="Reason for extension")
+
+
+class RefundRequest(BaseModel):
+    """Request to process a refund.
+    
+    Requirements: 4.4 - Process refund through original payment gateway
+    """
+    amount: Optional[float] = Field(None, gt=0, description="Partial refund amount (full refund if None)")
+    reason: str = Field(..., min_length=1, max_length=1000, description="Reason for refund")
+
+
+class RefundResponse(BaseModel):
+    """Response after processing a refund."""
+    refund_id: str
+    payment_id: uuid.UUID
+    amount: float
+    currency: str
+    status: str
+    gateway: str
+    processed_at: datetime
+
+
+class RevenueByPlan(BaseModel):
+    """Revenue breakdown by plan."""
+    plan: str
+    revenue: float
+    transaction_count: int
+
+
+class RevenueByGateway(BaseModel):
+    """Revenue breakdown by payment gateway."""
+    gateway: str
+    revenue: float
+    transaction_count: int
+
+
+class RevenueAnalyticsResponse(BaseModel):
+    """Revenue analytics response.
+    
+    Requirements: 4.5 - Display MRR, ARR, revenue by plan, revenue by gateway, refund rate
+    """
+    mrr: float = Field(..., description="Monthly Recurring Revenue")
+    arr: float = Field(..., description="Annual Recurring Revenue")
+    total_revenue: float = Field(..., description="Total revenue in period")
+    total_refunds: float = Field(..., description="Total refunds in period")
+    refund_rate: float = Field(..., description="Refund rate percentage")
+    refund_count: int = Field(..., description="Number of refunds")
+    growth_rate: float = Field(..., description="Revenue growth rate vs previous period")
+    revenue_by_plan: list[RevenueByPlan]
+    revenue_by_gateway: list[RevenueByGateway]
+    period_start: datetime
+    period_end: datetime
+
+
+# ==================== Discount Code Schemas (Requirements 14.1, 14.2) ====================
+
+
+class DiscountCodeCreate(BaseModel):
+    """Request to create a discount code.
+    
+    Requirements: 14.1 - Create discount code with percentage or fixed discount,
+    validity period, and usage limit.
+    """
+    code: str = Field(..., min_length=3, max_length=50, description="Unique discount code")
+    discount_type: Literal["percentage", "fixed"] = Field(..., description="Type of discount")
+    discount_value: float = Field(..., gt=0, description="Discount value (percentage or fixed amount)")
+    valid_from: datetime = Field(..., description="Start date of validity")
+    valid_until: datetime = Field(..., description="End date of validity")
+    usage_limit: Optional[int] = Field(None, ge=1, description="Maximum number of uses (None for unlimited)")
+    applicable_plans: list[str] = Field(default_factory=list, description="Plans this code applies to (empty for all)")
+
+
+class DiscountCodeUpdate(BaseModel):
+    """Request to update a discount code."""
+    discount_type: Optional[Literal["percentage", "fixed"]] = Field(None, description="Type of discount")
+    discount_value: Optional[float] = Field(None, gt=0, description="Discount value")
+    valid_from: Optional[datetime] = Field(None, description="Start date of validity")
+    valid_until: Optional[datetime] = Field(None, description="End date of validity")
+    usage_limit: Optional[int] = Field(None, ge=1, description="Maximum number of uses")
+    applicable_plans: Optional[list[str]] = Field(None, description="Plans this code applies to")
+    is_active: Optional[bool] = Field(None, description="Whether the code is active")
+
+
+class DiscountCodeResponse(BaseModel):
+    """Response for a discount code.
+    
+    Requirements: 14.2 - Display all codes with usage count and revenue impact
+    """
+    id: uuid.UUID
+    code: str
+    discount_type: str
+    discount_value: float
+    valid_from: datetime
+    valid_until: datetime
+    usage_limit: Optional[int]
+    usage_count: int
+    applicable_plans: list[str]
+    is_active: bool
+    is_valid: bool = Field(..., description="Whether the code is currently valid")
+    created_by: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class DiscountCodeListResponse(BaseModel):
+    """Paginated list of discount codes."""
+    items: list[DiscountCodeResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class DiscountCodeValidationRequest(BaseModel):
+    """Request to validate a discount code."""
+    code: str = Field(..., description="Discount code to validate")
+    plan: Optional[str] = Field(None, description="Plan to check applicability")
+
+
+class DiscountCodeValidationResponse(BaseModel):
+    """Response for discount code validation."""
+    is_valid: bool
+    code: Optional[str] = None
+    discount_type: Optional[str] = None
+    discount_value: Optional[float] = None
+    message: str

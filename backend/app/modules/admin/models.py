@@ -1,6 +1,7 @@
 """Admin models for database entities.
 
 Requirements: 1.1, 1.4 - Admin Authentication & Authorization
+Requirements: 14.1 - Promotional Tools (Discount Codes)
 """
 
 import uuid
@@ -8,12 +9,21 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.core.database import Base
+
+
+class DiscountType(str, Enum):
+    """Discount code types.
+    
+    Requirements: 14.1 - Percentage or fixed discount
+    """
+    PERCENTAGE = "percentage"
+    FIXED = "fixed"
 
 
 class AdminRole(str, Enum):
@@ -146,3 +156,101 @@ class Admin(Base):
     def is_super_admin(self) -> bool:
         """Check if admin is a super admin."""
         return self.role == AdminRole.SUPER_ADMIN.value
+
+
+class DiscountCode(Base):
+    """Discount code model for promotional campaigns.
+    
+    Requirements: 14.1 - Create discount codes with percentage or fixed discount,
+    validity period, and usage limit.
+    
+    Property 15: Discount Code Validation
+    - Code is valid only if current_date is between valid_from and valid_until
+    - Code is valid only if usage_count < usage_limit (when usage_limit is set)
+    """
+
+    __tablename__ = "discount_codes"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    code: Mapped[str] = mapped_column(
+        String(50), unique=True, nullable=False, index=True
+    )
+    discount_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=DiscountType.PERCENTAGE.value
+    )
+    discount_value: Mapped[float] = mapped_column(
+        Float, nullable=False
+    )
+    valid_from: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    valid_until: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    usage_limit: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+    usage_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    applicable_plans: Mapped[list[str]] = mapped_column(
+        ARRAY(String(50)), nullable=False, default=list
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    def is_valid(self, current_date: Optional[datetime] = None) -> bool:
+        """Check if discount code is currently valid.
+        
+        Property 15: Discount Code Validation
+        - Code is valid only if current_date is between valid_from and valid_until
+        - Code is valid only if usage_count < usage_limit (when usage_limit is set)
+        
+        Args:
+            current_date: Date to check validity against (defaults to now)
+            
+        Returns:
+            bool: True if code is valid
+        """
+        if current_date is None:
+            current_date = datetime.utcnow()
+        
+        # Check if code is active
+        if not self.is_active:
+            return False
+        
+        # Check date validity
+        if current_date < self.valid_from or current_date > self.valid_until:
+            return False
+        
+        # Check usage limit
+        if self.usage_limit is not None and self.usage_count >= self.usage_limit:
+            return False
+        
+        return True
+
+    def calculate_discount(self, original_price: float) -> float:
+        """Calculate the discounted price.
+        
+        Args:
+            original_price: Original price before discount
+            
+        Returns:
+            float: Discount amount
+        """
+        if self.discount_type == DiscountType.PERCENTAGE.value:
+            return original_price * (self.discount_value / 100)
+        else:  # FIXED
+            return min(self.discount_value, original_price)
