@@ -28,7 +28,6 @@ from app.modules.job.router import router as job_router
 from app.modules.notification import notification_router
 from app.modules.system_monitoring import system_monitoring_router
 from app.modules.security.router import router as security_router
-from app.modules.backup import backup_router
 from app.modules.billing import router as billing_router
 from app.modules.payment_gateway.router import admin_router as payment_gateway_admin_router, payment_router as payment_gateway_payment_router
 from app.modules.integration.router import router as integration_router
@@ -286,7 +285,6 @@ app.include_router(job_router, prefix=settings.API_V1_PREFIX)
 app.include_router(notification_router, prefix=settings.API_V1_PREFIX)
 app.include_router(system_monitoring_router, prefix=settings.API_V1_PREFIX)
 app.include_router(security_router, prefix=settings.API_V1_PREFIX)
-app.include_router(backup_router, prefix=settings.API_V1_PREFIX)
 app.include_router(billing_router, prefix=settings.API_V1_PREFIX)
 app.include_router(payment_gateway_admin_router, prefix=settings.API_V1_PREFIX)
 app.include_router(payment_gateway_payment_router, prefix=settings.API_V1_PREFIX)

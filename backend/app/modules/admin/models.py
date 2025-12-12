@@ -1442,7 +1442,7 @@ class BackupSchedule(Base):
     )
     last_backup_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("backups.id", ondelete="SET NULL"),
+        ForeignKey("admin_backups.id", ondelete="SET NULL"),
         nullable=True,
     )
     
@@ -1492,7 +1492,7 @@ class BackupRestore(Base):
     # Source backup
     backup_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("backups.id", ondelete="CASCADE"),
+        ForeignKey("admin_backups.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -1500,7 +1500,7 @@ class BackupRestore(Base):
     # Pre-restore snapshot
     pre_restore_snapshot_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("backups.id", ondelete="SET NULL"),
+        ForeignKey("admin_backups.id", ondelete="SET NULL"),
         nullable=True,
     )
     

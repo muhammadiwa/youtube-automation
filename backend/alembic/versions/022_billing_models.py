@@ -1,7 +1,7 @@
 """Billing models migration.
 
 Revision ID: 022
-Revises: 021
+Revises: 020
 Create Date: 2024-01-01 00:00:00.000000
 
 Requirements: 27.1, 27.2, 27.3, 27.4, 27.5, 28.1, 28.3, 28.4, 28.5
@@ -12,7 +12,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = '022'
-down_revision = '021'
+down_revision = '020'
 branch_labels = None
 depends_on = None
 
