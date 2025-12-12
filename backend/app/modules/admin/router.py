@@ -94,6 +94,10 @@ router.include_router(support_router, prefix="", tags=["admin-support"])
 from app.modules.admin.payment_gateway_router import router as payment_gateway_router
 router.include_router(payment_gateway_router, prefix="", tags=["admin-payment-gateways"])
 
+# Include AI service management router
+from app.modules.admin.ai_router import router as ai_router
+router.include_router(ai_router, prefix="", tags=["admin-ai"])
+
 
 # ==================== Admin Access Verification ====================
 
