@@ -167,6 +167,14 @@ setup_tracing(
 # Set up default alert thresholds (Requirements: 24.4)
 setup_default_thresholds()
 
+# Set up admin error alerting (Requirements: 7.5)
+from app.modules.admin.system_service import setup_admin_error_alerting
+setup_admin_error_alerting()
+
+# Set up quota alerting (Requirements: 11.2)
+from app.modules.admin.quota_service import setup_quota_alerting
+setup_quota_alerting()
+
 # Set application info for metrics
 set_app_info(
     version=settings.VERSION,

@@ -66,6 +66,14 @@ router.include_router(promotional_router, prefix="/promotions", tags=["admin-pro
 from app.modules.admin.moderation_router import router as moderation_router
 router.include_router(moderation_router, prefix="", tags=["admin-moderation"])
 
+# Include system router
+from app.modules.admin.system_router import router as system_router
+router.include_router(system_router, prefix="", tags=["admin-system"])
+
+# Include quota router
+from app.modules.admin.quota_router import router as quota_router
+router.include_router(quota_router, prefix="", tags=["admin-quota"])
+
 
 # ==================== Admin Access Verification ====================
 
