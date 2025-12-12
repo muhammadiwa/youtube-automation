@@ -477,3 +477,65 @@ class UserWarning(Base):
 
     def __repr__(self) -> str:
         return f"<UserWarning(id={self.id}, user_id={self.user_id}, warning_number={self.warning_number})>"
+
+
+# ==================== System Configuration Models (Requirements 19-29) ====================
+
+
+class ConfigCategory(str, Enum):
+    """Categories for system configuration.
+    
+    Requirements: 19-29 - Global Configuration Management
+    """
+    AUTH = "auth"
+    UPLOAD = "upload"
+    STREAMING = "streaming"
+    AI = "ai"
+    MODERATION = "moderation"
+    NOTIFICATION = "notification"
+    JOBS = "jobs"
+    QUOTA = "quota"
+    PLANS = "plans"
+    EMAIL_TEMPLATES = "email_templates"
+    FEATURE_FLAGS = "feature_flags"
+    BRANDING = "branding"
+
+
+class SystemConfig(Base):
+    """System Configuration model for global platform settings.
+    
+    Requirements: 19-29 - Global Configuration Management
+    - Stores all configurable parameters grouped by category
+    - Logs modifications with previous value
+    - Supports various config types: auth, upload, streaming, AI, moderation, etc.
+    """
+
+    __tablename__ = "system_configs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    key: Mapped[str] = mapped_column(
+        String(100), unique=True, nullable=False, index=True
+    )
+    value: Mapped[dict] = mapped_column(
+        JSON, nullable=False
+    )
+    category: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True
+    )
+    description: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )
+    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    def __repr__(self) -> str:
+        return f"<SystemConfig(key={self.key}, category={self.category})>"

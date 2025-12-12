@@ -410,11 +410,12 @@ class TestSubscriptionProrationCalculation:
         assume(new_price_monthly > current_price_monthly)  # Upgrade scenario
         
         # Ensure price difference is large enough that proration won't round to zero
-        # Formula: (remaining_days / total_days) * (price_diff / 100) >= 0.005 (rounds to 0.01)
-        # So: price_diff >= 0.005 * 100 * total_days / remaining_days
+        # Formula: (remaining_days / total_days) * (price_diff / 100) > 0.005 (rounds to 0.01)
+        # Due to Python's banker's rounding, 0.005 can round to 0.0, so we need > 0.005
+        # So: price_diff > 0.5 * total_days / remaining_days (using > instead of >=)
         price_diff = new_price_monthly - current_price_monthly
         min_price_diff_for_nonzero = (0.5 * total_days) / remaining_days
-        assume(price_diff >= min_price_diff_for_nonzero)
+        assume(price_diff > min_price_diff_for_nonzero)
         
         now = datetime.utcnow()
         period_start = now - timedelta(days=(total_days - remaining_days))
