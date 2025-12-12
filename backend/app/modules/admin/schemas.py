@@ -481,3 +481,158 @@ class DiscountCodeValidationResponse(BaseModel):
     discount_type: Optional[str] = None
     discount_value: Optional[float] = None
     message: str
+
+
+# ==================== Content Moderation Schemas (Requirements 6.1-6.5) ====================
+
+
+class ModerationFilters(BaseModel):
+    """Filters for moderation queue query.
+    
+    Requirements: 6.1 - Display reported content sorted by severity and report count
+    """
+    status: Optional[str] = Field(None, description="Filter by status (pending, reviewed, approved, removed)")
+    severity: Optional[str] = Field(None, description="Filter by severity (low, medium, high, critical)")
+    content_type: Optional[str] = Field(None, description="Filter by content type (video, comment, stream, thumbnail)")
+    search: Optional[str] = Field(None, description="Search in content preview or reason")
+
+
+class ReporterInfo(BaseModel):
+    """Reporter information for report detail."""
+    id: Optional[uuid.UUID] = None
+    email: Optional[str] = None
+    name: Optional[str] = None
+
+
+class ContentOwnerInfo(BaseModel):
+    """Content owner information for report detail."""
+    id: uuid.UUID
+    email: Optional[str] = None
+    name: Optional[str] = None
+
+
+class ContentReportSummary(BaseModel):
+    """Summary of a content report for list view.
+    
+    Requirements: 6.1 - Display reported content sorted by severity and report count
+    """
+    id: uuid.UUID
+    content_type: str
+    content_id: uuid.UUID
+    content_preview: Optional[str] = None
+    reason: str
+    reason_category: Optional[str] = None
+    severity: str
+    report_count: int
+    status: str
+    created_at: datetime
+    content_owner_email: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ContentReportDetail(BaseModel):
+    """Detailed content report for review.
+    
+    Requirements: 6.2 - Show content details, reporter info, and report reason
+    """
+    id: uuid.UUID
+    content_type: str
+    content_id: uuid.UUID
+    content_preview: Optional[str] = None
+    content_owner: ContentOwnerInfo
+    reporter: Optional[ReporterInfo] = None
+    reason: str
+    reason_category: Optional[str] = None
+    additional_info: Optional[dict] = None
+    severity: str
+    report_count: int
+    status: str
+    reviewed_by: Optional[uuid.UUID] = None
+    reviewed_at: Optional[datetime] = None
+    review_notes: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ContentReportListResponse(BaseModel):
+    """Paginated list of content reports.
+    
+    Requirements: 6.1 - Display reported content sorted by severity and report count
+    """
+    items: list[ContentReportSummary]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class ContentApproveRequest(BaseModel):
+    """Request to approve content.
+    
+    Requirements: 6.3 - Dismiss reports and mark content as reviewed
+    """
+    notes: Optional[str] = Field(None, max_length=1000, description="Optional review notes")
+
+
+class ContentApproveResponse(BaseModel):
+    """Response after approving content.
+    
+    Requirements: 6.3 - Dismiss reports and mark content as reviewed
+    """
+    report_id: uuid.UUID
+    status: str
+    reviewed_at: datetime
+    message: str
+
+
+class ContentRemoveRequest(BaseModel):
+    """Request to remove content.
+    
+    Requirements: 6.4 - Delete content, notify user, log action with reason
+    """
+    reason: str = Field(..., min_length=1, max_length=1000, description="Reason for removal")
+    notify_user: bool = Field(default=True, description="Whether to notify the content owner")
+
+
+class ContentRemoveResponse(BaseModel):
+    """Response after removing content.
+    
+    Requirements: 6.4 - Delete content, notify user, log action with reason
+    """
+    report_id: uuid.UUID
+    content_id: uuid.UUID
+    content_type: str
+    status: str
+    content_deleted: bool
+    user_notified: bool
+    audit_log_id: uuid.UUID
+    removed_at: datetime
+    message: str
+
+
+class UserWarnRequest(BaseModel):
+    """Request to warn a user.
+    
+    Requirements: 6.5 - Send warning notification and increment user warning count
+    """
+    reason: str = Field(..., min_length=1, max_length=1000, description="Reason for warning")
+    related_report_id: Optional[uuid.UUID] = Field(None, description="Related content report ID")
+
+
+class UserWarnResponse(BaseModel):
+    """Response after warning a user.
+    
+    Requirements: 6.5 - Send warning notification and increment user warning count
+    """
+    warning_id: uuid.UUID
+    user_id: uuid.UUID
+    warning_number: int
+    reason: str
+    notification_sent: bool
+    created_at: datetime
+    message: str

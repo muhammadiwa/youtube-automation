@@ -1,6 +1,7 @@
 """Admin models for database entities.
 
 Requirements: 1.1, 1.4 - Admin Authentication & Authorization
+Requirements: 6.1, 6.2, 6.3, 6.4, 6.5 - Content Moderation
 Requirements: 14.1 - Promotional Tools (Discount Codes)
 """
 
@@ -10,7 +11,7 @@ from enum import Enum
 from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, UUID, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -254,3 +255,225 @@ class DiscountCode(Base):
             return original_price * (self.discount_value / 100)
         else:  # FIXED
             return min(self.discount_value, original_price)
+
+
+# ==================== Content Moderation Models (Requirements 6.1-6.5) ====================
+
+
+class ContentType(str, Enum):
+    """Types of content that can be reported.
+    
+    Requirements: 6.1 - Content moderation queue
+    """
+    VIDEO = "video"
+    COMMENT = "comment"
+    STREAM = "stream"
+    THUMBNAIL = "thumbnail"
+    CHANNEL = "channel"
+
+
+class ReportSeverity(str, Enum):
+    """Severity levels for content reports.
+    
+    Requirements: 6.1 - Sorted by severity
+    """
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class ReportStatus(str, Enum):
+    """Status of content reports.
+    
+    Requirements: 6.3, 6.4 - Approve or remove content
+    """
+    PENDING = "pending"
+    REVIEWED = "reviewed"
+    APPROVED = "approved"
+    REMOVED = "removed"
+
+
+class ContentReport(Base):
+    """Content Report model for moderation queue.
+    
+    Requirements: 6.1 - Display reported content sorted by severity and report count
+    Requirements: 6.2 - Show content details, reporter info, and report reason
+    Requirements: 6.3 - Approve content (dismiss reports, mark as reviewed)
+    Requirements: 6.4 - Remove content (delete content, notify user, log action)
+    
+    Property 9: Moderation Queue Sorting
+    - Results SHALL be sorted by severity (critical > high > medium > low) 
+    - Then by report_count descending
+    
+    Property 10: Content Removal Flow
+    - For any content removal action, the system SHALL delete content, 
+    - create notification for content owner, and create audit log with removal reason.
+    """
+
+    __tablename__ = "content_reports"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    
+    # Content identification
+    content_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True
+    )
+    content_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, index=True
+    )
+    content_preview: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )
+    content_owner_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    
+    # Reporter information
+    reporter_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    
+    # Report details
+    reason: Mapped[str] = mapped_column(
+        Text, nullable=False
+    )
+    reason_category: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True
+    )
+    additional_info: Mapped[Optional[dict]] = mapped_column(
+        JSON, nullable=True
+    )
+    
+    # Severity and aggregation
+    severity: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=ReportSeverity.MEDIUM.value, index=True
+    )
+    report_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1
+    )
+    
+    # Status tracking
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=ReportStatus.PENDING.value, index=True
+    )
+    
+    # Review information
+    reviewed_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admins.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    review_notes: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    @property
+    def severity_order(self) -> int:
+        """Get numeric severity order for sorting.
+        
+        Property 9: Moderation Queue Sorting
+        - critical > high > medium > low
+        
+        Returns:
+            int: Severity order (higher = more severe)
+        """
+        severity_map = {
+            ReportSeverity.LOW.value: 1,
+            ReportSeverity.MEDIUM.value: 2,
+            ReportSeverity.HIGH.value: 3,
+            ReportSeverity.CRITICAL.value: 4,
+        }
+        return severity_map.get(self.severity, 0)
+
+    def mark_as_reviewed(
+        self,
+        admin_id: uuid.UUID,
+        status: ReportStatus,
+        notes: Optional[str] = None,
+    ) -> None:
+        """Mark report as reviewed.
+        
+        Args:
+            admin_id: Admin who reviewed the report
+            status: New status (approved or removed)
+            notes: Optional review notes
+        """
+        self.reviewed_by = admin_id
+        self.reviewed_at = datetime.utcnow()
+        self.status = status.value
+        if notes:
+            self.review_notes = notes
+
+    def __repr__(self) -> str:
+        return f"<ContentReport(id={self.id}, type={self.content_type}, severity={self.severity})>"
+
+
+class UserWarning(Base):
+    """User Warning model for tracking warnings issued to users.
+    
+    Requirements: 6.5 - Send warning notification and increment user warning count
+    
+    Property 11: User Warning Counter
+    - For any user warning action, the user's warning_count SHALL increment by 1
+    - A UserWarning record SHALL be created
+    """
+
+    __tablename__ = "user_warnings"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    admin_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admins.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    
+    # Warning details
+    reason: Mapped[str] = mapped_column(
+        Text, nullable=False
+    )
+    warning_number: Mapped[int] = mapped_column(
+        Integer, nullable=False
+    )
+    
+    # Related report (if warning is from moderation)
+    related_report_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("content_reports.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserWarning(id={self.id}, user_id={self.user_id}, warning_number={self.warning_number})>"
