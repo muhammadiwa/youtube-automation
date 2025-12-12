@@ -10,6 +10,7 @@ import { Separator } from "@/components/ui/separator"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Input } from "@/components/ui/input"
 import {
     ShoppingCart,
     CreditCard,
@@ -30,6 +31,8 @@ import {
     AlertCircle,
     CheckCircle2,
     Info,
+    Tag,
+    Percent,
 } from "lucide-react"
 import billingApi, { Plan, GatewayProvider, GatewayPublicInfo, PlanTier } from "@/lib/api/billing"
 import Link from "next/link"
@@ -95,6 +98,18 @@ function CheckoutContent() {
     const [error, setError] = useState<string | null>(null)
     const [convertedPrice, setConvertedPrice] = useState<{ amount: number; currency: string; rate: number } | null>(null)
     const [convertingCurrency, setConvertingCurrency] = useState(false)
+
+    // Promo code state
+    const [promoCode, setPromoCode] = useState("")
+    const [promoCodeValidating, setPromoCodeValidating] = useState(false)
+    const [promoCodeApplied, setPromoCodeApplied] = useState<{
+        code: string
+        discount_type: "percentage" | "fixed"
+        discount_value: number
+        discount_amount: number
+        final_amount: number
+    } | null>(null)
+    const [promoCodeError, setPromoCodeError] = useState<string | null>(null)
 
     // Ensure user ID is set in apiClient when user is available
     useEffect(() => {
@@ -186,6 +201,45 @@ function CheckoutContent() {
         convertPrice()
     }, [selectedGateway, plan, cycle, gateways])
 
+    // Handle promo code validation
+    const handleApplyPromoCode = async () => {
+        if (!promoCode.trim() || !plan) return
+
+        setPromoCodeValidating(true)
+        setPromoCodeError(null)
+
+        try {
+            const basePrice = cycle === "monthly" ? plan.price_monthly : plan.price_yearly
+            const result = await billingApi.validateDiscountCode(promoCode.trim(), plan.slug, basePrice)
+
+            if (result.is_valid && result.code) {
+                setPromoCodeApplied({
+                    code: result.code,
+                    discount_type: result.discount_type as "percentage" | "fixed",
+                    discount_value: result.discount_value || 0,
+                    discount_amount: result.discount_amount || 0,
+                    final_amount: result.final_amount || basePrice,
+                })
+                setPromoCodeError(null)
+            } else {
+                setPromoCodeError(result.message)
+                setPromoCodeApplied(null)
+            }
+        } catch (err) {
+            console.error("Failed to validate promo code:", err)
+            setPromoCodeError("Failed to validate promo code. Please try again.")
+            setPromoCodeApplied(null)
+        } finally {
+            setPromoCodeValidating(false)
+        }
+    }
+
+    const handleRemovePromoCode = () => {
+        setPromoCodeApplied(null)
+        setPromoCode("")
+        setPromoCodeError(null)
+    }
+
     const handleCheckout = async () => {
         if (!plan || !selectedGateway || !agreeTerms) return
 
@@ -205,13 +259,25 @@ function CheckoutContent() {
             const basePrice = cycle === "monthly" ? plan.price_monthly : plan.price_yearly
             const baseUrl = window.location.origin
 
+            // Apply discount if promo code is applied
+            let finalPrice = basePrice
+            if (promoCodeApplied) {
+                finalPrice = promoCodeApplied.final_amount
+            }
+
             // Determine amount and currency based on gateway support
             // If gateway doesn't support USD and we have converted price, use that
-            let paymentAmount = basePrice
+            let paymentAmount = finalPrice
             let paymentCurrency = "USD"
 
             if (convertedPrice) {
-                paymentAmount = convertedPrice.amount
+                // Recalculate converted price with discount
+                if (promoCodeApplied) {
+                    const discountRatio = finalPrice / basePrice
+                    paymentAmount = Math.round(convertedPrice.amount * discountRatio)
+                } else {
+                    paymentAmount = convertedPrice.amount
+                }
                 paymentCurrency = convertedPrice.currency
             }
 
@@ -221,6 +287,7 @@ function CheckoutContent() {
                 currency: paymentCurrency,
                 gateway: selectedGateway,
                 convertedPrice,
+                promoCode: promoCodeApplied?.code,
                 userId: user.id,
             })
 
@@ -229,15 +296,18 @@ function CheckoutContent() {
             const session = await billingApi.createPayment({
                 amount: paymentAmount,
                 currency: paymentCurrency,
-                description: `${plan.name} Plan - ${cycle} subscription`,
+                description: `${plan.name} Plan - ${cycle} subscription${promoCodeApplied ? ` (Promo: ${promoCodeApplied.code})` : ""}`,
                 preferred_gateway: selectedGateway,
-                success_url: `${baseUrl}/dashboard/billing/checkout/success?plan=${plan.slug}&cycle=${cycle}`,
+                success_url: `${baseUrl}/dashboard/billing/checkout/success?plan=${plan.slug}&cycle=${cycle}${promoCodeApplied ? `&promo=${promoCodeApplied.code}` : ""}`,
                 cancel_url: `${baseUrl}/dashboard/billing/checkout/failed?plan=${plan.slug}&reason=cancelled`,
                 metadata: {
                     plan_id: plan.id,
                     plan_slug: plan.slug,
                     billing_cycle: cycle,
                     original_amount_usd: basePrice, // Store original USD amount for reference
+                    promo_code: promoCodeApplied?.code,
+                    discount_amount: promoCodeApplied?.discount_amount,
+                    discount_type: promoCodeApplied?.discount_type,
                 },
             })
 
@@ -529,7 +599,7 @@ function CheckoutContent() {
                                 <div className="space-y-3">
                                     <div className="flex items-center justify-between">
                                         <span className="text-muted-foreground">{plan.name} Plan ({cycle})</span>
-                                        <span className="font-medium">{formatPrice(price)}</span>
+                                        <span className={cn("font-medium", promoCodeApplied && "line-through text-muted-foreground")}>{formatPrice(price)}</span>
                                     </div>
                                     {cycle === "yearly" && savings > 0 && (
                                         <div className="flex items-center justify-between text-emerald-600">
@@ -537,13 +607,91 @@ function CheckoutContent() {
                                             <span>-{formatPrice(savings)}</span>
                                         </div>
                                     )}
+                                    {promoCodeApplied && (
+                                        <div className="flex items-center justify-between text-emerald-600">
+                                            <span className="flex items-center gap-1.5">
+                                                <Tag className="h-3.5 w-3.5" />
+                                                Promo: {promoCodeApplied.code}
+                                                <button
+                                                    onClick={handleRemovePromoCode}
+                                                    className="ml-1 text-muted-foreground hover:text-red-500 transition-colors"
+                                                >
+                                                    <X className="h-3.5 w-3.5" />
+                                                </button>
+                                            </span>
+                                            <span>-{formatPrice(promoCodeApplied.discount_amount)}</span>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <Separator />
+
+                                {/* Promo Code Input */}
+                                <div className="space-y-2">
+                                    <Label className="text-sm font-medium flex items-center gap-2">
+                                        <Percent className="h-4 w-4" />
+                                        Promo Code
+                                    </Label>
+                                    {!promoCodeApplied ? (
+                                        <div className="flex gap-2">
+                                            <Input
+                                                placeholder="Enter code"
+                                                value={promoCode}
+                                                onChange={(e) => {
+                                                    setPromoCode(e.target.value.toUpperCase())
+                                                    setPromoCodeError(null)
+                                                }}
+                                                className="flex-1 uppercase"
+                                                disabled={promoCodeValidating}
+                                            />
+                                            <Button
+                                                variant="outline"
+                                                onClick={handleApplyPromoCode}
+                                                disabled={!promoCode.trim() || promoCodeValidating}
+                                            >
+                                                {promoCodeValidating ? (
+                                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                                ) : (
+                                                    "Apply"
+                                                )}
+                                            </Button>
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-2 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                                            <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0" />
+                                            <div className="flex-1">
+                                                <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                                                    {promoCodeApplied.code} applied!
+                                                </p>
+                                                <p className="text-xs text-muted-foreground">
+                                                    {promoCodeApplied.discount_type === "percentage"
+                                                        ? `${promoCodeApplied.discount_value}% off`
+                                                        : `$${promoCodeApplied.discount_value} off`}
+                                                </p>
+                                            </div>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={handleRemovePromoCode}
+                                                className="h-8 w-8 p-0 text-muted-foreground hover:text-red-500"
+                                            >
+                                                <X className="h-4 w-4" />
+                                            </Button>
+                                        </div>
+                                    )}
+                                    {promoCodeError && (
+                                        <p className="text-xs text-red-500 flex items-center gap-1">
+                                            <AlertCircle className="h-3 w-3" />
+                                            {promoCodeError}
+                                        </p>
+                                    )}
                                 </div>
 
                                 <Separator />
 
                                 <div className="flex items-center justify-between text-lg font-bold">
                                     <span>Total</span>
-                                    <span>{formatPrice(price)}</span>
+                                    <span>{formatPrice(promoCodeApplied ? promoCodeApplied.final_amount : price)}</span>
                                 </div>
 
                                 {/* Show converted price for non-USD gateways */}
@@ -560,7 +708,12 @@ function CheckoutContent() {
                                                 Charged in {convertedPrice.currency}
                                             </span>
                                             <span className="font-semibold text-amber-600 dark:text-amber-400">
-                                                {formatPrice(convertedPrice.amount, convertedPrice.currency)}
+                                                {formatPrice(
+                                                    promoCodeApplied
+                                                        ? Math.round(convertedPrice.amount * (promoCodeApplied.final_amount / price))
+                                                        : convertedPrice.amount,
+                                                    convertedPrice.currency
+                                                )}
                                             </span>
                                         </div>
                                         <p className="text-xs text-muted-foreground mt-1">
@@ -632,8 +785,13 @@ function CheckoutContent() {
                                         <>
                                             <Lock className="h-5 w-5 mr-2" />
                                             Pay {convertedPrice
-                                                ? formatPrice(convertedPrice.amount, convertedPrice.currency)
-                                                : formatPrice(price)}
+                                                ? formatPrice(
+                                                    promoCodeApplied
+                                                        ? Math.round(convertedPrice.amount * (promoCodeApplied.final_amount / price))
+                                                        : convertedPrice.amount,
+                                                    convertedPrice.currency
+                                                )
+                                                : formatPrice(promoCodeApplied ? promoCodeApplied.final_amount : price)}
                                         </>
                                     )}
                                 </Button>

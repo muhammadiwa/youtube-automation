@@ -53,6 +53,36 @@ from app.modules.admin.audit import AdminAuditService, AdminAuditEvent
 logger = logging.getLogger(__name__)
 
 
+async def convert_to_usd(amount: float, currency: str) -> float:
+    """Convert amount from given currency to USD using real-time exchange rates.
+    
+    Uses the CurrencyConverter service which fetches rates from exchangerate-api.com
+    with fallback to cached rates.
+    
+    Args:
+        amount: Amount in original currency
+        currency: Currency code (e.g., 'IDR', 'USD')
+        
+    Returns:
+        Amount converted to USD
+    """
+    from app.modules.payment_gateway.currency import convert_currency
+    
+    currency_upper = currency.upper() if currency else "USD"
+    
+    # If already USD, no conversion needed
+    if currency_upper == "USD":
+        return amount
+    
+    try:
+        converted = await convert_currency(amount, currency_upper, "USD")
+        return float(converted)
+    except Exception as e:
+        logger.warning(f"Currency conversion failed for {currency_upper} to USD: {e}")
+        # Return 0 if conversion fails to avoid incorrect totals
+        return 0.0
+
+
 class AdminAuditLogger:
     """Helper class for async audit logging in billing service."""
     
@@ -648,12 +678,15 @@ class AdminBillingService:
         
         Requirements: 4.5 - Display MRR, ARR, revenue by plan, revenue by gateway, refund rate
         
+        All amounts are converted to USD for consistent reporting.
+        IDR and other currencies are converted using exchange rates.
+        
         Args:
             start_date: Start date for analytics
             end_date: End date for analytics
             
         Returns:
-            Revenue analytics data
+            Revenue analytics data (all amounts in USD)
         """
         if not end_date:
             end_date = datetime.utcnow()
@@ -663,34 +696,42 @@ class AdminBillingService:
         # Get all completed transactions in period
         transactions = await self._get_transactions_in_period(start_date, end_date)
         
-        # Calculate total revenue
-        total_revenue = sum(t.amount for t in transactions if t.status == PaymentStatus.COMPLETED.value)
+        # Calculate total revenue (converted to USD)
+        total_revenue = 0.0
+        for t in transactions:
+            if t.status == PaymentStatus.COMPLETED.value:
+                total_revenue += await convert_to_usd(t.amount, t.currency)
         
-        # Calculate refunds
+        # Calculate refunds (converted to USD)
         refunded_transactions = [t for t in transactions if t.status == PaymentStatus.REFUNDED.value]
-        total_refunds = sum(t.amount for t in refunded_transactions)
+        total_refunds = 0.0
+        for t in refunded_transactions:
+            total_refunds += await convert_to_usd(t.amount, t.currency)
         refund_count = len(refunded_transactions)
         
         # Calculate refund rate
         total_transactions = len([t for t in transactions if t.status in [PaymentStatus.COMPLETED.value, PaymentStatus.REFUNDED.value]])
         refund_rate = (refund_count / total_transactions * 100) if total_transactions > 0 else 0.0
         
-        # Calculate MRR (Monthly Recurring Revenue)
+        # Calculate MRR (Monthly Recurring Revenue) - already in USD
         mrr = await self._calculate_mrr()
         
         # Calculate ARR (Annual Recurring Revenue)
         arr = mrr * 12
         
-        # Revenue by plan
+        # Revenue by plan (converted to USD)
         revenue_by_plan = await self._calculate_revenue_by_plan(transactions)
         
-        # Revenue by gateway
+        # Revenue by gateway (converted to USD)
         revenue_by_gateway = await self._calculate_revenue_by_gateway(transactions)
         
         # Calculate growth rate (compare to previous period)
         previous_start = start_date - (end_date - start_date)
         previous_transactions = await self._get_transactions_in_period(previous_start, start_date)
-        previous_revenue = sum(t.amount for t in previous_transactions if t.status == PaymentStatus.COMPLETED.value)
+        previous_revenue = 0.0
+        for t in previous_transactions:
+            if t.status == PaymentStatus.COMPLETED.value:
+                previous_revenue += await convert_to_usd(t.amount, t.currency)
         
         growth_rate = 0.0
         if previous_revenue > 0:
@@ -752,7 +793,10 @@ class AdminBillingService:
         self,
         transactions: list[PaymentTransaction],
     ) -> list[RevenueByPlan]:
-        """Calculate revenue breakdown by plan."""
+        """Calculate revenue breakdown by plan.
+        
+        All amounts are converted to USD for consistent reporting.
+        """
         plan_revenue = {}
         
         for transaction in transactions:
@@ -771,7 +815,9 @@ class AdminBillingService:
             if plan_name not in plan_revenue:
                 plan_revenue[plan_name] = {"amount": 0.0, "count": 0}
             
-            plan_revenue[plan_name]["amount"] += transaction.amount
+            # Convert to USD before summing (using real-time exchange rates)
+            amount_usd = await convert_to_usd(transaction.amount, transaction.currency)
+            plan_revenue[plan_name]["amount"] += amount_usd
             plan_revenue[plan_name]["count"] += 1
         
         return [
@@ -787,7 +833,10 @@ class AdminBillingService:
         self,
         transactions: list[PaymentTransaction],
     ) -> list[RevenueByGateway]:
-        """Calculate revenue breakdown by payment gateway."""
+        """Calculate revenue breakdown by payment gateway.
+        
+        All amounts are converted to USD for consistent reporting.
+        """
         gateway_revenue = {}
         
         for transaction in transactions:
@@ -798,7 +847,9 @@ class AdminBillingService:
             if gateway not in gateway_revenue:
                 gateway_revenue[gateway] = {"amount": 0.0, "count": 0}
             
-            gateway_revenue[gateway]["amount"] += transaction.amount
+            # Convert to USD before summing (using real-time exchange rates)
+            amount_usd = await convert_to_usd(transaction.amount, transaction.currency)
+            gateway_revenue[gateway]["amount"] += amount_usd
             gateway_revenue[gateway]["count"] += 1
         
         return [

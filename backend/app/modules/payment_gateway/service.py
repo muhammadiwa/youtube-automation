@@ -893,6 +893,16 @@ class PaymentService:
                 )
                 logger.info(f"Successfully linked transaction to subscription")
             
+            # Track promo code usage if applied
+            promo_code = metadata.get("promo_code")
+            if promo_code:
+                try:
+                    await self._track_promo_code_usage(promo_code)
+                    logger.info(f"Tracked promo code usage: {promo_code}")
+                except Exception as promo_error:
+                    # Don't fail the subscription activation if promo tracking fails
+                    logger.error(f"Failed to track promo code usage: {promo_error}")
+            
             # Send notifications
             try:
                 notification_service = BillingNotificationService(self.session)
@@ -933,6 +943,28 @@ class PaymentService:
         except Exception as e:
             logger.error(f"Error in subscription activation: {e}")
             raise
+
+    async def _track_promo_code_usage(self, promo_code: str) -> None:
+        """Track promo code usage after successful payment.
+        
+        Args:
+            promo_code: The promo code that was used
+        """
+        from sqlalchemy import select
+        from app.modules.admin.models import DiscountCode
+        
+        # Find the discount code
+        result = await self.session.execute(
+            select(DiscountCode).where(DiscountCode.code == promo_code.upper())
+        )
+        discount_code = result.scalar_one_or_none()
+        
+        if discount_code:
+            # Increment usage count
+            discount_code.usage_count += 1
+            logger.info(f"Incremented usage count for promo code {promo_code} to {discount_code.usage_count}")
+        else:
+            logger.warning(f"Promo code {promo_code} not found for usage tracking")
     
     async def handle_webhook(
         self,

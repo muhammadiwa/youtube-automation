@@ -257,3 +257,154 @@ export interface UserStatsResponse {
     suspended: number
     new_this_month: number
 }
+
+// ==================== Subscription Management Types ====================
+
+export interface AdminSubscriptionFilters {
+    plan?: string
+    status?: string
+    user_search?: string
+}
+
+export interface AdminSubscription {
+    id: string
+    user_id: string
+    user_email: string | null
+    user_name: string | null
+    plan_tier: string
+    status: string
+    billing_cycle: string
+    current_period_start: string
+    current_period_end: string
+    cancel_at_period_end: boolean
+    canceled_at: string | null
+    created_at: string
+    updated_at: string
+}
+
+export interface AdminSubscriptionListResponse {
+    items: AdminSubscription[]
+    total: number
+    page: number
+    page_size: number
+    total_pages: number
+}
+
+export interface SubscriptionUpgradeRequest {
+    new_plan: string
+    reason?: string
+}
+
+export interface SubscriptionDowngradeRequest {
+    new_plan: string
+    reason?: string
+}
+
+export interface SubscriptionExtendRequest {
+    days: number
+    reason?: string
+}
+
+export interface RefundRequest {
+    amount?: number
+    reason: string
+}
+
+export interface RefundResponse {
+    refund_id: string
+    payment_id: string
+    amount: number
+    currency: string
+    status: string
+    gateway: string
+    processed_at: string
+}
+
+export interface RevenueByPlan {
+    plan: string
+    revenue: number
+    transaction_count: number
+}
+
+export interface RevenueByGateway {
+    gateway: string
+    revenue: number
+    transaction_count: number
+}
+
+export interface RevenueAnalytics {
+    mrr: number
+    arr: number
+    total_revenue: number
+    total_refunds: number
+    refund_rate: number
+    refund_count: number
+    growth_rate: number
+    revenue_by_plan: RevenueByPlan[]
+    revenue_by_gateway: RevenueByGateway[]
+    period_start: string
+    period_end: string
+}
+
+
+// ==================== Promotional Types ====================
+
+export type DiscountType = "percentage" | "fixed"
+
+export interface DiscountCode {
+    id: string
+    code: string
+    discount_type: DiscountType
+    discount_value: number
+    valid_from: string
+    valid_until: string
+    usage_limit: number | null
+    usage_count: number
+    applicable_plans: string[]
+    is_active: boolean
+    is_valid: boolean
+    created_by: string
+    created_at: string
+    updated_at: string
+}
+
+export interface DiscountCodeListResponse {
+    items: DiscountCode[]
+    total: number
+    page: number
+    page_size: number
+    total_pages: number
+}
+
+export interface DiscountCodeCreateRequest {
+    code: string
+    discount_type: DiscountType
+    discount_value: number
+    valid_from: string
+    valid_until: string
+    usage_limit?: number | null
+    applicable_plans?: string[]
+}
+
+export interface DiscountCodeUpdateRequest {
+    discount_type?: DiscountType
+    discount_value?: number
+    valid_from?: string
+    valid_until?: string
+    usage_limit?: number | null
+    applicable_plans?: string[]
+    is_active?: boolean
+}
+
+export interface DiscountCodeValidationResponse {
+    is_valid: boolean
+    code: string
+    discount_type: DiscountType | null
+    discount_value: number | null
+    reason: string | null
+}
+
+export interface DiscountCodeFilters {
+    is_active?: boolean
+    search?: string
+}

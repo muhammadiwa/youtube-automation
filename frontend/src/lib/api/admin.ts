@@ -18,6 +18,15 @@ import type {
     ImpersonateResponse,
     PasswordResetResponse,
     UserStatsResponse,
+    AdminSubscriptionFilters,
+    AdminSubscriptionListResponse,
+    AdminSubscription,
+    SubscriptionUpgradeRequest,
+    SubscriptionDowngradeRequest,
+    SubscriptionExtendRequest,
+    RefundRequest,
+    RefundResponse,
+    RevenueAnalytics,
 } from "@/types/admin"
 
 /**
@@ -233,6 +242,143 @@ const adminApi = {
      */
     async resetUserPassword(userId: string): Promise<PasswordResetResponse> {
         return apiClient.post(`/admin/users/${userId}/reset-password`, {})
+    },
+
+    // ==================== Subscription Management API ====================
+
+    /**
+     * Get paginated list of subscriptions with filters
+     * Requirements: 4.1
+     */
+    async getSubscriptions(params: {
+        page?: number
+        page_size?: number
+        filters?: AdminSubscriptionFilters
+    }): Promise<AdminSubscriptionListResponse> {
+        const searchParams = new URLSearchParams()
+        if (params.page) searchParams.set("page", params.page.toString())
+        if (params.page_size) searchParams.set("page_size", params.page_size.toString())
+        if (params.filters?.plan) searchParams.set("plan", params.filters.plan)
+        if (params.filters?.status) searchParams.set("status", params.filters.status)
+        if (params.filters?.user_search) searchParams.set("user_search", params.filters.user_search)
+        const query = searchParams.toString()
+        return apiClient.get(`/admin/subscriptions${query ? `?${query}` : ""}`)
+    },
+
+    /**
+     * Get subscription details
+     * Requirements: 4.1
+     */
+    async getSubscription(subscriptionId: string): Promise<AdminSubscription> {
+        return apiClient.get(`/admin/subscriptions/${subscriptionId}`)
+    },
+
+    /**
+     * Upgrade subscription to a higher plan
+     * Requirements: 4.2
+     */
+    async upgradeSubscription(subscriptionId: string, data: SubscriptionUpgradeRequest): Promise<AdminSubscription> {
+        return apiClient.post(`/admin/subscriptions/${subscriptionId}/upgrade`, data)
+    },
+
+    /**
+     * Downgrade subscription to a lower plan
+     * Requirements: 4.2
+     */
+    async downgradeSubscription(subscriptionId: string, data: SubscriptionDowngradeRequest): Promise<AdminSubscription> {
+        return apiClient.post(`/admin/subscriptions/${subscriptionId}/downgrade`, data)
+    },
+
+    /**
+     * Extend subscription by adding days
+     * Requirements: 4.3
+     */
+    async extendSubscription(subscriptionId: string, data: SubscriptionExtendRequest): Promise<AdminSubscription> {
+        return apiClient.post(`/admin/subscriptions/${subscriptionId}/extend`, data)
+    },
+
+    /**
+     * Process refund for a payment
+     * Requirements: 4.4
+     */
+    async processRefund(paymentId: string, data: RefundRequest): Promise<RefundResponse> {
+        return apiClient.post(`/admin/payments/${paymentId}/refund`, data)
+    },
+
+    /**
+     * Get revenue analytics
+     * Requirements: 4.5
+     */
+    async getRevenueAnalytics(params?: {
+        start_date?: string
+        end_date?: string
+    }): Promise<RevenueAnalytics> {
+        const searchParams = new URLSearchParams()
+        if (params?.start_date) searchParams.set("start_date", params.start_date)
+        if (params?.end_date) searchParams.set("end_date", params.end_date)
+        const query = searchParams.toString()
+        return apiClient.get(`/admin/analytics/revenue${query ? `?${query}` : ""}`)
+    },
+
+    // ==================== Promotional API ====================
+
+    /**
+     * Get paginated list of discount codes
+     * Requirements: 14.2
+     */
+    async getDiscountCodes(params: {
+        page?: number
+        page_size?: number
+        is_active?: boolean
+        search?: string
+    }): Promise<import("@/types/admin").DiscountCodeListResponse> {
+        const searchParams = new URLSearchParams()
+        if (params.page) searchParams.set("page", params.page.toString())
+        if (params.page_size) searchParams.set("page_size", params.page_size.toString())
+        if (params.is_active !== undefined) searchParams.set("is_active", params.is_active.toString())
+        if (params.search) searchParams.set("search", params.search)
+        const query = searchParams.toString()
+        return apiClient.get(`/admin/promotions/discount-codes${query ? `?${query}` : ""}`)
+    },
+
+    /**
+     * Get discount code by ID
+     * Requirements: 14.2
+     */
+    async getDiscountCode(discountCodeId: string): Promise<import("@/types/admin").DiscountCode> {
+        return apiClient.get(`/admin/promotions/discount-codes/${discountCodeId}`)
+    },
+
+    /**
+     * Create a new discount code
+     * Requirements: 14.1
+     */
+    async createDiscountCode(data: import("@/types/admin").DiscountCodeCreateRequest): Promise<import("@/types/admin").DiscountCode> {
+        return apiClient.post("/admin/promotions/discount-codes", data)
+    },
+
+    /**
+     * Update a discount code
+     * Requirements: 14.1
+     */
+    async updateDiscountCode(discountCodeId: string, data: import("@/types/admin").DiscountCodeUpdateRequest): Promise<import("@/types/admin").DiscountCode> {
+        return apiClient.put(`/admin/promotions/discount-codes/${discountCodeId}`, data)
+    },
+
+    /**
+     * Delete a discount code
+     * Requirements: 14.2
+     */
+    async deleteDiscountCode(discountCodeId: string): Promise<void> {
+        return apiClient.delete(`/admin/promotions/discount-codes/${discountCodeId}`)
+    },
+
+    /**
+     * Validate a discount code
+     * Requirements: 14.1
+     */
+    async validateDiscountCode(code: string, plan?: string): Promise<import("@/types/admin").DiscountCodeValidationResponse> {
+        return apiClient.post("/admin/promotions/discount-codes/validate", { code, plan })
     },
 }
 

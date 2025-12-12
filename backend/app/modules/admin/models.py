@@ -225,15 +225,31 @@ class DiscountCode(Base):
         Returns:
             bool: True if code is valid
         """
+        from datetime import timezone
+        
         if current_date is None:
-            current_date = datetime.utcnow()
+            current_date = datetime.now(timezone.utc)
         
         # Check if code is active
         if not self.is_active:
             return False
         
+        # Make dates timezone-aware for comparison
+        valid_from = self.valid_from
+        valid_until = self.valid_until
+        
+        # If valid_from/valid_until are naive, assume UTC
+        if valid_from.tzinfo is None:
+            valid_from = valid_from.replace(tzinfo=timezone.utc)
+        if valid_until.tzinfo is None:
+            valid_until = valid_until.replace(tzinfo=timezone.utc)
+        
+        # If current_date is naive, assume UTC
+        if current_date.tzinfo is None:
+            current_date = current_date.replace(tzinfo=timezone.utc)
+        
         # Check date validity
-        if current_date < self.valid_from or current_date > self.valid_until:
+        if current_date < valid_from or current_date > valid_until:
             return False
         
         # Check usage limit

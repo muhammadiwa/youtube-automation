@@ -208,3 +208,23 @@ class EnableDisableResponse(BaseModel):
     provider: str
     is_enabled: bool
     message: str
+
+
+# ==================== Discount Code Schemas (Public) ====================
+
+class ApplyDiscountCodeRequest(BaseModel):
+    """Request to validate and apply a discount code."""
+    code: str = Field(..., min_length=1, max_length=50, description="Discount code to apply")
+    plan: Optional[str] = Field(None, description="Plan to check applicability")
+    amount: float = Field(default=0, ge=0, description="Original amount before discount (0 for usage tracking only)")
+
+
+class DiscountCodePublicResponse(BaseModel):
+    """Public response for discount code validation."""
+    is_valid: bool
+    code: Optional[str] = None
+    discount_type: Optional[str] = None  # "percentage" or "fixed"
+    discount_value: Optional[float] = None
+    discount_amount: Optional[float] = None  # Calculated discount amount
+    final_amount: Optional[float] = None  # Amount after discount
+    message: str

@@ -954,6 +954,131 @@ async def retry_payment(
         )
 
 
+# ==================== Discount Code Endpoints (Public) ====================
+
+from app.modules.payment_gateway.schemas import (
+    ApplyDiscountCodeRequest,
+    DiscountCodePublicResponse,
+)
+
+
+@payment_router.post("/discount-code/validate", response_model=DiscountCodePublicResponse)
+async def validate_discount_code(
+    data: ApplyDiscountCodeRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Validate and calculate discount for a promo code.
+    
+    This is a public endpoint for users to validate discount codes during checkout.
+    
+    Args:
+        data: Discount code, plan, and original amount
+        
+    Returns:
+        Validation result with calculated discount amount
+    """
+    from sqlalchemy import select
+    from app.modules.admin.models import DiscountCode
+    
+    # Find the discount code
+    result = await session.execute(
+        select(DiscountCode).where(DiscountCode.code == data.code.upper())
+    )
+    discount_code = result.scalar_one_or_none()
+    
+    if not discount_code:
+        return DiscountCodePublicResponse(
+            is_valid=False,
+            message="Invalid discount code"
+        )
+    
+    # Check if code is valid (active, within date range, usage limit)
+    if not discount_code.is_valid():
+        if not discount_code.is_active:
+            return DiscountCodePublicResponse(
+                is_valid=False,
+                message="This discount code is no longer active"
+            )
+        if discount_code.usage_limit and discount_code.usage_count >= discount_code.usage_limit:
+            return DiscountCodePublicResponse(
+                is_valid=False,
+                message="This discount code has reached its usage limit"
+            )
+        return DiscountCodePublicResponse(
+            is_valid=False,
+            message="This discount code has expired"
+        )
+    
+    # Check plan applicability
+    if data.plan and discount_code.applicable_plans:
+        if data.plan.lower() not in [p.lower() for p in discount_code.applicable_plans]:
+            return DiscountCodePublicResponse(
+                is_valid=False,
+                message=f"This discount code is not applicable to the {data.plan} plan"
+            )
+    
+    # Calculate discount
+    discount_amount = discount_code.calculate_discount(data.amount)
+    final_amount = max(0, data.amount - discount_amount)
+    
+    return DiscountCodePublicResponse(
+        is_valid=True,
+        code=discount_code.code,
+        discount_type=discount_code.discount_type,
+        discount_value=discount_code.discount_value,
+        discount_amount=round(discount_amount, 2),
+        final_amount=round(final_amount, 2),
+        message=f"Discount code applied! You save ${discount_amount:.2f}"
+    )
+
+
+@payment_router.post("/discount-code/apply")
+async def apply_discount_code(
+    data: ApplyDiscountCodeRequest,
+    user_id: uuid.UUID = Header(..., alias="X-User-ID"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Apply a discount code and increment usage count.
+    
+    This should be called after successful payment to track usage.
+    
+    Args:
+        data: Discount code and amount info
+        user_id: User applying the code
+        
+    Returns:
+        Updated discount info
+    """
+    from sqlalchemy import select
+    from app.modules.admin.models import DiscountCode
+    
+    # Find the discount code
+    result = await session.execute(
+        select(DiscountCode).where(DiscountCode.code == data.code.upper())
+    )
+    discount_code = result.scalar_one_or_none()
+    
+    if not discount_code or not discount_code.is_valid():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired discount code"
+        )
+    
+    # Increment usage count
+    discount_code.usage_count += 1
+    await session.commit()
+    
+    discount_amount = discount_code.calculate_discount(data.amount)
+    
+    return {
+        "success": True,
+        "code": discount_code.code,
+        "discount_amount": round(discount_amount, 2),
+        "new_usage_count": discount_code.usage_count,
+        "message": "Discount code applied successfully"
+    }
+
+
 @payment_router.post("/webhook/{provider}")
 async def handle_webhook(
     provider: GatewayProvider,

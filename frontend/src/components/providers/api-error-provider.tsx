@@ -33,6 +33,9 @@ const ERROR_MESSAGES: Record<number, string> = {
 const SILENT_ENDPOINTS = [
     "/auth/me", // Don't show error when checking auth status
     "/auth/refresh", // Don't show error when refreshing token
+    "/admin/me", // Don't show error when checking admin status (may not be admin)
+    "/strikes/alerts", // Don't show error for strike alerts (handled gracefully in component)
+    "/strikes/summaries", // Don't show error for strike summaries
 ]
 
 export function ApiErrorProvider({ children }: { children: React.ReactNode }) {

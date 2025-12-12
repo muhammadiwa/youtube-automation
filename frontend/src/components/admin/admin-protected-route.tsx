@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
 import { useAdmin } from "@/hooks/use-admin"
@@ -9,6 +9,7 @@ import { Shield, AlertTriangle } from "lucide-react"
 
 const ADMIN_SESSION_KEY = "admin_session_token"
 const ADMIN_SESSION_EXPIRY_KEY = "admin_session_expiry"
+const ADMIN_VERIFIED_KEY = "admin_verified" // Cache admin verification
 
 interface AdminProtectedRouteProps {
     children: React.ReactNode
@@ -18,8 +19,7 @@ interface AdminProtectedRouteProps {
 
 /**
  * Check if admin session is valid
- * For non-2FA admins, we use a simple session marker
- * For 2FA admins, we check the actual session token
+ * Session is created after successful admin login with 2FA
  */
 function isAdminSessionValid(): boolean {
     if (typeof window === "undefined") return false
@@ -34,8 +34,34 @@ function isAdminSessionValid(): boolean {
 }
 
 /**
+ * Check if admin was previously verified (cached)
+ * This prevents unnecessary API calls on refresh
+ */
+function isAdminVerifiedCached(): boolean {
+    if (typeof window === "undefined") return false
+    return localStorage.getItem(ADMIN_VERIFIED_KEY) === "true"
+}
+
+/**
+ * Cache admin verification status
+ */
+function setAdminVerifiedCache(verified: boolean): void {
+    if (typeof window === "undefined") return
+    if (verified) {
+        localStorage.setItem(ADMIN_VERIFIED_KEY, "true")
+    } else {
+        localStorage.removeItem(ADMIN_VERIFIED_KEY)
+    }
+}
+
+/**
  * Protected route wrapper for admin pages
- * Checks both authentication, admin role, and 2FA session
+ * 
+ * Logic:
+ * 1. Check if user is authenticated (via auth token)
+ * 2. Check if admin session is valid (created after 2FA login)
+ * 3. If session valid, trust it - no need to re-verify admin status on every refresh
+ * 4. Only verify admin status from API if not cached
  */
 export function AdminProtectedRoute({
     children,
@@ -47,69 +73,101 @@ export function AdminProtectedRoute({
     const { isAuthenticated, isLoading: authLoading } = useAuth()
     const { admin, isAdmin, isLoading: adminLoading } = useAdmin()
     const [hasValidSession, setHasValidSession] = useState<boolean | null>(null)
-
-    const isLoading = authLoading || adminLoading || hasValidSession === null
+    const [isVerified, setIsVerified] = useState<boolean | null>(null)
+    const hasRedirected = useRef(false)
 
     // Check admin session on mount
     useEffect(() => {
-        setHasValidSession(isAdminSessionValid())
+        const sessionValid = isAdminSessionValid()
+        setHasValidSession(sessionValid)
+
+        // If session is valid, trust the cached verification
+        if (sessionValid && isAdminVerifiedCached()) {
+            setIsVerified(true)
+        }
     }, [])
 
-    // Set up session expiry check interval
+    // Update verification status when admin data loads
+    useEffect(() => {
+        if (!adminLoading && hasValidSession) {
+            if (isAdmin) {
+                setIsVerified(true)
+                setAdminVerifiedCache(true)
+            } else if (isVerified === null) {
+                // Only set to false if we haven't verified yet
+                // This prevents race conditions
+                setIsVerified(false)
+                setAdminVerifiedCache(false)
+            }
+        }
+    }, [adminLoading, isAdmin, hasValidSession, isVerified])
+
+    // Set up session expiry check interval (every 5 minutes instead of 1)
     useEffect(() => {
         const checkSession = () => {
             const valid = isAdminSessionValid()
-            setHasValidSession(valid)
-
-            if (!valid && isAdmin) {
-                // Session expired, redirect to admin login
+            if (!valid && hasValidSession) {
+                // Session expired
+                setHasValidSession(false)
+                setAdminVerifiedCache(false)
                 const returnUrl = encodeURIComponent(pathname)
-                router.push(`/admin/login?returnUrl=${returnUrl}`)
+                router.push(`/admin/login?returnUrl=${returnUrl}&reason=session_expired`)
             }
         }
 
-        // Check every minute
-        const interval = setInterval(checkSession, 60000)
+        // Check every 5 minutes
+        const interval = setInterval(checkSession, 300000)
         return () => clearInterval(interval)
-    }, [isAdmin, pathname, router])
+    }, [hasValidSession, pathname, router])
+
+    // Determine if we're still loading
+    const isLoading = authLoading || hasValidSession === null ||
+        (hasValidSession && !isAdminVerifiedCached() && adminLoading)
 
     useEffect(() => {
-        if (isLoading) return
+        if (isLoading || hasRedirected.current) return
 
-        // Redirect to admin login if not authenticated
+        // Redirect to login if not authenticated
         if (!isAuthenticated) {
+            hasRedirected.current = true
             const returnUrl = encodeURIComponent(pathname)
             router.push(`/admin/login?returnUrl=${returnUrl}`)
             return
         }
 
-        // Redirect to dashboard if not admin
-        if (!isAdmin) {
-            router.push("/dashboard")
-            return
-        }
-
-        // Redirect to admin login if no valid 2FA session
+        // Redirect to admin login if no valid session
         if (!hasValidSession) {
+            hasRedirected.current = true
             const returnUrl = encodeURIComponent(pathname)
             router.push(`/admin/login?returnUrl=${returnUrl}`)
+            return
+        }
+
+        // If we have valid session and cached verification, allow access
+        // Only check API result if not cached
+        if (!isAdminVerifiedCached() && !adminLoading && !isAdmin) {
+            hasRedirected.current = true
+            setAdminVerifiedCache(false)
+            router.push("/dashboard")
             return
         }
 
         // Check super admin requirement
         if (requireSuperAdmin && admin?.role !== "super_admin") {
+            hasRedirected.current = true
             router.push("/admin")
             return
         }
 
         // Check specific permission
         if (requiredPermission && admin && !admin.permissions.includes(requiredPermission)) {
+            hasRedirected.current = true
             router.push("/admin")
             return
         }
-    }, [isAuthenticated, isAdmin, admin, isLoading, hasValidSession, router, pathname, requiredPermission, requireSuperAdmin])
+    }, [isAuthenticated, isAdmin, admin, isLoading, adminLoading, hasValidSession, router, pathname, requiredPermission, requireSuperAdmin])
 
-    // Show loading state
+    // Show loading state only during initial load
     if (isLoading) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-muted/30">
@@ -118,19 +176,30 @@ export function AdminProtectedRoute({
                         <Shield className="h-8 w-8 text-white animate-pulse" />
                     </div>
                     <Spinner className="h-6 w-6 mx-auto" />
-                    <p className="text-muted-foreground">Verifying admin access...</p>
+                    <p className="text-muted-foreground">Loading...</p>
                 </div>
             </div>
         )
     }
 
-    // Show access denied if not authenticated
+    // Show nothing if not authenticated (will redirect)
     if (!isAuthenticated) {
         return null
     }
 
-    // Show access denied if not admin
-    if (!isAdmin) {
+    // Show nothing if session is invalid (will redirect)
+    if (!hasValidSession) {
+        return null
+    }
+
+    // If session is valid and we have cached verification, show content
+    // This allows immediate render without waiting for API
+    if (hasValidSession && (isAdminVerifiedCached() || isAdmin)) {
+        return <>{children}</>
+    }
+
+    // Show access denied only if API confirmed user is not admin
+    if (!adminLoading && !isAdmin && !isAdminVerifiedCached()) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-muted/30">
                 <div className="text-center space-y-4 max-w-md mx-auto p-8">
@@ -145,11 +214,6 @@ export function AdminProtectedRoute({
                 </div>
             </div>
         )
-    }
-
-    // Show nothing if session is invalid (will redirect)
-    if (!hasValidSession) {
-        return null
     }
 
     return <>{children}</>

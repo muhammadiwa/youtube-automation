@@ -406,6 +406,36 @@ export const billingApi = {
         })
     },
 
+    // ============ Discount Code ============
+    async validateDiscountCode(code: string, plan?: string, amount?: number): Promise<{
+        is_valid: boolean
+        code?: string
+        discount_type?: "percentage" | "fixed"
+        discount_value?: number
+        discount_amount?: number
+        final_amount?: number
+        message: string
+    }> {
+        return await apiClient.post("/payments/discount-code/validate", {
+            code,
+            plan,
+            amount: amount || 0,
+        })
+    },
+
+    async applyDiscountCode(code: string, amount: number): Promise<{
+        success: boolean
+        code: string
+        discount_amount: number
+        new_usage_count: number
+        message: string
+    }> {
+        return await apiClient.post("/payments/discount-code/apply", {
+            code,
+            amount,
+        }, { includeUserId: true })
+    },
+
     async createPayment(data: {
         amount: number
         currency: string

@@ -64,6 +64,7 @@ const adminNavigation: NavSection[] = [
         items: [
             { name: "Users", href: "/admin/users", icon: Users },
             { name: "Subscriptions", href: "/admin/subscriptions", icon: CreditCard },
+            { name: "Revenue", href: "/admin/revenue", icon: TrendingUp },
         ],
     },
     {

@@ -279,6 +279,57 @@ class StrikeAlertRepository:
         await self.session.flush()
         return alert
 
+    async def get_all(
+        self,
+        user_id: Optional[uuid.UUID] = None,
+        acknowledged: Optional[bool] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[StrikeAlert]:
+        """Get all alerts, optionally filtered by user's accounts."""
+        query = select(StrikeAlert)
+        
+        if acknowledged is not None:
+            query = query.where(StrikeAlert.acknowledged == acknowledged)
+        
+        query = query.order_by(StrikeAlert.created_at.desc())
+        query = query.limit(limit).offset(offset)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def count_all(
+        self,
+        user_id: Optional[uuid.UUID] = None,
+        acknowledged: Optional[bool] = None,
+    ) -> int:
+        """Count all alerts."""
+        query = select(func.count(StrikeAlert.id))
+        
+        if acknowledged is not None:
+            query = query.where(StrikeAlert.acknowledged == acknowledged)
+        
+        result = await self.session.execute(query)
+        return result.scalar() or 0
+
+    async def mark_all_as_read(self, user_id: Optional[uuid.UUID] = None) -> int:
+        """Mark all alerts as read."""
+        from sqlalchemy import update
+        
+        query = update(StrikeAlert).where(
+            StrikeAlert.acknowledged == False
+        ).values(
+            acknowledged=True,
+            acknowledged_at=datetime.utcnow(),
+        )
+        
+        result = await self.session.execute(query)
+        return result.rowcount
+
+    async def delete(self, alert: StrikeAlert) -> None:
+        """Delete an alert."""
+        await self.session.delete(alert)
+        await self.session.flush()
+
 
 class PausedStreamRepository:
     """Repository for PausedStream model operations."""
