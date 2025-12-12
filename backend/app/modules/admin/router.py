@@ -50,6 +50,7 @@ from app.modules.admin.schemas import (
     ImpersonateRequest,
     ImpersonateResponse,
     PasswordResetResponse,
+    UserStatsResponse,
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -115,7 +116,10 @@ async def verify_admin_access_endpoint(
     Requirements: 1.1 - Verify admin role before granting access
     
     Returns 403 for non-admin users.
+    2FA is only required if user has enabled it (totp_secret is set).
     """
+    from app.modules.auth.repository import UserRepository
+    
     service = AdminService(session)
     admin = await service.verify_admin_access(user_id)
     
@@ -125,12 +129,17 @@ async def verify_admin_access_endpoint(
             detail="User does not have admin privileges",
         )
     
+    # Check if user has 2FA enabled
+    user_repo = UserRepository(session)
+    user = await user_repo.get_by_id(user_id)
+    requires_2fa = user is not None and user.totp_secret is not None
+    
     return AdminAccessVerification(
         is_admin=True,
         admin_id=admin.id,
         role=admin.role,
         permissions=admin.permissions,
-        requires_2fa=True,  # Always require 2FA for admin
+        requires_2fa=requires_2fa,  # Only require 2FA if user has it enabled
     )
 
 
@@ -417,6 +426,21 @@ async def get_current_admin(
 
 
 # ==================== User Management (Requirements 3.1-3.6) ====================
+
+@router.get("/users/stats", response_model=UserStatsResponse)
+async def get_user_stats(
+    admin: Admin = Depends(require_permission(AdminPermission.VIEW_USERS)),
+    session: AsyncSession = Depends(get_session),
+):
+    """Get user statistics for admin dashboard.
+    
+    Returns total users, active users, suspended users, and new users this month.
+    
+    Requires VIEW_USERS permission.
+    """
+    service = AdminUserService(session)
+    return await service.get_user_stats()
+
 
 @router.get("/users", response_model=UserListResponse)
 async def list_users(

@@ -53,7 +53,17 @@ export default function AdminLoginPage() {
             try {
                 const adminInfo = await adminApi.verifyAdminAccess()
                 if (adminInfo.isAdmin) {
-                    // Check if we have a valid admin session
+                    // If 2FA is not required, redirect directly to admin
+                    if (!adminInfo.requires2FA) {
+                        // Create a simple session marker for non-2FA admins
+                        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
+                        localStorage.setItem(ADMIN_SESSION_KEY, "no-2fa-session")
+                        localStorage.setItem(ADMIN_SESSION_EXPIRY_KEY, expiresAt.toISOString())
+                        router.push(returnUrl)
+                        return
+                    }
+
+                    // Check if we have a valid admin session (for 2FA users)
                     const sessionToken = localStorage.getItem(ADMIN_SESSION_KEY)
                     const sessionExpiry = localStorage.getItem(ADMIN_SESSION_EXPIRY_KEY)
 
@@ -101,7 +111,17 @@ export default function AdminLoginPage() {
                 return
             }
 
-            // Move to 2FA step
+            // If 2FA is not required, redirect directly to admin
+            if (!adminInfo.requires2FA) {
+                // Create a simple session marker for non-2FA admins
+                const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
+                localStorage.setItem(ADMIN_SESSION_KEY, "no-2fa-session")
+                localStorage.setItem(ADMIN_SESSION_EXPIRY_KEY, expiresAt.toISOString())
+                router.push(returnUrl)
+                return
+            }
+
+            // Move to 2FA step (only if 2FA is enabled)
             setState((prev) => ({
                 ...prev,
                 step: "2fa",

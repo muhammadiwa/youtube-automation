@@ -26,6 +26,7 @@ from app.modules.admin.schemas import (
     YouTubeAccountSummary,
     UsageStats,
     ActivityLog,
+    UserStatsResponse,
 )
 from app.modules.auth.models import User
 from app.modules.auth.repository import UserRepository
@@ -68,6 +69,41 @@ class AdminUserService:
         self.session = session
         self.user_repo = UserRepository(session)
 
+    async def get_user_stats(self) -> UserStatsResponse:
+        """Get user statistics for admin dashboard.
+        
+        Returns:
+            UserStatsResponse: User statistics
+        """
+        # Get total users
+        total_query = select(func.count(User.id))
+        total_result = await self.session.execute(total_query)
+        total = total_result.scalar() or 0
+        
+        # Get active users
+        active_query = select(func.count(User.id)).where(User.is_active == True)
+        active_result = await self.session.execute(active_query)
+        active = active_result.scalar() or 0
+        
+        # Get suspended users
+        suspended = total - active
+        
+        # Get new users this month
+        now = datetime.utcnow()
+        first_day_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        new_this_month_query = select(func.count(User.id)).where(
+            User.created_at >= first_day_of_month
+        )
+        new_this_month_result = await self.session.execute(new_this_month_query)
+        new_this_month = new_this_month_result.scalar() or 0
+        
+        return UserStatsResponse(
+            total=total,
+            active=active,
+            suspended=suspended,
+            new_this_month=new_this_month,
+        )
+
     async def get_users(
         self,
         filters: UserFilters,
@@ -86,7 +122,10 @@ class AdminUserService:
         Returns:
             UserListResponse: Paginated user list
         """
+        from sqlalchemy.orm import selectinload
+        
         conditions = []
+        need_subscription_join = False
         
         # Status filter
         if filters.status:
@@ -110,6 +149,35 @@ class AdminUserService:
             conditions.append(User.created_at >= filters.registered_after)
         if filters.registered_before:
             conditions.append(User.created_at <= filters.registered_before)
+        
+        # Plan filter - requires join with subscriptions
+        subscription_filter_ids = None
+        if filters.plan:
+            try:
+                from app.modules.billing.models import Subscription
+                
+                # Get user IDs with matching plan
+                plan_query = select(Subscription.user_id).where(
+                    Subscription.plan_tier == filters.plan.lower(),
+                    Subscription.status.in_(["active", "trialing"])
+                )
+                plan_result = await self.session.execute(plan_query)
+                subscription_filter_ids = [row[0] for row in plan_result.fetchall()]
+                
+                if subscription_filter_ids:
+                    conditions.append(User.id.in_(subscription_filter_ids))
+                else:
+                    # No users with this plan, return empty result
+                    return UserListResponse(
+                        items=[],
+                        total=0,
+                        page=page,
+                        page_size=page_size,
+                        total_pages=0,
+                    )
+            except Exception as e:
+                import logging
+                logging.warning(f"Failed to filter by plan: {e}")
         
         # Build count query
         count_query = select(func.count(User.id))
@@ -477,16 +545,22 @@ class AdminUserService:
 
     async def _get_user_warning_count(self, user_id: uuid.UUID) -> int:
         """Get the number of warnings for a user."""
-        # This would query a user_warnings table in production
-        # For now, return 0 as placeholder
-        return 0
+        try:
+            from app.modules.admin.models import UserWarning
+            
+            query = select(func.count(UserWarning.id)).where(UserWarning.user_id == user_id)
+            result = await self.session.execute(query)
+            return result.scalar() or 0
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to get warning count for user {user_id}: {e}")
+            return 0
 
     async def _get_user_plan_name(self, user_id: uuid.UUID) -> Optional[str]:
         """Get the user's subscription plan name."""
-        # This would join with subscriptions table in production
-        # For now, return None as placeholder
         try:
             from app.modules.billing.models import Subscription
+            
             query = select(Subscription).where(
                 Subscription.user_id == user_id,
                 Subscription.status.in_(["active", "trialing"])
@@ -494,35 +568,42 @@ class AdminUserService:
             result = await self.session.execute(query)
             subscription = result.scalar_one_or_none()
             if subscription:
-                return subscription.plan_name
-        except Exception:
-            pass
-        return None
+                # Capitalize plan tier for display (e.g., "free" -> "Free")
+                return subscription.plan_tier.capitalize() if subscription.plan_tier else "Free"
+        except Exception as e:
+            # Log error for debugging
+            import logging
+            logging.warning(f"Failed to get plan name for user {user_id}: {e}")
+        return "Free"  # Default to Free if no subscription found
 
     async def _get_user_subscription(self, user_id: uuid.UUID) -> Optional[SubscriptionInfo]:
         """Get user's subscription information."""
         try:
             from app.modules.billing.models import Subscription
+            
             query = select(Subscription).where(Subscription.user_id == user_id)
             result = await self.session.execute(query)
             subscription = result.scalar_one_or_none()
             if subscription:
                 return SubscriptionInfo(
                     id=subscription.id,
-                    plan_name=subscription.plan_name,
+                    plan_name=subscription.plan_tier.capitalize() if subscription.plan_tier else "Free",
                     status=subscription.status,
-                    start_date=subscription.start_date,
-                    end_date=subscription.end_date,
-                    next_billing_date=getattr(subscription, 'next_billing_date', None),
+                    start_date=subscription.current_period_start,
+                    end_date=subscription.current_period_end,
+                    next_billing_date=subscription.current_period_end,  # Next billing is at period end
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            # Log error for debugging
+            import logging
+            logging.warning(f"Failed to get subscription for user {user_id}: {e}")
         return None
 
     async def _get_connected_accounts(self, user_id: uuid.UUID) -> list[YouTubeAccountSummary]:
         """Get user's connected YouTube accounts."""
         try:
-            from app.modules.account.models import YouTubeAccount
+            from app.modules.account.models import YouTubeAccount, AccountStatus
+            
             query = select(YouTubeAccount).where(YouTubeAccount.user_id == user_id)
             result = await self.session.execute(query)
             accounts = list(result.scalars().all())
@@ -530,33 +611,124 @@ class AdminUserService:
                 YouTubeAccountSummary(
                     id=acc.id,
                     channel_id=acc.channel_id,
-                    channel_name=acc.channel_name or "Unknown",
-                    subscriber_count=getattr(acc, 'subscriber_count', None),
-                    is_active=acc.is_active,
+                    channel_name=acc.channel_title or "Unknown",  # Use channel_title
+                    subscriber_count=acc.subscriber_count,
+                    is_active=acc.status == AccountStatus.ACTIVE.value,  # Check status field
                 )
                 for acc in accounts
             ]
-        except Exception:
-            pass
+        except Exception as e:
+            # Log error for debugging
+            import logging
+            logging.warning(f"Failed to get connected accounts for user {user_id}: {e}")
         return []
 
     async def _get_usage_stats(self, user_id: uuid.UUID) -> UsageStats:
         """Get user's usage statistics."""
-        # This would aggregate from various tables in production
+        import logging
+        
+        total_videos = 0
+        total_streams = 0
+        storage_used_gb = 0.0
+        ai_generations_used = 0
+        account_ids: list = []
+        
+        try:
+            from app.modules.video.models import Video
+            from app.modules.account.models import YouTubeAccount
+            
+            # Get user's YouTube accounts
+            accounts_query = select(YouTubeAccount.id).where(YouTubeAccount.user_id == user_id)
+            accounts_result = await self.session.execute(accounts_query)
+            account_ids = [row[0] for row in accounts_result.fetchall()]
+            
+            if account_ids:
+                # Count videos
+                videos_query = select(func.count(Video.id)).where(Video.account_id.in_(account_ids))
+                videos_result = await self.session.execute(videos_query)
+                total_videos = videos_result.scalar() or 0
+                
+                # Calculate storage used (sum of file sizes)
+                storage_query = select(func.sum(Video.file_size)).where(
+                    Video.account_id.in_(account_ids),
+                    Video.file_size.isnot(None)
+                )
+                storage_result = await self.session.execute(storage_query)
+                total_bytes = storage_result.scalar() or 0
+                storage_used_gb = total_bytes / (1024 * 1024 * 1024)  # Convert to GB
+        except Exception as e:
+            logging.warning(f"Failed to get video stats for user {user_id}: {e}")
+        
+        try:
+            from app.modules.stream.models import LiveEvent
+            
+            if account_ids:
+                # Count streams
+                streams_query = select(func.count(LiveEvent.id)).where(LiveEvent.account_id.in_(account_ids))
+                streams_result = await self.session.execute(streams_query)
+                total_streams = streams_result.scalar() or 0
+        except Exception as e:
+            logging.warning(f"Failed to get stream stats for user {user_id}: {e}")
+        
+        # Get AI generations count from AI logs
+        try:
+            from app.modules.ai.models import AILog
+            
+            ai_query = select(func.count(AILog.id)).where(AILog.user_id == user_id)
+            ai_result = await self.session.execute(ai_query)
+            ai_generations_used = ai_result.scalar() or 0
+        except Exception as e:
+            logging.warning(f"Failed to get AI stats for user {user_id}: {e}")
+        
         return UsageStats(
-            total_videos=0,
-            total_streams=0,
-            storage_used_gb=0.0,
-            bandwidth_used_gb=0.0,
-            ai_generations_used=0,
+            total_videos=total_videos,
+            total_streams=total_streams,
+            storage_used_gb=round(storage_used_gb, 2),
+            bandwidth_used_gb=0.0,  # Would need bandwidth tracking table
+            ai_generations_used=ai_generations_used,
         )
 
     async def _get_activity_history(
         self, user_id: uuid.UUID, limit: int = 50
     ) -> list[ActivityLog]:
         """Get user's activity history from audit logs."""
-        # This would query audit_logs table in production
-        return []
+        try:
+            from app.modules.auth.audit import AuditLog
+            
+            query = (
+                select(AuditLog)
+                .where(AuditLog.user_id == user_id)
+                .order_by(AuditLog.timestamp.desc())
+                .limit(limit)
+            )
+            result = await self.session.execute(query)
+            logs = list(result.scalars().all())
+            
+            return [
+                ActivityLog(
+                    id=log.id,
+                    action=log.action,
+                    details=log.details,
+                    ip_address=log.ip_address,
+                    created_at=log.timestamp,
+                )
+                for log in logs
+            ]
+        except Exception:
+            # Fallback to in-memory audit logger
+            from app.modules.auth.audit import AuditLogger
+            
+            logs = AuditLogger.get_logs_for_user(user_id, limit=limit)
+            return [
+                ActivityLog(
+                    id=log.id,
+                    action=log.action,
+                    details=log.details,
+                    ip_address=log.ip_address,
+                    created_at=log.timestamp,
+                )
+                for log in logs
+            ]
 
     async def _pause_user_jobs(self, user_id: uuid.UUID) -> int:
         """Pause all queued jobs for a user.

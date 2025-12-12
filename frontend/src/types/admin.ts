@@ -123,3 +123,137 @@ export interface ExportResponse {
     completed_at: string | null
     file_size: number | null
 }
+
+// ==================== User Management Types ====================
+
+export type UserStatus = "active" | "suspended" | "pending"
+
+export interface UserFilters {
+    status?: UserStatus
+    plan?: string
+    search?: string
+    registered_after?: string
+    registered_before?: string
+}
+
+export interface UserSummary {
+    id: string
+    email: string
+    name: string
+    status: UserStatus
+    is_active: boolean
+    plan_name: string | null
+    created_at: string
+    last_login_at: string | null
+    warning_count: number
+}
+
+export interface UserListResponse {
+    items: UserSummary[]
+    total: number
+    page: number
+    page_size: number
+    total_pages: number
+}
+
+export interface SubscriptionInfo {
+    id: string | null
+    plan_name: string | null
+    status: string | null
+    start_date: string | null
+    end_date: string | null
+    next_billing_date: string | null
+}
+
+export interface YouTubeAccountSummary {
+    id: string
+    channel_id: string
+    channel_name: string
+    subscriber_count: number | null
+    is_active: boolean
+}
+
+export interface UsageStats {
+    total_videos: number
+    total_streams: number
+    storage_used_gb: number
+    bandwidth_used_gb: number
+    ai_generations_used: number
+}
+
+export interface ActivityLog {
+    id: string
+    action: string
+    details: Record<string, unknown> | null
+    ip_address: string | null
+    created_at: string
+}
+
+export interface UserDetail {
+    id: string
+    email: string
+    name: string
+    status: UserStatus
+    is_active: boolean
+    is_2fa_enabled: boolean
+    subscription: SubscriptionInfo | null
+    connected_accounts: YouTubeAccountSummary[]
+    usage_stats: UsageStats
+    activity_history: ActivityLog[]
+    created_at: string
+    updated_at: string
+    last_login_at: string | null
+    warning_count: number
+}
+
+export interface UserSuspendRequest {
+    reason: string
+}
+
+export interface UserSuspendResponse {
+    user_id: string
+    status: string
+    suspended_at: string
+    reason: string
+    jobs_paused: number
+    notification_sent: boolean
+}
+
+export interface UserActivateResponse {
+    user_id: string
+    status: string
+    activated_at: string
+    jobs_resumed: number
+}
+
+export interface ImpersonationSession {
+    session_id: string
+    admin_id: string
+    user_id: string
+    access_token: string
+    expires_at: string
+    audit_log_id: string
+}
+
+export interface ImpersonateRequest {
+    reason?: string
+}
+
+export interface ImpersonateResponse {
+    session: ImpersonationSession
+    message: string
+}
+
+export interface PasswordResetResponse {
+    user_id: string
+    email: string
+    reset_link_sent: boolean
+    expires_at: string
+}
+
+export interface UserStatsResponse {
+    total: number
+    active: number
+    suspended: number
+    new_this_month: number
+}

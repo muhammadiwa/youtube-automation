@@ -18,6 +18,8 @@ interface AdminProtectedRouteProps {
 
 /**
  * Check if admin session is valid
+ * For non-2FA admins, we use a simple session marker
+ * For 2FA admins, we check the actual session token
  */
 function isAdminSessionValid(): boolean {
     if (typeof window === "undefined") return false

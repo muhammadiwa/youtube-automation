@@ -76,3 +76,10 @@ export {
     TableCell,
     TableCaption,
 } from "./table"
+export {
+    Popover,
+    PopoverTrigger,
+    PopoverContent,
+    PopoverAnchor,
+} from "./popover"
+export { Calendar } from "./calendar"

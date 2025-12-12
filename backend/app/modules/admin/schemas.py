@@ -103,6 +103,17 @@ class AdminPermissionCheckResponse(BaseModel):
 from enum import Enum
 
 
+class UserStatsResponse(BaseModel):
+    """User statistics for admin dashboard.
+    
+    Requirements: 3.1 - Display user statistics
+    """
+    total: int = Field(..., description="Total number of users")
+    active: int = Field(..., description="Number of active users")
+    suspended: int = Field(..., description="Number of suspended users")
+    new_this_month: int = Field(..., description="Number of users registered this month")
+
+
 class UserStatus(str, Enum):
     """User account status."""
     ACTIVE = "active"

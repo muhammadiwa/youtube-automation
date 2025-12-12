@@ -17,16 +17,19 @@ export function AdminLayout({
     className,
 }: AdminLayoutProps) {
     return (
-        <div className="flex min-h-screen bg-muted/30">
+        <div className="flex min-h-screen bg-slate-50 dark:bg-slate-950">
             {/* Desktop Sidebar */}
-            <aside className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 z-50">
+            <aside className="hidden lg:flex lg:w-64 lg:flex-col lg:fixed lg:inset-y-0 z-50">
                 <AdminSidebar />
             </aside>
 
             {/* Main Content */}
-            <div className="flex-1 flex flex-col md:pl-64">
+            <div className="flex-1 flex flex-col lg:pl-64">
                 <AdminHeader breadcrumbs={breadcrumbs} />
-                <main className={cn("flex-1 p-4 md:p-6 lg:p-8", className)}>
+                <main className={cn(
+                    "flex-1 p-4 md:p-6",
+                    className
+                )}>
                     {children}
                 </main>
             </div>
