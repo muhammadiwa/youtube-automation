@@ -4,7 +4,10 @@ Scheduled tasks for token management and quota monitoring.
 """
 
 import logging
+import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Optional
 
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +15,117 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.account.models import YouTubeAccount, AccountStatus
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TokenExpiryAlert:
+    """Alert model for token expiry notifications."""
+    
+    account_id: uuid.UUID
+    channel_title: str
+    user_id: uuid.UUID
+    expires_at: Optional[datetime]
+    hours_until_expiry: int
+    alert_type: str = "token_expiry"
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def to_dict(self) -> dict:
+        """Convert alert to dictionary."""
+        return {
+            "account_id": str(self.account_id),
+            "user_id": str(self.user_id),
+            "channel_title": self.channel_title,
+            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "hours_until_expiry": self.hours_until_expiry,
+            "alert_type": self.alert_type,
+            "created_at": self.created_at.isoformat(),
+        }
+
+
+class TokenExpiryAlertStore:
+    """In-memory store for token expiry alerts (for testing and caching)."""
+    
+    _alerts: list[dict] = []
+    _notified_accounts: set[str] = set()
+    
+    @classmethod
+    def add_alert(cls, alert: TokenExpiryAlert) -> None:
+        """Add an alert to the store, preventing duplicates."""
+        account_key = str(alert.account_id)
+        if account_key not in cls._notified_accounts:
+            cls._alerts.append(alert.to_dict())
+            cls._notified_accounts.add(account_key)
+    
+    @classmethod
+    def get_alerts(cls, user_id: Optional[uuid.UUID] = None) -> list[dict]:
+        """Get all alerts, optionally filtered by user ID."""
+        if user_id is None:
+            return cls._alerts.copy()
+        return [a for a in cls._alerts if a["user_id"] == str(user_id)]
+    
+    @classmethod
+    def clear_alerts(cls) -> None:
+        """Clear all alerts."""
+        cls._alerts = []
+        cls._notified_accounts = set()
+    
+    @classmethod
+    def reset_notification_status(cls, account_id: uuid.UUID) -> None:
+        """Reset notification status for an account (e.g., after token refresh)."""
+        account_key = str(account_id)
+        cls._notified_accounts.discard(account_key)
+
+
+def check_token_expiry(
+    account_id: uuid.UUID,
+    channel_title: str,
+    user_id: uuid.UUID,
+    token_expires_at: Optional[datetime],
+    alert_threshold_hours: int = 24,
+) -> Optional[TokenExpiryAlert]:
+    """Check if a token is expiring and generate an alert if needed.
+    
+    Args:
+        account_id: The YouTube account ID
+        channel_title: The channel title
+        user_id: The user ID
+        token_expires_at: When the token expires (None if unknown)
+        alert_threshold_hours: Hours before expiry to trigger alert
+        
+    Returns:
+        TokenExpiryAlert if alert should be generated, None otherwise
+    """
+    now = datetime.utcnow()
+    
+    # If expiry is unknown, generate alert
+    if token_expires_at is None:
+        alert = TokenExpiryAlert(
+            account_id=account_id,
+            channel_title=channel_title,
+            user_id=user_id,
+            expires_at=None,
+            hours_until_expiry=0,
+        )
+        TokenExpiryAlertStore.add_alert(alert)
+        return alert
+    
+    # Calculate hours until expiry
+    time_until_expiry = token_expires_at - now
+    hours_until_expiry = max(0, int(time_until_expiry.total_seconds() / 3600))
+    
+    # Check if within threshold
+    if hours_until_expiry <= alert_threshold_hours:
+        alert = TokenExpiryAlert(
+            account_id=account_id,
+            channel_title=channel_title,
+            user_id=user_id,
+            expires_at=token_expires_at,
+            hours_until_expiry=hours_until_expiry,
+        )
+        TokenExpiryAlertStore.add_alert(alert)
+        return alert
+    
+    return None
 
 
 async def check_expiring_tokens(session: AsyncSession) -> int:
