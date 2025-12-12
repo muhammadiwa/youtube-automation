@@ -255,3 +255,122 @@ class CancelDeletionResponse(BaseModel):
     status: str
     cancelled_at: datetime
     message: str
+
+
+# ==================== Terms of Service Schemas (Requirements 15.4) ====================
+
+
+class CreateTermsOfServiceRequest(BaseModel):
+    """Request to create a new terms of service version.
+    
+    Requirements: 15.4 - Create new version
+    """
+    version: str = Field(..., min_length=1, max_length=50, description="Version identifier (e.g., '1.0', '2.0')")
+    title: str = Field(..., min_length=1, max_length=255, description="Title of the terms")
+    content: str = Field(..., min_length=1, description="Plain text content of the terms")
+    content_html: Optional[str] = Field(None, description="HTML formatted content")
+    summary: Optional[str] = Field(None, description="Summary of changes from previous version")
+    effective_date: Optional[datetime] = Field(None, description="When the terms become effective")
+
+
+class TermsOfServiceResponse(BaseModel):
+    """Response for a terms of service version.
+    
+    Requirements: 15.4 - Terms of service versioning
+    """
+    id: uuid.UUID
+    version: str
+    title: str
+    content: str
+    content_html: Optional[str] = None
+    summary: Optional[str] = None
+    status: Literal["draft", "active", "archived"]
+    effective_date: Optional[datetime] = None
+    created_by: uuid.UUID
+    activated_by: Optional[uuid.UUID] = None
+    activated_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TermsOfServiceListResponse(BaseModel):
+    """Paginated list of terms of service versions.
+    
+    Requirements: 15.4 - List versions
+    """
+    items: list[TermsOfServiceResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class ActivateTermsOfServiceResponse(BaseModel):
+    """Response after activating a terms of service version.
+    
+    Requirements: 15.4 - Activate version
+    """
+    id: uuid.UUID
+    version: str
+    status: str
+    activated_at: datetime
+    message: str
+
+
+# ==================== Compliance Report Schemas (Requirements 15.5) ====================
+
+
+class CreateComplianceReportRequest(BaseModel):
+    """Request to generate a compliance report.
+    
+    Requirements: 15.5 - Generate audit-ready report
+    """
+    report_type: Literal["data_processing", "user_activity", "security_audit", "gdpr_compliance", "full_audit"] = Field(
+        ..., description="Type of compliance report"
+    )
+    title: str = Field(..., min_length=1, max_length=255, description="Report title")
+    description: Optional[str] = Field(None, description="Report description")
+    start_date: Optional[datetime] = Field(None, description="Report period start date")
+    end_date: Optional[datetime] = Field(None, description="Report period end date")
+    parameters: Optional[dict[str, Any]] = Field(None, description="Additional report parameters")
+
+
+class ComplianceReportResponse(BaseModel):
+    """Response for a compliance report.
+    
+    Requirements: 15.5 - Compliance report generation
+    """
+    id: uuid.UUID
+    report_type: str
+    title: str
+    description: Optional[str] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    parameters: Optional[dict[str, Any]] = None
+    status: Literal["pending", "generating", "completed", "failed"]
+    error_message: Optional[str] = None
+    file_path: Optional[str] = None
+    file_size: Optional[int] = None
+    download_url: Optional[str] = None
+    expires_at: Optional[datetime] = None
+    requested_by: uuid.UUID
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ComplianceReportListResponse(BaseModel):
+    """Paginated list of compliance reports.
+    
+    Requirements: 15.5 - List reports
+    """
+    items: list[ComplianceReportResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int

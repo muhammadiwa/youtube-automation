@@ -30,6 +30,15 @@ from app.modules.admin.compliance_schemas import (
     ProcessDeletionResponse,
     CancelDeletionRequest,
     CancelDeletionResponse,
+    # Terms of Service schemas (Requirements 15.4)
+    CreateTermsOfServiceRequest,
+    TermsOfServiceResponse,
+    TermsOfServiceListResponse,
+    ActivateTermsOfServiceResponse,
+    # Compliance Report schemas (Requirements 15.5)
+    CreateComplianceReportRequest,
+    ComplianceReportResponse,
+    ComplianceReportListResponse,
 )
 from app.modules.admin.compliance_service import (
     AdminComplianceService,
@@ -342,3 +351,194 @@ async def cancel_deletion(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
+
+
+
+# ==================== Terms of Service (Requirements 15.4) ====================
+
+
+@router.post("/compliance/terms", response_model=TermsOfServiceResponse)
+async def create_terms_of_service(
+    request: Request,
+    data: CreateTermsOfServiceRequest,
+    admin: Admin = Depends(require_permission(AdminPermission.MANAGE_COMPLIANCE)),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Create a new terms of service version.
+    
+    Requirements: 15.4 - Create new version
+    
+    Requires MANAGE_COMPLIANCE permission.
+    """
+    from app.modules.admin.compliance_service import (
+        AdminTermsOfServiceService,
+        TermsOfServiceVersionExistsError,
+    )
+    from app.modules.admin.compliance_schemas import TermsOfServiceResponse
+    
+    service = AdminTermsOfServiceService(session)
+    
+    try:
+        terms = await service.create_terms_of_service(
+            version=data.version,
+            title=data.title,
+            content=data.content,
+            admin_id=admin.user_id,
+            content_html=data.content_html,
+            summary=data.summary,
+            effective_date=data.effective_date,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+        
+        return TermsOfServiceResponse(
+            id=terms.id,
+            version=terms.version,
+            title=terms.title,
+            content=terms.content,
+            content_html=terms.content_html,
+            summary=terms.summary,
+            status=terms.status,
+            effective_date=terms.effective_date,
+            created_by=terms.created_by,
+            activated_by=terms.activated_by,
+            activated_at=terms.activated_at,
+            created_at=terms.created_at,
+            updated_at=terms.updated_at,
+        )
+    except TermsOfServiceVersionExistsError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        )
+
+
+@router.get("/compliance/terms", response_model=TermsOfServiceListResponse)
+async def get_terms_of_service_list(
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    status_filter: Optional[str] = Query(None, alias="status", description="Filter by status"),
+    admin: Admin = Depends(require_permission(AdminPermission.VIEW_AUDIT_LOGS)),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Get list of terms of service versions.
+    
+    Requirements: 15.4 - List versions
+    
+    Requires VIEW_AUDIT_LOGS permission.
+    """
+    from app.modules.admin.compliance_service import AdminTermsOfServiceService
+    
+    service = AdminTermsOfServiceService(session)
+    return await service.get_terms_of_service_list(
+        page=page,
+        page_size=page_size,
+        status=status_filter,
+    )
+
+
+@router.put(
+    "/compliance/terms/{terms_id}/activate",
+    response_model=ActivateTermsOfServiceResponse,
+)
+async def activate_terms_of_service(
+    request: Request,
+    terms_id: uuid.UUID,
+    admin: Admin = Depends(require_permission(AdminPermission.MANAGE_COMPLIANCE)),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Activate a terms of service version.
+    
+    Requirements: 15.4 - Activate version and require user acceptance on next login
+    
+    Requires MANAGE_COMPLIANCE permission.
+    """
+    from app.modules.admin.compliance_service import (
+        AdminTermsOfServiceService,
+        TermsOfServiceNotFoundError,
+        TermsOfServiceAlreadyActiveError,
+    )
+    
+    service = AdminTermsOfServiceService(session)
+    
+    try:
+        return await service.activate_terms_of_service(
+            terms_id=terms_id,
+            admin_id=admin.user_id,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+    except TermsOfServiceNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+    except TermsOfServiceAlreadyActiveError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+# ==================== Compliance Reports (Requirements 15.5) ====================
+
+
+@router.post("/compliance/reports", response_model=ComplianceReportResponse)
+async def create_compliance_report(
+    request: Request,
+    data: CreateComplianceReportRequest,
+    admin: Admin = Depends(require_permission(AdminPermission.MANAGE_COMPLIANCE)),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Generate a compliance report.
+    
+    Requirements: 15.5 - Generate audit-ready report
+    
+    Requires MANAGE_COMPLIANCE permission.
+    """
+    from app.modules.admin.compliance_service import AdminComplianceReportService
+    
+    service = AdminComplianceReportService(session)
+    
+    return await service.create_compliance_report(
+        report_type=data.report_type,
+        title=data.title,
+        admin_id=admin.user_id,
+        description=data.description,
+        start_date=data.start_date,
+        end_date=data.end_date,
+        parameters=data.parameters,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
+
+@router.get("/compliance/reports", response_model=ComplianceReportListResponse)
+async def get_compliance_reports(
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    report_type: Optional[str] = Query(None, description="Filter by report type"),
+    status_filter: Optional[str] = Query(None, alias="status", description="Filter by status"),
+    admin: Admin = Depends(require_permission(AdminPermission.VIEW_AUDIT_LOGS)),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Get list of compliance reports.
+    
+    Requirements: 15.5 - List reports
+    
+    Requires VIEW_AUDIT_LOGS permission.
+    """
+    from app.modules.admin.compliance_service import AdminComplianceReportService
+    
+    service = AdminComplianceReportService(session)
+    return await service.get_compliance_reports(
+        page=page,
+        page_size=page_size,
+        report_type=report_type,
+        status=status_filter,
+    )

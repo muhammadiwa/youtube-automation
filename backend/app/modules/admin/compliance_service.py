@@ -758,3 +758,473 @@ class AdminComplianceService:
             "scheduled_for": scheduled_for,
         }
         return request_id
+
+
+
+# ==================== Terms of Service Service (Requirements 15.4) ====================
+
+
+class TermsOfServiceNotFoundError(Exception):
+    """Raised when terms of service is not found."""
+    pass
+
+
+class TermsOfServiceAlreadyActiveError(Exception):
+    """Raised when trying to activate already active terms."""
+    pass
+
+
+class TermsOfServiceVersionExistsError(Exception):
+    """Raised when version already exists."""
+    pass
+
+
+class AdminTermsOfServiceService:
+    """
+    Service for managing terms of service versions.
+    
+    Requirements: 15.4 - Terms of service versioning
+    """
+    
+    def __init__(self, session: AsyncSession):
+        """Initialize the terms of service service."""
+        self.session = session
+    
+    async def create_terms_of_service(
+        self,
+        version: str,
+        title: str,
+        content: str,
+        admin_id: uuid.UUID,
+        content_html: Optional[str] = None,
+        summary: Optional[str] = None,
+        effective_date: Optional[datetime] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ):
+        """
+        Create a new terms of service version.
+        
+        Requirements: 15.4 - Create new version
+        
+        Args:
+            version: Version identifier
+            title: Title of the terms
+            content: Plain text content
+            admin_id: Admin creating the terms
+            content_html: HTML formatted content
+            summary: Summary of changes
+            effective_date: When terms become effective
+            ip_address: Client IP address
+            user_agent: Client user agent
+            
+        Returns:
+            TermsOfService: Created terms of service
+        """
+        from app.modules.admin.models import TermsOfService, TermsOfServiceStatus
+        
+        # Check if version already exists
+        existing = await self.session.execute(
+            select(TermsOfService).where(TermsOfService.version == version)
+        )
+        if existing.scalar_one_or_none():
+            raise TermsOfServiceVersionExistsError(f"Version {version} already exists")
+        
+        # Create new terms
+        terms = TermsOfService(
+            version=version,
+            title=title,
+            content=content,
+            content_html=content_html,
+            summary=summary,
+            status=TermsOfServiceStatus.DRAFT.value,
+            effective_date=effective_date,
+            created_by=admin_id,
+        )
+        
+        self.session.add(terms)
+        await self.session.commit()
+        await self.session.refresh(terms)
+        
+        # Log the action
+        AdminAuditService.log(
+            admin_id=admin_id,
+            admin_user_id=admin_id,
+            event=AdminAuditEvent.TERMS_CREATED,
+            resource_type="terms_of_service",
+            resource_id=str(terms.id),
+            details={
+                "version": version,
+                "title": title,
+            },
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        
+        return terms
+    
+    async def get_terms_of_service_list(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        status: Optional[str] = None,
+    ):
+        """
+        Get list of terms of service versions.
+        
+        Requirements: 15.4 - List versions
+        
+        Args:
+            page: Page number
+            page_size: Items per page
+            status: Filter by status
+            
+        Returns:
+            Paginated list of terms
+        """
+        from app.modules.admin.models import TermsOfService
+        from app.modules.admin.compliance_schemas import (
+            TermsOfServiceResponse,
+            TermsOfServiceListResponse,
+        )
+        
+        # Build query
+        query = select(TermsOfService)
+        
+        if status:
+            query = query.where(TermsOfService.status == status)
+        
+        # Order by created_at descending
+        query = query.order_by(desc(TermsOfService.created_at))
+        
+        # Get total count
+        count_query = select(func.count()).select_from(TermsOfService)
+        if status:
+            count_query = count_query.where(TermsOfService.status == status)
+        
+        total_result = await self.session.execute(count_query)
+        total = total_result.scalar() or 0
+        
+        # Apply pagination
+        query = query.offset((page - 1) * page_size).limit(page_size)
+        
+        result = await self.session.execute(query)
+        terms_list = result.scalars().all()
+        
+        total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+        
+        items = [
+            TermsOfServiceResponse(
+                id=t.id,
+                version=t.version,
+                title=t.title,
+                content=t.content,
+                content_html=t.content_html,
+                summary=t.summary,
+                status=t.status,
+                effective_date=t.effective_date,
+                created_by=t.created_by,
+                activated_by=t.activated_by,
+                activated_at=t.activated_at,
+                created_at=t.created_at,
+                updated_at=t.updated_at,
+            )
+            for t in terms_list
+        ]
+        
+        return TermsOfServiceListResponse(
+            items=items,
+            total=total,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+        )
+    
+    async def activate_terms_of_service(
+        self,
+        terms_id: uuid.UUID,
+        admin_id: uuid.UUID,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ):
+        """
+        Activate a terms of service version.
+        
+        Requirements: 15.4 - Activate version and require user acceptance on next login
+        
+        Args:
+            terms_id: ID of the terms to activate
+            admin_id: Admin activating the terms
+            ip_address: Client IP address
+            user_agent: Client user agent
+            
+        Returns:
+            ActivateTermsOfServiceResponse: Activation result
+        """
+        from app.modules.admin.models import TermsOfService, TermsOfServiceStatus
+        from app.modules.admin.compliance_schemas import ActivateTermsOfServiceResponse
+        
+        # Get the terms
+        result = await self.session.execute(
+            select(TermsOfService).where(TermsOfService.id == terms_id)
+        )
+        terms = result.scalar_one_or_none()
+        
+        if not terms:
+            raise TermsOfServiceNotFoundError(f"Terms of service {terms_id} not found")
+        
+        if terms.status == TermsOfServiceStatus.ACTIVE.value:
+            raise TermsOfServiceAlreadyActiveError("Terms of service is already active")
+        
+        # Archive any currently active terms
+        await self.session.execute(
+            select(TermsOfService)
+            .where(TermsOfService.status == TermsOfServiceStatus.ACTIVE.value)
+        )
+        active_terms = await self.session.execute(
+            select(TermsOfService).where(
+                TermsOfService.status == TermsOfServiceStatus.ACTIVE.value
+            )
+        )
+        for active in active_terms.scalars().all():
+            active.status = TermsOfServiceStatus.ARCHIVED.value
+        
+        # Activate the new terms
+        terms.status = TermsOfServiceStatus.ACTIVE.value
+        terms.activated_by = admin_id
+        terms.activated_at = datetime.utcnow()
+        
+        if not terms.effective_date:
+            terms.effective_date = datetime.utcnow()
+        
+        await self.session.commit()
+        await self.session.refresh(terms)
+        
+        # Log the action
+        AdminAuditService.log(
+            admin_id=admin_id,
+            admin_user_id=admin_id,
+            event=AdminAuditEvent.TERMS_ACTIVATED,
+            resource_type="terms_of_service",
+            resource_id=str(terms.id),
+            details={
+                "version": terms.version,
+                "title": terms.title,
+            },
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        
+        return ActivateTermsOfServiceResponse(
+            id=terms.id,
+            version=terms.version,
+            status=terms.status,
+            activated_at=terms.activated_at,
+            message=f"Terms of service version {terms.version} activated successfully",
+        )
+
+
+# ==================== Compliance Report Service (Requirements 15.5) ====================
+
+
+class ComplianceReportNotFoundError(Exception):
+    """Raised when compliance report is not found."""
+    pass
+
+
+class AdminComplianceReportService:
+    """
+    Service for generating compliance reports.
+    
+    Requirements: 15.5 - Compliance report generation
+    """
+    
+    def __init__(self, session: AsyncSession):
+        """Initialize the compliance report service."""
+        self.session = session
+    
+    async def create_compliance_report(
+        self,
+        report_type: str,
+        title: str,
+        admin_id: uuid.UUID,
+        description: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        parameters: Optional[dict] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ):
+        """
+        Create and generate a compliance report.
+        
+        Requirements: 15.5 - Generate audit-ready report
+        
+        Args:
+            report_type: Type of report
+            title: Report title
+            admin_id: Admin requesting the report
+            description: Report description
+            start_date: Report period start
+            end_date: Report period end
+            parameters: Additional parameters
+            ip_address: Client IP address
+            user_agent: Client user agent
+            
+        Returns:
+            ComplianceReport: Created report
+        """
+        from app.modules.admin.models import ComplianceReport, ComplianceReportStatus
+        from app.modules.admin.compliance_schemas import ComplianceReportResponse
+        
+        # Create the report
+        report = ComplianceReport(
+            report_type=report_type,
+            title=title,
+            description=description,
+            start_date=start_date,
+            end_date=end_date,
+            parameters=parameters,
+            status=ComplianceReportStatus.PENDING.value,
+            requested_by=admin_id,
+        )
+        
+        self.session.add(report)
+        await self.session.commit()
+        await self.session.refresh(report)
+        
+        # In production, this would trigger an async job to generate the report
+        # For now, simulate generation
+        report.status = ComplianceReportStatus.GENERATING.value
+        await self.session.commit()
+        
+        # Simulate completion
+        report.status = ComplianceReportStatus.COMPLETED.value
+        report.completed_at = datetime.utcnow()
+        report.download_url = f"/admin/compliance/reports/{report.id}/download"
+        report.expires_at = datetime.utcnow() + timedelta(days=30)
+        report.file_size = 1024 * 100  # Simulated 100KB
+        
+        await self.session.commit()
+        await self.session.refresh(report)
+        
+        # Log the action
+        AdminAuditService.log(
+            admin_id=admin_id,
+            admin_user_id=admin_id,
+            event=AdminAuditEvent.COMPLIANCE_REPORT_GENERATED,
+            resource_type="compliance_report",
+            resource_id=str(report.id),
+            details={
+                "report_type": report_type,
+                "title": title,
+            },
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        
+        return ComplianceReportResponse(
+            id=report.id,
+            report_type=report.report_type,
+            title=report.title,
+            description=report.description,
+            start_date=report.start_date,
+            end_date=report.end_date,
+            parameters=report.parameters,
+            status=report.status,
+            error_message=report.error_message,
+            file_path=report.file_path,
+            file_size=report.file_size,
+            download_url=report.download_url,
+            expires_at=report.expires_at,
+            requested_by=report.requested_by,
+            created_at=report.created_at,
+            completed_at=report.completed_at,
+        )
+    
+    async def get_compliance_reports(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        report_type: Optional[str] = None,
+        status: Optional[str] = None,
+    ):
+        """
+        Get list of compliance reports.
+        
+        Requirements: 15.5 - List reports
+        
+        Args:
+            page: Page number
+            page_size: Items per page
+            report_type: Filter by report type
+            status: Filter by status
+            
+        Returns:
+            Paginated list of reports
+        """
+        from app.modules.admin.models import ComplianceReport
+        from app.modules.admin.compliance_schemas import (
+            ComplianceReportResponse,
+            ComplianceReportListResponse,
+        )
+        
+        # Build query
+        query = select(ComplianceReport)
+        
+        if report_type:
+            query = query.where(ComplianceReport.report_type == report_type)
+        
+        if status:
+            query = query.where(ComplianceReport.status == status)
+        
+        # Order by created_at descending
+        query = query.order_by(desc(ComplianceReport.created_at))
+        
+        # Get total count
+        count_query = select(func.count()).select_from(ComplianceReport)
+        if report_type:
+            count_query = count_query.where(ComplianceReport.report_type == report_type)
+        if status:
+            count_query = count_query.where(ComplianceReport.status == status)
+        
+        total_result = await self.session.execute(count_query)
+        total = total_result.scalar() or 0
+        
+        # Apply pagination
+        query = query.offset((page - 1) * page_size).limit(page_size)
+        
+        result = await self.session.execute(query)
+        reports = result.scalars().all()
+        
+        total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+        
+        items = [
+            ComplianceReportResponse(
+                id=r.id,
+                report_type=r.report_type,
+                title=r.title,
+                description=r.description,
+                start_date=r.start_date,
+                end_date=r.end_date,
+                parameters=r.parameters,
+                status=r.status,
+                error_message=r.error_message,
+                file_path=r.file_path,
+                file_size=r.file_size,
+                download_url=r.download_url,
+                expires_at=r.expires_at,
+                requested_by=r.requested_by,
+                created_at=r.created_at,
+                completed_at=r.completed_at,
+            )
+            for r in reports
+        ]
+        
+        return ComplianceReportListResponse(
+            items=items,
+            total=total,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+        )

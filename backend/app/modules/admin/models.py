@@ -1081,3 +1081,179 @@ class TrialCode(Base):
 
     def __repr__(self) -> str:
         return f"<TrialCode(id={self.id}, code={self.code}, days={self.trial_days})>"
+
+
+# ==================== Terms of Service Models (Requirements 15.4) ====================
+
+
+class TermsOfServiceStatus(str, Enum):
+    """Status of terms of service versions.
+    
+    Requirements: 15.4 - Terms of service versioning
+    """
+    DRAFT = "draft"
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+
+
+class TermsOfService(Base):
+    """Terms of Service model for versioned legal documents.
+    
+    Requirements: 15.4 - Version the document and require user acceptance on next login
+    """
+
+    __tablename__ = "terms_of_service"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    
+    # Version information
+    version: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(
+        String(255), nullable=False
+    )
+    
+    # Content
+    content: Mapped[str] = mapped_column(
+        Text, nullable=False
+    )
+    content_html: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )
+    summary: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )
+    
+    # Status
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=TermsOfServiceStatus.DRAFT.value, index=True
+    )
+    
+    # Effective dates
+    effective_date: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    
+    # Admin who created/activated
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    activated_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    activated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    def __repr__(self) -> str:
+        return f"<TermsOfService(id={self.id}, version={self.version}, status={self.status})>"
+
+
+# ==================== Compliance Report Models (Requirements 15.5) ====================
+
+
+class ComplianceReportStatus(str, Enum):
+    """Status of compliance reports.
+    
+    Requirements: 15.5 - Compliance report generation
+    """
+    PENDING = "pending"
+    GENERATING = "generating"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ComplianceReportType(str, Enum):
+    """Types of compliance reports.
+    
+    Requirements: 15.5 - Audit-ready reports
+    """
+    DATA_PROCESSING = "data_processing"
+    USER_ACTIVITY = "user_activity"
+    SECURITY_AUDIT = "security_audit"
+    GDPR_COMPLIANCE = "gdpr_compliance"
+    FULL_AUDIT = "full_audit"
+
+
+class ComplianceReport(Base):
+    """Compliance Report model for audit-ready documents.
+    
+    Requirements: 15.5 - Create audit-ready document with data processing activities
+    """
+
+    __tablename__ = "compliance_reports"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    
+    # Report information
+    report_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(
+        String(255), nullable=False
+    )
+    description: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )
+    
+    # Report parameters
+    start_date: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    end_date: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    parameters: Mapped[Optional[dict]] = mapped_column(
+        JSON, nullable=True
+    )
+    
+    # Status tracking
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=ComplianceReportStatus.PENDING.value, index=True
+    )
+    error_message: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )
+    
+    # File information
+    file_path: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )
+    file_size: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+    download_url: Mapped[Optional[str]] = mapped_column(
+        String(1000), nullable=True
+    )
+    expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    
+    # Admin who requested
+    requested_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<ComplianceReport(id={self.id}, type={self.report_type}, status={self.status})>"

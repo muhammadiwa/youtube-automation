@@ -56,6 +56,13 @@ class AdminAuditEvent(str, Enum):
     DATA_EXPORT_PROCESSED = "data_export_processed"
     DELETION_REQUEST_PROCESSED = "deletion_request_processed"
     AUDIT_LOG_EXPORTED = "audit_log_exported"
+    
+    # Terms of Service events (Requirements 15.4)
+    TERMS_CREATED = "terms_created"
+    TERMS_ACTIVATED = "terms_activated"
+    
+    # Compliance Report events (Requirements 15.5)
+    COMPLIANCE_REPORT_GENERATED = "compliance_report_generated"
 
 
 class AdminAuditEntry(BaseModel):
