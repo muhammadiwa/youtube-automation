@@ -380,6 +380,60 @@ const adminApi = {
     async validateDiscountCode(code: string, plan?: string): Promise<import("@/types/admin").DiscountCodeValidationResponse> {
         return apiClient.post("/admin/promotions/discount-codes/validate", { code, plan })
     },
+
+    // ==================== Moderation API ====================
+
+    /**
+     * Get moderation queue with filters
+     * Requirements: 6.1
+     */
+    async getModerationQueue(params: {
+        page?: number
+        page_size?: number
+        filters?: import("@/types/admin").ModerationFilters
+    }): Promise<import("@/types/admin").ContentReportListResponse> {
+        const searchParams = new URLSearchParams()
+        if (params.page) searchParams.set("page", params.page.toString())
+        if (params.page_size) searchParams.set("page_size", params.page_size.toString())
+        if (params.filters?.status) searchParams.set("status", params.filters.status)
+        if (params.filters?.severity) searchParams.set("severity", params.filters.severity)
+        if (params.filters?.content_type) searchParams.set("content_type", params.filters.content_type)
+        if (params.filters?.search) searchParams.set("search", params.filters.search)
+        const query = searchParams.toString()
+        return apiClient.get(`/admin/moderation/queue${query ? `?${query}` : ""}`)
+    },
+
+    /**
+     * Get report detail
+     * Requirements: 6.2
+     */
+    async getReportDetail(reportId: string): Promise<import("@/types/admin").ContentReportDetail> {
+        return apiClient.get(`/admin/moderation/reports/${reportId}`)
+    },
+
+    /**
+     * Approve content and dismiss reports
+     * Requirements: 6.3
+     */
+    async approveContent(reportId: string, data?: import("@/types/admin").ContentApproveRequest): Promise<import("@/types/admin").ContentApproveResponse> {
+        return apiClient.post(`/admin/moderation/reports/${reportId}/approve`, data || {})
+    },
+
+    /**
+     * Remove content
+     * Requirements: 6.4
+     */
+    async removeContent(reportId: string, data: import("@/types/admin").ContentRemoveRequest): Promise<import("@/types/admin").ContentRemoveResponse> {
+        return apiClient.post(`/admin/moderation/reports/${reportId}/remove`, data)
+    },
+
+    /**
+     * Warn a user
+     * Requirements: 6.5
+     */
+    async warnUser(userId: string, data: import("@/types/admin").UserWarnRequest): Promise<import("@/types/admin").UserWarnResponse> {
+        return apiClient.post(`/admin/moderation/users/${userId}/warn`, data)
+    },
 }
 
 export default adminApi

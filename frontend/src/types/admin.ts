@@ -408,3 +408,114 @@ export interface DiscountCodeFilters {
     is_active?: boolean
     search?: string
 }
+
+
+// ==================== Content Moderation Types ====================
+
+export type ReportSeverity = "low" | "medium" | "high" | "critical"
+export type ReportStatus = "pending" | "reviewed" | "approved" | "removed"
+export type ContentType = "video" | "comment" | "stream" | "thumbnail"
+
+export interface ModerationFilters {
+    status?: ReportStatus
+    severity?: ReportSeverity
+    content_type?: ContentType
+    search?: string
+}
+
+export interface ReporterInfo {
+    id: string | null
+    email: string | null
+    name: string | null
+}
+
+export interface ContentOwnerInfo {
+    id: string
+    email: string | null
+    name: string | null
+}
+
+export interface ContentReportSummary {
+    id: string
+    content_type: ContentType
+    content_id: string
+    content_preview: string | null
+    reason: string
+    reason_category: string | null
+    severity: ReportSeverity
+    report_count: number
+    status: ReportStatus
+    created_at: string
+    content_owner_email: string | null
+}
+
+export interface ContentReportDetail {
+    id: string
+    content_type: ContentType
+    content_id: string
+    content_preview: string | null
+    content_owner: ContentOwnerInfo
+    reporter: ReporterInfo | null
+    reason: string
+    reason_category: string | null
+    additional_info: Record<string, unknown> | null
+    severity: ReportSeverity
+    report_count: number
+    status: ReportStatus
+    reviewed_by: string | null
+    reviewed_at: string | null
+    review_notes: string | null
+    created_at: string
+    updated_at: string
+}
+
+export interface ContentReportListResponse {
+    items: ContentReportSummary[]
+    total: number
+    page: number
+    page_size: number
+    total_pages: number
+}
+
+export interface ContentApproveRequest {
+    notes?: string
+}
+
+export interface ContentApproveResponse {
+    report_id: string
+    status: string
+    reviewed_at: string
+    message: string
+}
+
+export interface ContentRemoveRequest {
+    reason: string
+    notify_user?: boolean
+}
+
+export interface ContentRemoveResponse {
+    report_id: string
+    content_id: string
+    content_type: string
+    status: string
+    content_deleted: boolean
+    user_notified: boolean
+    audit_log_id: string
+    removed_at: string
+    message: string
+}
+
+export interface UserWarnRequest {
+    reason: string
+    related_report_id?: string
+}
+
+export interface UserWarnResponse {
+    warning_id: string
+    user_id: string
+    warning_number: number
+    reason: string
+    notification_sent: boolean
+    created_at: string
+    message: string
+}
