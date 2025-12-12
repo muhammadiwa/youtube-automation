@@ -1000,3 +1000,84 @@ class UserCommunication(Base):
 
     def __repr__(self) -> str:
         return f"<UserCommunication(id={self.id}, user_id={self.user_id}, type={self.communication_type})>"
+
+
+# ==================== Trial Code Models (Requirements 14.4) ====================
+
+
+class TrialCode(Base):
+    """Trial code model for extended trial promotions.
+    
+    Requirements: 14.4 - Create extended trial codes
+    """
+
+    __tablename__ = "trial_codes"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    code: Mapped[str] = mapped_column(
+        String(50), unique=True, nullable=False, index=True
+    )
+    trial_days: Mapped[int] = mapped_column(
+        Integer, nullable=False
+    )
+    valid_from: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    valid_until: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    usage_limit: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+    usage_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    applicable_plans: Mapped[list[str]] = mapped_column(
+        ARRAY(String(50)), nullable=False, default=list
+    )
+    description: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    def is_valid(self, current_date: Optional[datetime] = None) -> bool:
+        """Check if trial code is currently valid.
+        
+        Args:
+            current_date: Date to check validity against (defaults to now)
+            
+        Returns:
+            bool: True if code is valid
+        """
+        if current_date is None:
+            current_date = datetime.utcnow()
+        
+        # Check if code is active
+        if not self.is_active:
+            return False
+        
+        # Check date validity
+        if current_date < self.valid_from or current_date > self.valid_until:
+            return False
+        
+        # Check usage limit
+        if self.usage_limit is not None and self.usage_count >= self.usage_limit:
+            return False
+        
+        return True
+
+    def __repr__(self) -> str:
+        return f"<TrialCode(id={self.id}, code={self.code}, days={self.trial_days})>"

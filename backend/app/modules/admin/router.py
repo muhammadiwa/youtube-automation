@@ -629,6 +629,48 @@ async def reset_user_password(
 from app.modules.admin.schemas import UserWarnRequest, UserWarnResponse
 from app.modules.admin.moderation_service import AdminModerationService
 from app.modules.admin.moderation_service import UserNotFoundError as ModerationUserNotFoundError
+from app.modules.admin.promotional_schemas import TrialExtensionRequest, TrialExtensionResponse
+from app.modules.admin.promotional_service import (
+    AdminPromotionalService,
+    TrialCodeNotFoundError,
+)
+
+
+# ==================== Trial Extension (Requirements 14.4) ====================
+
+
+@router.post("/users/{user_id}/extend-trial", response_model=TrialExtensionResponse)
+async def extend_user_trial(
+    request: Request,
+    user_id: uuid.UUID,
+    data: TrialExtensionRequest,
+    admin: Admin = Depends(require_permission(AdminPermission.MANAGE_BILLING)),
+    session: AsyncSession = Depends(get_session),
+):
+    """Extend a user's trial period.
+    
+    Requirements: 14.4 - Extend trial for specific user
+    
+    Requires MANAGE_BILLING permission.
+    """
+    service = AdminPromotionalService(session)
+    
+    try:
+        return await service.extend_user_trial(
+            user_id=user_id,
+            data=data,
+            admin_id=admin.user_id,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+    except TrialCodeNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+
+
+# ==================== User Warning (Requirements 6.5) ====================
 
 
 @router.post("/users/{user_id}/warn", response_model=UserWarnResponse)
