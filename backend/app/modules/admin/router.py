@@ -90,6 +90,10 @@ router.include_router(analytics_router, prefix="", tags=["admin-analytics"])
 from app.modules.admin.support_router import router as support_router
 router.include_router(support_router, prefix="", tags=["admin-support"])
 
+# Include payment gateway router
+from app.modules.admin.payment_gateway_router import router as payment_gateway_router
+router.include_router(payment_gateway_router, prefix="", tags=["admin-payment-gateways"])
+
 
 # ==================== Admin Access Verification ====================
 
