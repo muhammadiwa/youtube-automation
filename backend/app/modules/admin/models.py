@@ -631,3 +631,372 @@ class SystemConfig(Base):
 
     def __repr__(self) -> str:
         return f"<SystemConfig(key={self.key}, category={self.category})>"
+
+
+# ==================== Support & Communication Models (Requirements 10.1-10.5) ====================
+
+
+class TicketStatus(str, Enum):
+    """Status of support tickets.
+    
+    Requirements: 10.1 - Support ticket status tracking
+    """
+    OPEN = "open"
+    IN_PROGRESS = "in_progress"
+    WAITING_USER = "waiting_user"
+    RESOLVED = "resolved"
+    CLOSED = "closed"
+
+
+class TicketPriority(str, Enum):
+    """Priority levels for support tickets.
+    
+    Requirements: 10.1 - Support ticket priority
+    """
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    URGENT = "urgent"
+
+
+class SupportTicket(Base):
+    """Support Ticket model for user support requests.
+    
+    Requirements: 10.1 - Display all tickets with status, priority, user, and last update
+    Requirements: 10.2 - Respond to ticket via email and update ticket status
+    """
+
+    __tablename__ = "support_tickets"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    
+    # Ticket details
+    subject: Mapped[str] = mapped_column(
+        String(255), nullable=False
+    )
+    description: Mapped[str] = mapped_column(
+        Text, nullable=False
+    )
+    category: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True
+    )
+    
+    # Status and priority
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=TicketStatus.OPEN.value, index=True
+    )
+    priority: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=TicketPriority.MEDIUM.value, index=True
+    )
+    
+    # Assignment
+    assigned_to: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admins.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    
+    # Relationships
+    messages: Mapped[list["TicketMessage"]] = relationship(
+        "TicketMessage", back_populates="ticket", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        return f"<SupportTicket(id={self.id}, subject={self.subject}, status={self.status})>"
+
+
+class TicketMessage(Base):
+    """Ticket Message model for conversation thread.
+    
+    Requirements: 10.2 - Respond to ticket and track conversation
+    """
+
+    __tablename__ = "ticket_messages"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    ticket_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("support_tickets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    
+    # Sender information
+    sender_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    sender_type: Mapped[str] = mapped_column(
+        String(20), nullable=False  # 'user' or 'admin'
+    )
+    
+    # Message content
+    content: Mapped[str] = mapped_column(
+        Text, nullable=False
+    )
+    
+    # Attachments (stored as JSON array of file URLs)
+    attachments: Mapped[Optional[list]] = mapped_column(
+        JSON, nullable=True
+    )
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    
+    # Relationship
+    ticket: Mapped["SupportTicket"] = relationship(
+        "SupportTicket", back_populates="messages"
+    )
+
+    def __repr__(self) -> str:
+        return f"<TicketMessage(id={self.id}, ticket_id={self.ticket_id}, sender_type={self.sender_type})>"
+
+
+class BroadcastStatus(str, Enum):
+    """Status of broadcast messages.
+    
+    Requirements: 10.3 - Broadcast message status
+    """
+    DRAFT = "draft"
+    SCHEDULED = "scheduled"
+    SENDING = "sending"
+    SENT = "sent"
+    FAILED = "failed"
+
+
+class BroadcastMessage(Base):
+    """Broadcast Message model for mass communication.
+    
+    Requirements: 10.3 - Send broadcast targeting by plan, status, or all users with scheduling
+    """
+
+    __tablename__ = "broadcast_messages"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    
+    # Message content
+    subject: Mapped[str] = mapped_column(
+        String(255), nullable=False
+    )
+    content: Mapped[str] = mapped_column(
+        Text, nullable=False
+    )
+    content_html: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )
+    
+    # Targeting
+    target_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="all"  # 'all', 'plan', 'status'
+    )
+    target_plans: Mapped[Optional[list[str]]] = mapped_column(
+        ARRAY(String(50)), nullable=True
+    )
+    target_statuses: Mapped[Optional[list[str]]] = mapped_column(
+        ARRAY(String(50)), nullable=True
+    )
+    
+    # Scheduling
+    scheduled_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    
+    # Status tracking
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=BroadcastStatus.DRAFT.value, index=True
+    )
+    sent_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    failed_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    
+    # Admin who created
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admins.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    sent_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<BroadcastMessage(id={self.id}, subject={self.subject}, status={self.status})>"
+
+
+class Announcement(Base):
+    """Announcement model for dashboard banners.
+    
+    Requirements: 10.5 - Display banner in user dashboard with dismiss option
+    """
+
+    __tablename__ = "announcements"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    
+    # Announcement content
+    title: Mapped[str] = mapped_column(
+        String(255), nullable=False
+    )
+    content: Mapped[str] = mapped_column(
+        Text, nullable=False
+    )
+    
+    # Display settings
+    announcement_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="info"  # 'info', 'warning', 'success', 'error'
+    )
+    is_dismissible: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    
+    # Targeting (optional)
+    target_plans: Mapped[Optional[list[str]]] = mapped_column(
+        ARRAY(String(50)), nullable=True
+    )
+    
+    # Scheduling
+    start_date: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    end_date: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    
+    # Status
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    
+    # Admin who created
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admins.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    def is_visible(self, current_date: Optional[datetime] = None) -> bool:
+        """Check if announcement is currently visible.
+        
+        Args:
+            current_date: Date to check visibility against (defaults to now)
+            
+        Returns:
+            bool: True if announcement is visible
+        """
+        if current_date is None:
+            current_date = datetime.utcnow()
+        
+        if not self.is_active:
+            return False
+        
+        if current_date < self.start_date:
+            return False
+        
+        if self.end_date and current_date > self.end_date:
+            return False
+        
+        return True
+
+    def __repr__(self) -> str:
+        return f"<Announcement(id={self.id}, title={self.title}, is_active={self.is_active})>"
+
+
+class UserCommunication(Base):
+    """User Communication model for tracking all user interactions.
+    
+    Requirements: 10.4 - View all emails, notifications, and support interactions
+    """
+
+    __tablename__ = "user_communications"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    
+    # Communication type
+    communication_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True  # 'email', 'notification', 'support', 'broadcast'
+    )
+    
+    # Reference to related entity
+    reference_type: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True  # 'ticket', 'broadcast', 'notification'
+    )
+    reference_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    
+    # Communication details
+    subject: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )
+    content_preview: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )
+    
+    # Direction
+    direction: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="outbound"  # 'inbound', 'outbound'
+    )
+    
+    # Status
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="sent"  # 'sent', 'delivered', 'read', 'failed'
+    )
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserCommunication(id={self.id}, user_id={self.user_id}, type={self.communication_type})>"
