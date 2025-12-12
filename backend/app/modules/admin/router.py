@@ -33,6 +33,23 @@ from app.modules.admin.service import (
     AdminExistsError,
     AdminNotFoundError,
 )
+from app.modules.admin.user_service import (
+    AdminUserService,
+    UserNotFoundError,
+    UserAlreadySuspendedError,
+    UserNotSuspendedError,
+)
+from app.modules.admin.schemas import (
+    UserFilters,
+    UserListResponse,
+    UserDetail,
+    UserSuspendRequest,
+    UserSuspendResponse,
+    UserActivateResponse,
+    ImpersonateRequest,
+    ImpersonateResponse,
+    PasswordResetResponse,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -348,3 +365,215 @@ async def get_current_admin(
         )
     
     return result
+
+
+# ==================== User Management (Requirements 3.1-3.6) ====================
+
+@router.get("/users", response_model=UserListResponse)
+async def list_users(
+    request: Request,
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    status: Optional[str] = Query(None, description="Filter by status (active, suspended)"),
+    plan: Optional[str] = Query(None, description="Filter by subscription plan"),
+    search: Optional[str] = Query(None, description="Search by email or name"),
+    registered_after: Optional[str] = Query(None, description="Filter by registration date (ISO format)"),
+    registered_before: Optional[str] = Query(None, description="Filter by registration date (ISO format)"),
+    admin: Admin = Depends(require_permission(AdminPermission.VIEW_USERS)),
+    session: AsyncSession = Depends(get_session),
+):
+    """List all users with pagination and filters.
+    
+    Requirements: 3.1 - Display paginated list with search, filter by status, plan, registration date
+    
+    Requires VIEW_USERS permission.
+    """
+    from datetime import datetime
+    
+    # Parse date filters
+    reg_after = None
+    reg_before = None
+    if registered_after:
+        try:
+            reg_after = datetime.fromisoformat(registered_after.replace('Z', '+00:00'))
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid registered_after date format",
+            )
+    if registered_before:
+        try:
+            reg_before = datetime.fromisoformat(registered_before.replace('Z', '+00:00'))
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid registered_before date format",
+            )
+    
+    filters = UserFilters(
+        status=status,
+        plan=plan,
+        search=search,
+        registered_after=reg_after,
+        registered_before=reg_before,
+    )
+    
+    service = AdminUserService(session)
+    return await service.get_users(
+        filters=filters,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/users/{user_id}", response_model=UserDetail)
+async def get_user_detail(
+    user_id: uuid.UUID,
+    admin: Admin = Depends(require_permission(AdminPermission.VIEW_USERS)),
+    session: AsyncSession = Depends(get_session),
+):
+    """Get detailed user information.
+    
+    Requirements: 3.2 - Show profile info, subscription, connected accounts, usage stats, activity history
+    
+    Requires VIEW_USERS permission.
+    """
+    service = AdminUserService(session)
+    
+    try:
+        return await service.get_user_detail(user_id)
+    except UserNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+
+
+@router.post("/users/{user_id}/suspend", response_model=UserSuspendResponse)
+async def suspend_user(
+    request: Request,
+    user_id: uuid.UUID,
+    data: UserSuspendRequest,
+    admin: Admin = Depends(require_permission(AdminPermission.MANAGE_USERS)),
+    session: AsyncSession = Depends(get_session),
+):
+    """Suspend a user account.
+    
+    Requirements: 3.3 - Disable user access, pause all scheduled jobs, send notification email
+    
+    Requires MANAGE_USERS permission.
+    """
+    service = AdminUserService(session)
+    
+    try:
+        return await service.suspend_user(
+            user_id=user_id,
+            reason=data.reason,
+            admin_id=admin.user_id,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+    except UserNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+    except UserAlreadySuspendedError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@router.post("/users/{user_id}/activate", response_model=UserActivateResponse)
+async def activate_user(
+    request: Request,
+    user_id: uuid.UUID,
+    admin: Admin = Depends(require_permission(AdminPermission.MANAGE_USERS)),
+    session: AsyncSession = Depends(get_session),
+):
+    """Activate a suspended user account.
+    
+    Requirements: 3.4 - Restore access and resume paused jobs
+    
+    Requires MANAGE_USERS permission.
+    """
+    service = AdminUserService(session)
+    
+    try:
+        return await service.activate_user(
+            user_id=user_id,
+            admin_id=admin.user_id,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+    except UserNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+    except UserNotSuspendedError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@router.post("/users/{user_id}/impersonate", response_model=ImpersonateResponse)
+async def impersonate_user(
+    request: Request,
+    user_id: uuid.UUID,
+    data: Optional[ImpersonateRequest] = None,
+    admin: Admin = Depends(require_permission(AdminPermission.IMPERSONATE_USERS)),
+    session: AsyncSession = Depends(get_session),
+):
+    """Create an impersonation session for a user.
+    
+    Requirements: 3.5 - Create temporary session for support purposes with full audit logging
+    
+    Requires IMPERSONATE_USERS permission.
+    """
+    service = AdminUserService(session)
+    
+    try:
+        return await service.impersonate_user(
+            user_id=user_id,
+            admin_id=admin.user_id,
+            reason=data.reason if data else None,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+    except UserNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+
+
+@router.post("/users/{user_id}/reset-password", response_model=PasswordResetResponse)
+async def reset_user_password(
+    request: Request,
+    user_id: uuid.UUID,
+    admin: Admin = Depends(require_permission(AdminPermission.MANAGE_USERS)),
+    session: AsyncSession = Depends(get_session),
+):
+    """Initiate password reset for a user.
+    
+    Requirements: 3.6 - Send secure reset link to user email
+    
+    Requires MANAGE_USERS permission.
+    """
+    service = AdminUserService(session)
+    
+    try:
+        return await service.reset_user_password(
+            user_id=user_id,
+            admin_id=admin.user_id,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+    except UserNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
