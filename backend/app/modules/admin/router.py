@@ -74,6 +74,10 @@ router.include_router(system_router, prefix="", tags=["admin-system"])
 from app.modules.admin.quota_router import router as quota_router
 router.include_router(quota_router, prefix="", tags=["admin-quota"])
 
+# Include compliance router
+from app.modules.admin.compliance_router import router as compliance_router
+router.include_router(compliance_router, prefix="", tags=["admin-compliance"])
+
 
 # ==================== Admin Access Verification ====================
 
