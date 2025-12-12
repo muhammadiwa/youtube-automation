@@ -1,192 +1,182 @@
 "use client"
 
-import Link from "next/link"
+import { useState, useEffect, useCallback } from "react"
 import {
     Users,
     CreditCard,
-    Shield,
-    ChevronRight,
-    BarChart3,
-    Server,
-    FileText,
-    Settings,
-    MessageSquare,
-    Zap,
-    Database,
-    Bell,
-    Flag,
     TrendingUp,
     Activity,
+    Video,
+    DollarSign,
+    BarChart3,
 } from "lucide-react"
 import { AdminLayout } from "@/components/admin"
-import { Card, CardContent } from "@/components/ui/card"
+import {
+    MetricsCard,
+    GrowthCharts,
+    RealtimePanel,
+    DateRangeFilter,
+    ExportButton,
+    getDefaultDateRange,
+    type DateRange,
+} from "@/components/admin/dashboard"
+import adminApi from "@/lib/api/admin"
+import type { PlatformMetrics, GrowthMetrics } from "@/types/admin"
 
-const adminLinks = [
-    {
-        title: "Users",
-        description: "Manage platform users, suspensions, and impersonation",
-        href: "/admin/users",
-        icon: Users,
-    },
-    {
-        title: "Subscriptions",
-        description: "Manage subscriptions, upgrades, and refunds",
-        href: "/admin/subscriptions",
-        icon: CreditCard,
-    },
-    {
-        title: "Moderation",
-        description: "Review reported content and manage warnings",
-        href: "/admin/moderation",
-        icon: Shield,
-    },
-    {
-        title: "Support Tickets",
-        description: "Handle support requests and user communications",
-        href: "/admin/support",
-        icon: MessageSquare,
-    },
-    {
-        title: "System Health",
-        description: "Monitor system components and job queues",
-        href: "/admin/system",
-        icon: Server,
-    },
-    {
-        title: "Quota Management",
-        description: "Monitor YouTube API quota usage",
-        href: "/admin/quota",
-        icon: Zap,
-    },
-    {
-        title: "Payment Gateways",
-        description: "Configure and manage payment gateway integrations",
-        href: "/admin/payment-gateways",
-        icon: CreditCard,
-    },
-    {
-        title: "AI Services",
-        description: "Monitor AI usage, costs, and configuration",
-        href: "/admin/ai",
-        icon: Database,
-    },
-    {
-        title: "Audit Logs",
-        description: "View all admin and system actions",
-        href: "/admin/audit-logs",
-        icon: FileText,
-    },
-    {
-        title: "Security",
-        description: "Monitor failed logins and security events",
-        href: "/admin/security",
-        icon: Shield,
-    },
-    {
-        title: "Data Requests",
-        description: "Handle export and deletion requests",
-        href: "/admin/compliance",
-        icon: Flag,
-    },
-    {
-        title: "Global Config",
-        description: "Configure system-wide settings",
-        href: "/admin/config",
-        icon: Settings,
-    },
-    {
-        title: "Promotions",
-        description: "Manage discount codes and referral programs",
-        href: "/admin/promotions",
-        icon: Bell,
-    },
-    {
-        title: "Platform Analytics",
-        description: "View platform-wide metrics and insights",
-        href: "/admin/analytics",
-        icon: BarChart3,
-    },
-    {
-        title: "Backups",
-        description: "Manage backups and disaster recovery",
-        href: "/admin/backups",
-        icon: Database,
-    },
-]
+export default function AdminDashboardPage() {
+    const [dateRange, setDateRange] = useState<DateRange>(getDefaultDateRange())
+    const [comparisonEnabled, setComparisonEnabled] = useState(true)
+    const [platformMetrics, setPlatformMetrics] = useState<PlatformMetrics | null>(null)
+    const [growthMetrics, setGrowthMetrics] = useState<GrowthMetrics | null>(null)
+    const [isLoadingPlatform, setIsLoadingPlatform] = useState(true)
+    const [isLoadingGrowth, setIsLoadingGrowth] = useState(true)
 
-// Quick stats for dashboard overview
-const quickStats = [
-    { label: "Total Users", value: "-", icon: Users, color: "text-blue-500" },
-    { label: "Active Streams", value: "-", icon: Activity, color: "text-green-500" },
-    { label: "MRR", value: "-", icon: TrendingUp, color: "text-purple-500" },
-    { label: "System Health", value: "Healthy", icon: Server, color: "text-emerald-500" },
-]
+    const fetchPlatformMetrics = useCallback(async () => {
+        setIsLoadingPlatform(true)
+        try {
+            const data = await adminApi.getPlatformMetrics({
+                start_date: dateRange.startDate.toISOString(),
+                end_date: dateRange.endDate.toISOString(),
+            })
+            setPlatformMetrics(data)
+        } catch (error) {
+            console.error("Failed to fetch platform metrics:", error)
+        } finally {
+            setIsLoadingPlatform(false)
+        }
+    }, [dateRange])
 
-export default function AdminPage() {
+    const fetchGrowthMetrics = useCallback(async () => {
+        setIsLoadingGrowth(true)
+        try {
+            // Determine granularity based on date range
+            const daysDiff = Math.ceil(
+                (dateRange.endDate.getTime() - dateRange.startDate.getTime()) / (1000 * 60 * 60 * 24)
+            )
+            let granularity: "daily" | "weekly" | "monthly" = "daily"
+            if (daysDiff > 90) granularity = "monthly"
+            else if (daysDiff > 30) granularity = "weekly"
+
+            const data = await adminApi.getGrowthMetrics({
+                start_date: dateRange.startDate.toISOString(),
+                end_date: dateRange.endDate.toISOString(),
+                granularity,
+            })
+            setGrowthMetrics(data)
+        } catch (error) {
+            console.error("Failed to fetch growth metrics:", error)
+        } finally {
+            setIsLoadingGrowth(false)
+        }
+    }, [dateRange])
+
+    useEffect(() => {
+        fetchPlatformMetrics()
+        fetchGrowthMetrics()
+    }, [fetchPlatformMetrics, fetchGrowthMetrics])
+
     return (
         <AdminLayout breadcrumbs={[{ label: "Dashboard" }]}>
-            <div className="space-y-8">
-                {/* Header */}
-                <div>
-                    <h1 className="text-3xl font-bold flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 shadow-lg shadow-blue-500/30">
-                            <Shield className="h-5 w-5 text-white" />
-                        </div>
-                        Admin Dashboard
-                    </h1>
-                    <p className="text-muted-foreground mt-1">
-                        System administration and platform management
-                    </p>
-                </div>
-
-                {/* Quick Stats */}
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                    {quickStats.map((stat) => (
-                        <Card key={stat.label} className="border-0 shadow-md">
-                            <CardContent className="p-4">
-                                <div className="flex items-center gap-3">
-                                    <div className={`flex h-10 w-10 items-center justify-center rounded-lg bg-muted ${stat.color}`}>
-                                        <stat.icon className="h-5 w-5" />
-                                    </div>
-                                    <div>
-                                        <p className="text-sm text-muted-foreground">{stat.label}</p>
-                                        <p className="text-xl font-bold">{stat.value}</p>
-                                    </div>
-                                </div>
-                            </CardContent>
-                        </Card>
-                    ))}
-                </div>
-
-                {/* Quick Links */}
-                <div>
-                    <h2 className="text-lg font-semibold mb-4">Quick Access</h2>
-                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                        {adminLinks.map((link) => (
-                            <Link key={link.href} href={link.href}>
-                                <Card className="border-0 shadow-md hover:shadow-lg transition-all duration-300 cursor-pointer group h-full">
-                                    <CardContent className="p-5">
-                                        <div className="flex items-start gap-4">
-                                            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-500/10 group-hover:bg-blue-500/20 transition-colors">
-                                                <link.icon className="h-5 w-5 text-blue-500" />
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex items-center justify-between">
-                                                    <h3 className="font-semibold group-hover:text-blue-500 transition-colors">
-                                                        {link.title}
-                                                    </h3>
-                                                    <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:text-blue-500 group-hover:translate-x-1 transition-all" />
-                                                </div>
-                                                <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
-                                                    {link.description}
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </CardContent>
-                                </Card>
-                            </Link>
-                        ))}
+            <div className="space-y-6">
+                {/* Header with filters */}
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <h1 className="text-2xl font-bold flex items-center gap-2">
+                            <BarChart3 className="h-6 w-6 text-blue-500" />
+                            Admin Dashboard
+                        </h1>
+                        <p className="text-muted-foreground text-sm mt-1">
+                            Platform overview and key metrics
+                        </p>
                     </div>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <DateRangeFilter
+                            value={dateRange}
+                            onChange={setDateRange}
+                            showComparison={true}
+                            comparisonEnabled={comparisonEnabled}
+                            onComparisonChange={setComparisonEnabled}
+                        />
+                        <ExportButton dateRange={dateRange} />
+                    </div>
+                </div>
+
+                {/* Key Metrics Cards */}
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <MetricsCard
+                        title="Total Users"
+                        value={platformMetrics?.total_users ?? 0}
+                        icon={Users}
+                        iconColor="text-blue-500"
+                        comparison={comparisonEnabled ? platformMetrics?.users_comparison : null}
+                        isLoading={isLoadingPlatform}
+                    />
+                    <MetricsCard
+                        title="Monthly Recurring Revenue"
+                        value={platformMetrics?.mrr ?? 0}
+                        icon={DollarSign}
+                        iconColor="text-green-500"
+                        comparison={comparisonEnabled ? platformMetrics?.mrr_comparison : null}
+                        isLoading={isLoadingPlatform}
+                        format="currency"
+                    />
+                    <MetricsCard
+                        title="Annual Recurring Revenue"
+                        value={platformMetrics?.arr ?? 0}
+                        icon={TrendingUp}
+                        iconColor="text-purple-500"
+                        isLoading={isLoadingPlatform}
+                        format="currency"
+                    />
+                    <MetricsCard
+                        title="Active Subscriptions"
+                        value={platformMetrics?.active_subscriptions ?? 0}
+                        icon={CreditCard}
+                        iconColor="text-orange-500"
+                        isLoading={isLoadingPlatform}
+                    />
+                </div>
+
+                {/* Secondary Metrics */}
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <MetricsCard
+                        title="Active Users"
+                        value={platformMetrics?.active_users ?? 0}
+                        icon={Users}
+                        iconColor="text-cyan-500"
+                        isLoading={isLoadingPlatform}
+                    />
+                    <MetricsCard
+                        title="New Users"
+                        value={platformMetrics?.new_users ?? 0}
+                        icon={Users}
+                        iconColor="text-emerald-500"
+                        isLoading={isLoadingPlatform}
+                    />
+                    <MetricsCard
+                        title="Total Streams"
+                        value={platformMetrics?.total_streams ?? 0}
+                        icon={Activity}
+                        iconColor="text-red-500"
+                        comparison={comparisonEnabled ? platformMetrics?.streams_comparison : null}
+                        isLoading={isLoadingPlatform}
+                    />
+                    <MetricsCard
+                        title="Total Videos"
+                        value={platformMetrics?.total_videos ?? 0}
+                        icon={Video}
+                        iconColor="text-pink-500"
+                        isLoading={isLoadingPlatform}
+                    />
+                </div>
+
+                {/* Real-time Metrics Panel */}
+                <RealtimePanel autoRefresh={true} refreshInterval={30} />
+
+                {/* Growth Charts */}
+                <div>
+                    <h2 className="text-lg font-semibold mb-4">Growth Trends</h2>
+                    <GrowthCharts data={growthMetrics} isLoading={isLoadingGrowth} />
                 </div>
             </div>
         </AdminLayout>
