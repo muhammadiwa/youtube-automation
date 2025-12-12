@@ -434,6 +434,69 @@ const adminApi = {
     async warnUser(userId: string, data: import("@/types/admin").UserWarnRequest): Promise<import("@/types/admin").UserWarnResponse> {
         return apiClient.post(`/admin/moderation/users/${userId}/warn`, data)
     },
+
+    // ==================== System Monitoring API ====================
+
+    /**
+     * Get system health status
+     * Requirements: 7.1, 7.2
+     */
+    async getSystemHealth(): Promise<import("@/types/admin").SystemHealthResponse> {
+        return apiClient.get("/admin/system/health")
+    },
+
+    /**
+     * Get job queue status
+     * Requirements: 7.3
+     */
+    async getJobQueueStatus(): Promise<import("@/types/admin").JobQueueResponse> {
+        return apiClient.get("/admin/system/jobs")
+    },
+
+    /**
+     * Get worker status
+     * Requirements: 7.4
+     */
+    async getWorkerStatus(): Promise<import("@/types/admin").WorkerStatusResponse> {
+        return apiClient.get("/admin/system/workers")
+    },
+
+    /**
+     * Restart a worker
+     * Requirements: 12.2
+     */
+    async restartWorker(workerId: string, data?: import("@/types/admin").WorkerRestartRequest): Promise<import("@/types/admin").WorkerRestartResponse> {
+        return apiClient.post(`/admin/system/workers/${workerId}/restart`, data || {})
+    },
+
+    /**
+     * Get error alerts
+     * Requirements: 7.5
+     */
+    async getErrorAlerts(limit?: number): Promise<import("@/types/admin").ErrorAlertsResponse> {
+        const searchParams = new URLSearchParams()
+        if (limit) searchParams.set("limit", limit.toString())
+        const query = searchParams.toString()
+        return apiClient.get(`/admin/system/alerts${query ? `?${query}` : ""}`)
+    },
+
+    // ==================== Quota Management API ====================
+
+    /**
+     * Get quota dashboard
+     * Requirements: 11.1
+     */
+    async getQuotaDashboard(): Promise<import("@/types/admin").QuotaDashboardResponse> {
+        return apiClient.get("/admin/quota")
+    },
+
+    /**
+     * Get quota alerts
+     * Requirements: 11.2
+     */
+    async getQuotaAlerts(): Promise<import("@/types/admin").QuotaAlertsResponse> {
+        return apiClient.get("/admin/quota/alerts")
+    },
 }
 
 export default adminApi

@@ -519,3 +519,161 @@ export interface UserWarnResponse {
     created_at: string
     message: string
 }
+
+
+// ==================== System Monitoring Types ====================
+
+export type HealthStatus = "healthy" | "degraded" | "critical"
+export type ComponentStatusType = "healthy" | "degraded" | "down"
+export type WorkerStatusType = "active" | "idle" | "unhealthy" | "offline"
+export type AlertSeverity = "info" | "warning" | "critical"
+
+export interface ComponentHealth {
+    name: string
+    status: ComponentStatusType
+    message: string | null
+    latency_ms: number | null
+    error_rate: number | null
+    last_check: string
+    details: Record<string, unknown> | null
+    suggested_action: string | null
+}
+
+export interface SystemHealthResponse {
+    overall_status: HealthStatus
+    timestamp: string
+    version: string
+    uptime_seconds: number
+    components: ComponentHealth[]
+}
+
+export interface JobQueueStatus {
+    queue_name: string
+    depth: number
+    processing: number
+    processing_rate: number
+    failed_jobs: number
+    dlq_count: number
+    oldest_job_age_seconds: number | null
+}
+
+export interface JobQueueResponse {
+    timestamp: string
+    total_depth: number
+    total_processing: number
+    total_failed: number
+    total_dlq: number
+    queues: JobQueueStatus[]
+}
+
+export interface WorkerInfo {
+    id: string
+    name: string
+    status: WorkerStatusType
+    load: number
+    current_jobs: number
+    completed_jobs: number
+    failed_jobs: number
+    last_heartbeat: string | null
+    started_at: string | null
+    hostname: string | null
+}
+
+export interface WorkerStatusResponse {
+    timestamp: string
+    total_workers: number
+    active_workers: number
+    idle_workers: number
+    unhealthy_workers: number
+    total_capacity: number
+    current_load: number
+    utilization_percent: number
+    workers: WorkerInfo[]
+}
+
+export interface WorkerRestartRequest {
+    reason?: string
+    graceful?: boolean
+}
+
+export interface WorkerRestartResponse {
+    worker_id: string
+    status: string
+    message: string
+    jobs_reassigned: number
+    restarted_at: string
+}
+
+export interface SystemErrorAlert {
+    id: string
+    severity: AlertSeverity
+    message: string
+    component: string
+    correlation_id: string | null
+    occurred_at: string
+    notified_at: string | null
+    details: Record<string, unknown> | null
+}
+
+export interface ErrorAlertsResponse {
+    alerts: SystemErrorAlert[]
+    total: number
+    critical_count: number
+    warning_count: number
+}
+
+// ==================== Quota Management Types ====================
+
+export interface AccountQuotaInfo {
+    account_id: string
+    channel_title: string
+    daily_quota_used: number
+    daily_quota_limit: number
+    usage_percent: number
+    quota_reset_at: string | null
+}
+
+export interface UserQuotaUsage {
+    user_id: string
+    user_email: string
+    user_name: string | null
+    total_quota_used: number
+    account_count: number
+    highest_usage_percent: number
+    accounts: AccountQuotaInfo[]
+}
+
+export interface QuotaDashboardResponse {
+    timestamp: string
+    total_daily_quota_used: number
+    total_daily_quota_limit: number
+    platform_usage_percent: number
+    total_accounts: number
+    accounts_over_80_percent: number
+    accounts_over_90_percent: number
+    total_users_with_accounts: number
+    high_usage_users: UserQuotaUsage[]
+    alert_threshold_percent: number
+    alerts_triggered: number
+}
+
+export interface QuotaAlertInfo {
+    id: string
+    user_id: string
+    user_email: string
+    account_id: string
+    channel_title: string
+    usage_percent: number
+    quota_used: number
+    quota_limit: number
+    triggered_at: string
+    notified: boolean
+}
+
+export interface QuotaAlertsResponse {
+    timestamp: string
+    alerts: QuotaAlertInfo[]
+    total_alerts: number
+    critical_count: number
+    warning_count: number
+}
