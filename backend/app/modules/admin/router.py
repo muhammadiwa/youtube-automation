@@ -82,6 +82,10 @@ router.include_router(compliance_router, prefix="", tags=["admin-compliance"])
 from app.modules.admin.config_router import router as config_router
 router.include_router(config_router, prefix="", tags=["admin-config"])
 
+# Include analytics router
+from app.modules.admin.analytics_router import router as analytics_router
+router.include_router(analytics_router, prefix="", tags=["admin-analytics"])
+
 
 # ==================== Admin Access Verification ====================
 

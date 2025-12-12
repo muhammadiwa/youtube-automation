@@ -104,6 +104,7 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(2), nullable=True, index=True)  # ISO 3166-1 alpha-2
 
     def set_password(self, password: str, validate: bool = True) -> None:
         """Set user password with optional validation.

@@ -174,3 +174,18 @@ class UserRepository:
         user.backup_codes = None
         await self.session.flush()
         return user
+
+    async def update_country(self, user: User, country: str | None) -> User:
+        """Update user's country based on IP geolocation.
+
+        Args:
+            user: User instance
+            country: ISO 3166-1 alpha-2 country code (e.g., "US", "ID")
+
+        Returns:
+            User: Updated user instance
+        """
+        if country and len(country) == 2:
+            user.country = country.upper()
+            await self.session.flush()
+        return user

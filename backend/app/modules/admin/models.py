@@ -501,6 +501,98 @@ class ConfigCategory(str, Enum):
     BRANDING = "branding"
 
 
+# ==================== Dashboard Export Models (Requirements 2.5) ====================
+
+
+class ExportStatus(str, Enum):
+    """Status of dashboard export jobs.
+    
+    Requirements: 2.5 - Generate CSV or PDF report with selected metrics
+    """
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ExportFormat(str, Enum):
+    """Supported export formats.
+    
+    Requirements: 2.5 - CSV or PDF export
+    """
+    CSV = "csv"
+    PDF = "pdf"
+
+
+class DashboardExport(Base):
+    """Dashboard Export model for tracking export jobs.
+    
+    Requirements: 2.5 - Generate CSV or PDF report with selected metrics
+    """
+
+    __tablename__ = "dashboard_exports"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    admin_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    
+    # Export configuration
+    format: Mapped[str] = mapped_column(
+        String(10), nullable=False, default=ExportFormat.CSV.value
+    )
+    metrics: Mapped[list[str]] = mapped_column(
+        ARRAY(String(100)), nullable=False
+    )
+    start_date: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    end_date: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    include_charts: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    
+    # Status tracking
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=ExportStatus.PENDING.value, index=True
+    )
+    error_message: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )
+    
+    # File information
+    file_path: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )
+    file_size: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+    download_url: Mapped[Optional[str]] = mapped_column(
+        String(1000), nullable=True
+    )
+    expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<DashboardExport(id={self.id}, format={self.format}, status={self.status})>"
+
+
 class SystemConfig(Base):
     """System Configuration model for global platform settings.
     

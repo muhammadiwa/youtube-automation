@@ -1,6 +1,6 @@
 """Authentication router for user registration, login, and token management."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -89,12 +89,14 @@ async def register(
 )
 async def login(
     data: LoginRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> LoginResponse:
     """Login user and return tokens.
     
     Args:
         data: Login credentials
+        request: FastAPI request for IP extraction
         db: Database session
         
     Returns:
@@ -103,13 +105,17 @@ async def login(
     Raises:
         HTTPException: If credentials are invalid
     """
+    from app.core.geolocation import get_client_ip
+    
     service = AuthService(db)
+    client_ip = get_client_ip(request)
     
     try:
         result = await service.login(
             email=data.email,
             password=data.password,
             remember_me=data.remember_me,
+            client_ip=client_ip,
         )
         
         return LoginResponse(
@@ -280,12 +286,14 @@ async def verify_2fa_setup(
 )
 async def verify_2fa_login(
     data: TwoFactorVerifyRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
     """Verify 2FA code during login.
     
     Args:
         data: TOTP code and temp token
+        request: FastAPI request for IP extraction
         db: Database session
         
     Returns:
@@ -294,13 +302,16 @@ async def verify_2fa_login(
     Raises:
         HTTPException: If code or temp token is invalid
     """
+    from app.core.geolocation import get_client_ip
+    
     service = AuthService(db)
+    client_ip = get_client_ip(request)
     
     try:
         if not data.temp_token:
             raise ValueError("Temporary token is required")
         
-        result = await service.verify_2fa_login(data.temp_token, data.code)
+        result = await service.verify_2fa_login(data.temp_token, data.code, client_ip)
         return TokenResponse(**result)
     except ValueError as e:
         raise HTTPException(
