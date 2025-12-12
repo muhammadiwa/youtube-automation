@@ -32,6 +32,7 @@ from app.modules.backup import backup_router
 from app.modules.billing import router as billing_router
 from app.modules.payment_gateway.router import admin_router as payment_gateway_admin_router, payment_router as payment_gateway_payment_router
 from app.modules.integration.router import router as integration_router
+from app.modules.admin import admin_router
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -132,6 +133,10 @@ Authorization: Bearer <access_token>
         {
             "name": "integration",
             "description": "API key management, webhooks, and developer integration",
+        },
+        {
+            "name": "admin",
+            "description": "Admin panel - user management, system monitoring, billing administration",
         },
     ],
     contact={
@@ -278,3 +283,4 @@ app.include_router(billing_router, prefix=settings.API_V1_PREFIX)
 app.include_router(payment_gateway_admin_router, prefix=settings.API_V1_PREFIX)
 app.include_router(payment_gateway_payment_router, prefix=settings.API_V1_PREFIX)
 app.include_router(integration_router, prefix=settings.API_V1_PREFIX)
+app.include_router(admin_router, prefix=settings.API_V1_PREFIX)
