@@ -10,6 +10,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session
@@ -236,6 +237,115 @@ async def process_data_export(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e),
         )
+
+
+@router.get("/compliance/exports/{request_id}/download")
+async def download_data_export(
+    request_id: uuid.UUID,
+    admin: Admin = Depends(require_permission(AdminPermission.MANAGE_COMPLIANCE)),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Download a completed data export.
+    
+    Requirements: 15.1 - Download data export file (GDPR compliance)
+    
+    Requires MANAGE_COMPLIANCE permission.
+    """
+    from app.modules.admin.models import DataExportRequest
+    from app.modules.auth.models import User
+    from fastapi.responses import JSONResponse
+    
+    # Get the request from database
+    result = await session.execute(
+        select(DataExportRequest).where(DataExportRequest.id == request_id)
+    )
+    export_request = result.scalar_one_or_none()
+    
+    if not export_request:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Data export request {request_id} not found",
+        )
+    
+    if export_request.status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Data export is not yet completed",
+        )
+    
+    # Check if export has expired (handle timezone-aware datetime)
+    if export_request.expires_at:
+        expires_at = export_request.expires_at
+        if expires_at.tzinfo is not None:
+            expires_at = expires_at.replace(tzinfo=None)
+        if expires_at < datetime.utcnow():
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail="Data export has expired",
+            )
+    
+    # Get user data for export
+    user_result = await session.execute(
+        select(User).where(User.id == export_request.user_id)
+    )
+    user = user_result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    
+    # Helper function to safely convert datetime to ISO string
+    def safe_isoformat(dt):
+        if dt is None:
+            return None
+        if dt.tzinfo is not None:
+            dt = dt.replace(tzinfo=None)
+        return dt.isoformat()
+    
+    # Build comprehensive user data export (GDPR compliant)
+    export_data = {
+        "export_info": {
+            "export_id": str(request_id),
+            "user_id": str(user.id),
+            "requested_at": safe_isoformat(export_request.requested_at),
+            "completed_at": safe_isoformat(export_request.completed_at),
+            "expires_at": safe_isoformat(export_request.expires_at),
+            "generated_at": datetime.utcnow().isoformat(),
+        },
+        "personal_data": {
+            "id": str(user.id),
+            "email": user.email,
+            "name": user.name,
+            "is_active": user.is_active,
+            "country": user.country,
+            "created_at": safe_isoformat(user.created_at),
+            "updated_at": safe_isoformat(user.updated_at),
+            "last_login_at": safe_isoformat(user.last_login_at),
+        },
+        "account_settings": {
+            "two_factor_enabled": user.is_2fa_enabled,
+        },
+        "data_categories": [
+            "personal_data",
+            "account_settings",
+        ],
+        "gdpr_notice": {
+            "data_controller": "YouTube Automation Platform",
+            "purpose": "User data export as per GDPR Article 20 (Right to data portability)",
+            "legal_basis": "User request",
+        }
+    }
+    
+    return JSONResponse(
+        content=export_data,
+        headers={
+            "Content-Disposition": f'attachment; filename="data_export_{user.id}_{request_id}.json"',
+            "Content-Type": "application/json",
+        }
+    )
 
 
 # ==================== Deletion Requests (Requirements 15.2) ====================

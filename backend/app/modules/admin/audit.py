@@ -55,6 +55,7 @@ class AdminAuditEvent(str, Enum):
     # Compliance events
     DATA_EXPORT_PROCESSED = "data_export_processed"
     DELETION_REQUEST_PROCESSED = "deletion_request_processed"
+    DELETION_REQUEST_CANCELLED = "deletion_request_cancelled"
     AUDIT_LOG_EXPORTED = "audit_log_exported"
     
     # Terms of Service events (Requirements 15.4)

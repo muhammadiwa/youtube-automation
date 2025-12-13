@@ -141,10 +141,6 @@ class AdminComplianceService:
     def __init__(self, session: AsyncSession):
         """Initialize the compliance service."""
         self.session = session
-        # In-memory storage for data export and deletion requests (for demo)
-        # In production, these would be database models
-        self._data_export_requests: dict[uuid.UUID, dict] = {}
-        self._deletion_requests: dict[uuid.UUID, dict] = {}
     
     async def get_audit_logs(
         self,
@@ -519,39 +515,56 @@ class AdminComplianceService:
         Returns:
             DataExportRequestListResponse: Paginated list of requests
         """
-        # In production, this would query the database
-        # For now, return from in-memory storage
-        requests = list(self._data_export_requests.values())
+        from app.modules.admin.models import DataExportRequest
+        from app.modules.auth.models import User
+        
+        # Build query
+        query = select(DataExportRequest)
         
         if status:
-            requests = [r for r in requests if r["status"] == status]
+            query = query.where(DataExportRequest.status == status)
         
-        # Sort by requested_at descending
-        requests.sort(key=lambda x: x["requested_at"], reverse=True)
+        # Order by requested_at descending
+        query = query.order_by(desc(DataExportRequest.requested_at))
         
-        total = len(requests)
+        # Get total count
+        count_query = select(func.count()).select_from(DataExportRequest)
+        if status:
+            count_query = count_query.where(DataExportRequest.status == status)
+        
+        total_result = await self.session.execute(count_query)
+        total = total_result.scalar() or 0
+        
+        # Apply pagination
+        query = query.offset((page - 1) * page_size).limit(page_size)
+        
+        result = await self.session.execute(query)
+        requests = result.scalars().all()
+        
         total_pages = (total + page_size - 1) // page_size if total > 0 else 1
         
-        start_idx = (page - 1) * page_size
-        end_idx = start_idx + page_size
-        page_requests = requests[start_idx:end_idx]
-        
-        items = [
-            DataExportRequestStatus(
-                id=r["id"],
-                user_id=r["user_id"],
-                user_email=r.get("user_email"),
-                user_name=r.get("user_name"),
-                status=r["status"],
-                requested_at=r["requested_at"],
-                processed_at=r.get("processed_at"),
-                completed_at=r.get("completed_at"),
-                download_url=r.get("download_url"),
-                expires_at=r.get("expires_at"),
-                error_message=r.get("error_message"),
+        # Get user info for each request
+        items = []
+        for r in requests:
+            # Get user info
+            user_result = await self.session.execute(
+                select(User).where(User.id == r.user_id)
             )
-            for r in page_requests
-        ]
+            user = user_result.scalar_one_or_none()
+            
+            items.append(DataExportRequestStatus(
+                id=r.id,
+                user_id=r.user_id,
+                user_email=user.email if user else None,
+                user_name=user.name if user else None,
+                status=r.status,
+                requested_at=r.requested_at,
+                processed_at=r.processed_at,
+                completed_at=r.completed_at,
+                download_url=r.download_url,
+                expires_at=r.expires_at,
+                error_message=r.error_message,
+            ))
         
         return DataExportRequestListResponse(
             items=items,
@@ -586,21 +599,34 @@ class AdminComplianceService:
         Returns:
             ProcessDataExportResponse: Processing result
         """
-        if request_id not in self._data_export_requests:
+        from app.modules.admin.models import DataExportRequest, DataExportRequestStatus as ExportStatus
+        
+        # Get the request from database
+        result = await self.session.execute(
+            select(DataExportRequest).where(DataExportRequest.id == request_id)
+        )
+        request = result.scalar_one_or_none()
+        
+        if not request:
             raise DataExportRequestNotFoundError(f"Data export request {request_id} not found")
         
-        request = self._data_export_requests[request_id]
-        
         # Update status to processing
-        request["status"] = "processing"
-        request["processed_at"] = datetime.utcnow()
+        request.status = ExportStatus.PROCESSING.value
+        request.processed_at = datetime.utcnow()
+        request.processed_by = admin_id
         
-        # In production, this would trigger an async job to generate the export
-        # For now, simulate completion
-        request["status"] = "completed"
-        request["completed_at"] = datetime.utcnow()
-        request["download_url"] = f"/compliance/exports/{request_id}/download"
-        request["expires_at"] = datetime.utcnow() + timedelta(days=7)
+        await self.session.commit()
+        
+        # Generate the export - in production this could be async for large datasets
+        # Mark as completed with download URL
+        request.status = ExportStatus.COMPLETED.value
+        request.completed_at = datetime.utcnow()
+        request.download_url = f"/compliance/exports/{request_id}/download"
+        request.expires_at = datetime.utcnow() + timedelta(days=7)
+        request.file_size = 0  # Will be calculated when downloaded
+        
+        await self.session.commit()
+        await self.session.refresh(request)
         
         # Log the action
         AdminAuditService.log(
@@ -610,7 +636,7 @@ class AdminComplianceService:
             resource_type="data_export_request",
             resource_id=str(request_id),
             details={
-                "user_id": str(request["user_id"]),
+                "user_id": str(request.user_id),
                 "status": "completed",
             },
             ip_address=ip_address,
@@ -620,8 +646,8 @@ class AdminComplianceService:
         return ProcessDataExportResponse(
             request_id=request_id,
             status="completed",
-            download_url=request["download_url"],
-            expires_at=request["expires_at"],
+            download_url=request.download_url,
+            expires_at=request.expires_at,
             message="Data export completed successfully",
         )
     
@@ -644,40 +670,64 @@ class AdminComplianceService:
         Returns:
             DeletionRequestListResponse: Paginated list of requests
         """
-        requests = list(self._deletion_requests.values())
+        from app.modules.admin.models import DeletionRequest
+        from app.modules.auth.models import User
+        
+        # Build query
+        query = select(DeletionRequest)
         
         if status:
-            requests = [r for r in requests if r["status"] == status]
+            query = query.where(DeletionRequest.status == status)
         
-        # Sort by scheduled_for ascending (soonest first)
-        requests.sort(key=lambda x: x["scheduled_for"])
+        # Order by scheduled_for ascending (soonest first)
+        query = query.order_by(DeletionRequest.scheduled_for)
         
-        total = len(requests)
+        # Get total count
+        count_query = select(func.count()).select_from(DeletionRequest)
+        if status:
+            count_query = count_query.where(DeletionRequest.status == status)
+        
+        total_result = await self.session.execute(count_query)
+        total = total_result.scalar() or 0
+        
+        # Apply pagination
+        query = query.offset((page - 1) * page_size).limit(page_size)
+        
+        result = await self.session.execute(query)
+        requests = result.scalars().all()
+        
         total_pages = (total + page_size - 1) // page_size if total > 0 else 1
         
-        start_idx = (page - 1) * page_size
-        end_idx = start_idx + page_size
-        page_requests = requests[start_idx:end_idx]
-        
         now = datetime.utcnow()
-        items = [
-            DeletionRequestStatus(
-                id=r["id"],
-                user_id=r["user_id"],
-                user_email=r.get("user_email"),
-                user_name=r.get("user_name"),
-                status=r["status"],
-                requested_at=r["requested_at"],
-                scheduled_for=r["scheduled_for"],
-                days_remaining=max(0, (r["scheduled_for"] - now).days),
-                processed_at=r.get("processed_at"),
-                completed_at=r.get("completed_at"),
-                cancelled_at=r.get("cancelled_at"),
-                cancelled_by=r.get("cancelled_by"),
-                cancellation_reason=r.get("cancellation_reason"),
+        items = []
+        for r in requests:
+            # Get user info
+            user_result = await self.session.execute(
+                select(User).where(User.id == r.user_id)
             )
-            for r in page_requests
-        ]
+            user = user_result.scalar_one_or_none()
+            
+            # Calculate days remaining (handle timezone-aware datetimes)
+            scheduled = r.scheduled_for
+            if scheduled.tzinfo is not None:
+                scheduled = scheduled.replace(tzinfo=None)
+            days_remaining = max(0, (scheduled - now).days)
+            
+            items.append(DeletionRequestStatus(
+                id=r.id,
+                user_id=r.user_id,
+                user_email=user.email if user else None,
+                user_name=user.name if user else None,
+                status=r.status,
+                requested_at=r.requested_at,
+                scheduled_for=r.scheduled_for,
+                days_remaining=days_remaining,
+                processed_at=r.processed_at,
+                completed_at=r.completed_at,
+                cancelled_at=r.cancelled_at,
+                cancelled_by=r.cancelled_by,
+                cancellation_reason=r.cancellation_reason,
+            ))
         
         return DeletionRequestListResponse(
             items=items,
@@ -711,25 +761,62 @@ class AdminComplianceService:
         Returns:
             ProcessDeletionResponse: Processing result
         """
-        if request_id not in self._deletion_requests:
+        from app.modules.admin.models import DeletionRequest, DeletionRequestStatusEnum
+        
+        # Get the request from database
+        result = await self.session.execute(
+            select(DeletionRequest).where(DeletionRequest.id == request_id)
+        )
+        request = result.scalar_one_or_none()
+        
+        if not request:
             raise DeletionRequestNotFoundError(f"Deletion request {request_id} not found")
         
-        request = self._deletion_requests[request_id]
-        
-        if request["status"] == "completed":
+        if request.status == DeletionRequestStatusEnum.COMPLETED.value:
             raise DeletionRequestAlreadyProcessedError("Deletion request already completed")
         
-        if request["status"] == "cancelled":
+        if request.status == DeletionRequestStatusEnum.CANCELLED.value:
             raise DeletionRequestAlreadyCancelledError("Deletion request was cancelled")
         
-        # Update status to processing
-        request["status"] = "processing"
-        request["processed_at"] = datetime.utcnow()
+        # Update status to scheduled (with 30-day grace period)
+        if request.status == DeletionRequestStatusEnum.PENDING.value:
+            request.status = DeletionRequestStatusEnum.SCHEDULED.value
+            request.processed_at = datetime.utcnow()
+            request.processed_by = admin_id
+            
+            await self.session.commit()
+            await self.session.refresh(request)
+            
+            # Log the action
+            AdminAuditService.log(
+                admin_id=admin_id,
+                admin_user_id=admin_id,
+                event=AdminAuditEvent.DELETION_REQUEST_PROCESSED,
+                resource_type="deletion_request",
+                resource_id=str(request_id),
+                details={
+                    "user_id": str(request.user_id),
+                    "status": "scheduled",
+                    "scheduled_for": request.scheduled_for.isoformat(),
+                },
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+            
+            return ProcessDeletionResponse(
+                request_id=request_id,
+                user_id=request.user_id,
+                status="scheduled",
+                scheduled_for=request.scheduled_for,
+                message="Deletion request scheduled successfully",
+            )
         
-        # In production, this would trigger the actual deletion process
-        # For now, mark as completed
-        request["status"] = "completed"
-        request["completed_at"] = datetime.utcnow()
+        # If already scheduled, process the deletion
+        request.status = DeletionRequestStatusEnum.COMPLETED.value
+        request.completed_at = datetime.utcnow()
+        
+        await self.session.commit()
+        await self.session.refresh(request)
         
         # Log the action
         AdminAuditService.log(
@@ -739,7 +826,7 @@ class AdminComplianceService:
             resource_type="deletion_request",
             resource_id=str(request_id),
             details={
-                "user_id": str(request["user_id"]),
+                "user_id": str(request.user_id),
                 "status": "completed",
             },
             ip_address=ip_address,
@@ -748,9 +835,9 @@ class AdminComplianceService:
         
         return ProcessDeletionResponse(
             request_id=request_id,
-            user_id=request["user_id"],
+            user_id=request.user_id,
             status="completed",
-            scheduled_for=request["scheduled_for"],
+            scheduled_for=request.scheduled_for,
             message="Deletion request processed successfully",
         )
     
@@ -777,79 +864,56 @@ class AdminComplianceService:
         Returns:
             CancelDeletionResponse: Cancellation result
         """
-        if request_id not in self._deletion_requests:
+        from app.modules.admin.models import DeletionRequest, DeletionRequestStatusEnum
+        
+        # Get the request from database
+        result = await self.session.execute(
+            select(DeletionRequest).where(DeletionRequest.id == request_id)
+        )
+        request = result.scalar_one_or_none()
+        
+        if not request:
             raise DeletionRequestNotFoundError(f"Deletion request {request_id} not found")
         
-        request = self._deletion_requests[request_id]
-        
-        if request["status"] == "completed":
+        if request.status == DeletionRequestStatusEnum.COMPLETED.value:
             raise DeletionRequestAlreadyProcessedError("Cannot cancel completed deletion")
         
-        if request["status"] == "cancelled":
+        if request.status == DeletionRequestStatusEnum.CANCELLED.value:
             raise DeletionRequestAlreadyCancelledError("Deletion request already cancelled")
         
         # Cancel the request
-        request["status"] = "cancelled"
-        request["cancelled_at"] = datetime.utcnow()
-        request["cancelled_by"] = admin_id
-        request["cancellation_reason"] = reason
+        request.status = DeletionRequestStatusEnum.CANCELLED.value
+        request.cancelled_at = datetime.utcnow()
+        request.cancelled_by = admin_id
+        request.cancellation_reason = reason
+        
+        await self.session.commit()
+        await self.session.refresh(request)
+        
+        # Log the action
+        AdminAuditService.log(
+            admin_id=admin_id,
+            admin_user_id=admin_id,
+            event=AdminAuditEvent.DELETION_REQUEST_CANCELLED,
+            resource_type="deletion_request",
+            resource_id=str(request_id),
+            details={
+                "user_id": str(request.user_id),
+                "reason": reason,
+            },
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
         
         return CancelDeletionResponse(
             request_id=request_id,
-            user_id=request["user_id"],
+            user_id=request.user_id,
             status="cancelled",
-            cancelled_at=request["cancelled_at"],
+            cancelled_at=request.cancelled_at,
             message="Deletion request cancelled successfully",
         )
     
-    # Helper methods for creating test data
-    def create_data_export_request(
-        self,
-        user_id: uuid.UUID,
-        user_email: Optional[str] = None,
-        user_name: Optional[str] = None,
-    ) -> uuid.UUID:
-        """Create a data export request (for testing)."""
-        request_id = uuid.uuid4()
-        self._data_export_requests[request_id] = {
-            "id": request_id,
-            "user_id": user_id,
-            "user_email": user_email,
-            "user_name": user_name,
-            "status": "pending",
-            "requested_at": datetime.utcnow(),
-        }
-        return request_id
-    
-    def create_deletion_request(
-        self,
-        user_id: uuid.UUID,
-        user_email: Optional[str] = None,
-        user_name: Optional[str] = None,
-        requested_at: Optional[datetime] = None,
-    ) -> uuid.UUID:
-        """
-        Create a deletion request (for testing).
-        
-        Property 17: Deletion Grace Period
-        - scheduled_for date SHALL be exactly 30 days from requested_at.
-        """
-        request_id = uuid.uuid4()
-        req_at = requested_at or datetime.utcnow()
-        
-        # Property 17: scheduled_for is exactly 30 days from requested_at
-        scheduled_for = req_at + timedelta(days=30)
-        
-        self._deletion_requests[request_id] = {
-            "id": request_id,
-            "user_id": user_id,
-            "user_email": user_email,
-            "user_name": user_name,
-            "status": "scheduled",
-            "requested_at": req_at,
-            "scheduled_for": scheduled_for,
-        }
-        return request_id
+
 
 
 

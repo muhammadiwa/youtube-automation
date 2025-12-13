@@ -568,6 +568,16 @@ const adminApi = {
     },
 
     /**
+     * Download data export
+     * Requirements: 15.1
+     */
+    async downloadDataExport(
+        requestId: string
+    ): Promise<Record<string, unknown>> {
+        return apiClient.get(`/admin/compliance/exports/${requestId}/download`)
+    },
+
+    /**
      * Get deletion requests
      * Requirements: 15.2
      */

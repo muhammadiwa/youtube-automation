@@ -87,13 +87,13 @@ export default function DataRequestsPage() {
     const [exportData, setExportData] = useState<DataExportRequestListResponse | null>(null)
     const [isLoadingExport, setIsLoadingExport] = useState(true)
     const [exportPage, setExportPage] = useState(1)
-    const [exportStatus, setExportStatus] = useState("")
+    const [exportStatus, setExportStatus] = useState("all")
 
     // Deletion requests state
     const [deletionData, setDeletionData] = useState<DeletionRequestListResponse | null>(null)
     const [isLoadingDeletion, setIsLoadingDeletion] = useState(true)
     const [deletionPage, setDeletionPage] = useState(1)
-    const [deletionStatus, setDeletionStatus] = useState("")
+    const [deletionStatus, setDeletionStatus] = useState("all")
 
     // Processing state
     const [processingId, setProcessingId] = useState<string | null>(null)
@@ -110,7 +110,7 @@ export default function DataRequestsPage() {
             const response = await adminApi.getDataExportRequests(
                 exportPage,
                 20,
-                exportStatus || undefined
+                exportStatus !== "all" ? exportStatus : undefined
             )
             setExportData(response)
         } catch (error) {
@@ -125,7 +125,7 @@ export default function DataRequestsPage() {
             const response = await adminApi.getDeletionRequests(
                 deletionPage,
                 20,
-                deletionStatus || undefined
+                deletionStatus !== "all" ? deletionStatus : undefined
             )
             setDeletionData(response)
         } catch (error) {
@@ -168,6 +168,34 @@ export default function DataRequestsPage() {
             })
         } finally {
             setProcessingId(null)
+        }
+    }
+
+    const handleDownloadExport = async (requestId: string) => {
+        try {
+            const response = await adminApi.downloadDataExport(requestId)
+            // Create blob and download
+            const blob = new Blob([JSON.stringify(response, null, 2)], { type: "application/json" })
+            const url = window.URL.createObjectURL(blob)
+            const a = document.createElement("a")
+            a.href = url
+            a.download = `data_export_${requestId}.json`
+            document.body.appendChild(a)
+            a.click()
+            window.URL.revokeObjectURL(url)
+            document.body.removeChild(a)
+            addToast({
+                type: "success",
+                title: "Download started",
+                description: "Your data export is being downloaded",
+            })
+        } catch (error) {
+            console.error("Failed to download export:", error)
+            addToast({
+                type: "error",
+                title: "Failed to download",
+                description: "Please try again later",
+            })
         }
     }
 
@@ -311,7 +339,7 @@ export default function DataRequestsPage() {
                                                 <SelectValue placeholder="All Status" />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="">All Status</SelectItem>
+                                                <SelectItem value="all">All Status</SelectItem>
                                                 <SelectItem value="pending">Pending</SelectItem>
                                                 <SelectItem value="processing">Processing</SelectItem>
                                                 <SelectItem value="completed">Completed</SelectItem>
@@ -376,7 +404,7 @@ export default function DataRequestsPage() {
                                                                     <Button
                                                                         size="sm"
                                                                         variant="outline"
-                                                                        onClick={() => window.open(request.download_url!, "_blank")}
+                                                                        onClick={() => handleDownloadExport(request.id)}
                                                                     >
                                                                         <FileDown className="h-4 w-4 mr-1" />
                                                                         Download
@@ -439,7 +467,7 @@ export default function DataRequestsPage() {
                                                 <SelectValue placeholder="All Status" />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="">All Status</SelectItem>
+                                                <SelectItem value="all">All Status</SelectItem>
                                                 <SelectItem value="pending">Pending</SelectItem>
                                                 <SelectItem value="scheduled">Scheduled</SelectItem>
                                                 <SelectItem value="processing">Processing</SelectItem>

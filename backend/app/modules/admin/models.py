@@ -1558,3 +1558,183 @@ class BackupRestore(Base):
 
     def __repr__(self) -> str:
         return f"<BackupRestore(id={self.id}, backup_id={self.backup_id}, status={self.status})>"
+
+
+# ==================== Data Request Models (Requirements 15.1, 15.2) ====================
+
+
+class DataExportRequestStatus(str, Enum):
+    """Status of data export requests.
+    
+    Requirements: 15.1 - Data export request status tracking
+    """
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class DeletionRequestStatusEnum(str, Enum):
+    """Status of deletion requests.
+    
+    Requirements: 15.2 - Deletion request status tracking
+    """
+    PENDING = "pending"
+    SCHEDULED = "scheduled"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
+class DataExportRequest(Base):
+    """Data Export Request model for GDPR data export requests.
+    
+    Requirements: 15.1 - List data export requests, generate complete data package
+    
+    Property 16: Data Export Completion
+    - For any data export request, the system SHALL generate complete data package
+    - and update status to 'completed' with download_url within 72 hours.
+    """
+
+    __tablename__ = "data_export_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    
+    # Status tracking
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=DataExportRequestStatus.PENDING.value, index=True
+    )
+    
+    # Timestamps
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    processed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    
+    # File information
+    download_url: Mapped[Optional[str]] = mapped_column(
+        String(1000), nullable=True
+    )
+    expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    error_message: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )
+    file_path: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )
+    file_size: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+    
+    # Admin who processed
+    processed_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    
+    # Standard timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    def __repr__(self) -> str:
+        return f"<DataExportRequest(id={self.id}, user_id={self.user_id}, status={self.status})>"
+
+
+class DeletionRequest(Base):
+    """Deletion Request model for account deletion requests.
+    
+    Requirements: 15.2 - Display pending deletions with countdown and cancel option
+    
+    Property 17: Deletion Grace Period
+    - For any account deletion request, scheduled_for date SHALL be exactly 30 days from requested_at.
+    """
+
+    __tablename__ = "deletion_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    
+    # Status tracking
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=DeletionRequestStatusEnum.PENDING.value, index=True
+    )
+    
+    # Timestamps
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    scheduled_for: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    processed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    
+    # Cancellation info
+    cancelled_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    cancelled_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    cancellation_reason: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )
+    
+    # Admin who processed
+    processed_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    
+    # Standard timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    @property
+    def days_remaining(self) -> int:
+        """Calculate days remaining until scheduled deletion.
+        
+        Returns:
+            int: Days remaining (0 if past scheduled date)
+        """
+        now = datetime.utcnow()
+        if self.scheduled_for.tzinfo:
+            from datetime import timezone
+            now = datetime.now(timezone.utc)
+        delta = self.scheduled_for - now
+        return max(0, delta.days)
+
+    def __repr__(self) -> str:
+        return f"<DeletionRequest(id={self.id}, user_id={self.user_id}, status={self.status})>"
