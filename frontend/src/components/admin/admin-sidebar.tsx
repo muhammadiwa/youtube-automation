@@ -11,7 +11,6 @@ import {
     Server,
     FileText,
     Settings,
-    BarChart3,
     HelpCircle,
     Menu,
     MessageSquare,
@@ -23,9 +22,6 @@ import {
     ChevronDown,
     Gift,
     TrendingUp,
-    Map,
-    Clock,
-    Layers,
     HardDrive,
     ExternalLink,
 } from "lucide-react"
@@ -55,6 +51,8 @@ const adminNavigation: NavSection[] = [
         icon: LayoutDashboard,
         items: [
             { name: "Dashboard", href: "/admin", icon: LayoutDashboard },
+            { name: "Revenue", href: "/admin/revenue", icon: TrendingUp },
+            { name: "Funnel Analysis", href: "/admin/funnel", icon: TrendingUp },
         ],
     },
     {
@@ -64,7 +62,6 @@ const adminNavigation: NavSection[] = [
         items: [
             { name: "Users", href: "/admin/users", icon: Users },
             { name: "Subscriptions", href: "/admin/subscriptions", icon: CreditCard },
-            { name: "Revenue", href: "/admin/revenue", icon: TrendingUp },
         ],
     },
     {
@@ -106,18 +103,6 @@ const adminNavigation: NavSection[] = [
             { name: "Global Config", href: "/admin/config", icon: Settings },
             { name: "Promotions", href: "/admin/promotions", icon: Gift },
             { name: "Announcements", href: "/admin/announcements", icon: Bell },
-        ],
-    },
-    {
-        title: "Analytics",
-        key: "analytics",
-        icon: BarChart3,
-        items: [
-            { name: "Platform Analytics", href: "/admin/analytics", icon: BarChart3 },
-            { name: "Growth Metrics", href: "/admin/analytics/growth", icon: TrendingUp },
-            { name: "Cohort Analysis", href: "/admin/analytics/cohort", icon: Layers },
-            { name: "Geographic", href: "/admin/analytics/geographic", icon: Map },
-            { name: "Usage Heatmap", href: "/admin/analytics/heatmap", icon: Clock },
         ],
     },
 ]

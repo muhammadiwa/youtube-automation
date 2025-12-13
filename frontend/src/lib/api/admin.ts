@@ -150,6 +150,76 @@ const adminApi = {
     },
 
     /**
+     * Get cohort analysis data
+     * Requirements: 17.1
+     */
+    async getCohortAnalysis(params?: {
+        start_date?: string
+        end_date?: string
+        granularity?: "weekly" | "monthly"
+    }): Promise<import("@/types/admin").CohortAnalysisResponse> {
+        const searchParams = new URLSearchParams()
+        if (params?.start_date) searchParams.set("start_date", params.start_date)
+        if (params?.end_date) searchParams.set("end_date", params.end_date)
+        if (params?.granularity) searchParams.set("granularity", params.granularity)
+        const query = searchParams.toString()
+        return apiClient.get(`/admin/analytics/cohort${query ? `?${query}` : ""}`)
+    },
+
+    /**
+     * Get funnel analysis data
+     * Requirements: 17.2
+     */
+    async getFunnelAnalysis(params?: {
+        start_date?: string
+        end_date?: string
+    }): Promise<import("@/types/admin").FunnelAnalysisResponse> {
+        const searchParams = new URLSearchParams()
+        if (params?.start_date) searchParams.set("start_date", params.start_date)
+        if (params?.end_date) searchParams.set("end_date", params.end_date)
+        const query = searchParams.toString()
+        return apiClient.get(`/admin/analytics/funnel${query ? `?${query}` : ""}`)
+    },
+
+    /**
+     * Get geographic distribution data
+     * Requirements: 17.3
+     */
+    async getGeographicDistribution(): Promise<import("@/types/admin").GeographicDistributionResponse> {
+        return apiClient.get("/admin/analytics/geographic")
+    },
+
+    /**
+     * Get usage heatmap data
+     * Requirements: 17.4
+     */
+    async getUsageHeatmap(params?: {
+        start_date?: string
+        end_date?: string
+    }): Promise<import("@/types/admin").UsageHeatmapResponse> {
+        const searchParams = new URLSearchParams()
+        if (params?.start_date) searchParams.set("start_date", params.start_date)
+        if (params?.end_date) searchParams.set("end_date", params.end_date)
+        const query = searchParams.toString()
+        return apiClient.get(`/admin/analytics/heatmap${query ? `?${query}` : ""}`)
+    },
+
+    /**
+     * Get feature adoption data
+     * Requirements: 17.5
+     */
+    async getFeatureAdoption(params?: {
+        start_date?: string
+        end_date?: string
+    }): Promise<import("@/types/admin").FeatureAdoptionResponse> {
+        const searchParams = new URLSearchParams()
+        if (params?.start_date) searchParams.set("start_date", params.start_date)
+        if (params?.end_date) searchParams.set("end_date", params.end_date)
+        const query = searchParams.toString()
+        return apiClient.get(`/admin/analytics/features${query ? `?${query}` : ""}`)
+    },
+
+    /**
      * Export dashboard data
      * Requirements: 2.5
      */

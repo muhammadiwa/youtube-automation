@@ -852,3 +852,95 @@ export interface CancelDeletionResponse {
     cancelled_at: string
     message: string
 }
+
+
+// ==================== Advanced Analytics Types (17.1-17.5) ====================
+
+// Cohort Analysis Types (17.1)
+export interface CohortRow {
+    cohort_date: string
+    cohort_size: number
+    retention: number[]
+}
+
+export interface CohortAnalysisResponse {
+    cohorts: CohortRow[]
+    periods: string[]
+    granularity: "weekly" | "monthly"
+    period_start: string
+    period_end: string
+}
+
+// Funnel Analysis Types (17.2)
+export interface FunnelStage {
+    stage: string
+    count: number
+    conversion_rate: number
+    drop_off_rate: number
+}
+
+export interface FunnelAnalysisResponse {
+    stages: FunnelStage[]
+    overall_conversion: number
+    period_start: string
+    period_end: string
+}
+
+// Geographic Distribution Types (17.3)
+export interface CountryData {
+    country_code: string
+    country_name: string
+    user_count: number
+    percentage: number
+}
+
+export interface RegionData {
+    region: string
+    user_count: number
+    percentage: number
+    countries: CountryData[]
+}
+
+export interface GeographicDistributionResponse {
+    total_users: number
+    by_country: CountryData[]
+    by_region: RegionData[]
+    unknown_location: number
+}
+
+// Usage Heatmap Types (17.4)
+export interface HeatmapCell {
+    hour: number
+    day: number
+    value: number
+    intensity: number
+}
+
+export interface UsageHeatmapResponse {
+    data: HeatmapCell[]
+    peak_hour: number
+    peak_day: number
+    peak_value: number
+    total_activity: number
+    period_start: string
+    period_end: string
+}
+
+// Feature Adoption Types (17.5)
+export interface FeatureUsage {
+    feature_name: string
+    feature_key: string
+    total_users: number
+    active_users: number
+    usage_count: number
+    adoption_rate: number
+    trend: "up" | "down" | "stable"
+    trend_percent: number
+}
+
+export interface FeatureAdoptionResponse {
+    features: FeatureUsage[]
+    total_users: number
+    period_start: string
+    period_end: string
+}
