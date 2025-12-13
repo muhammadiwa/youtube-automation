@@ -648,7 +648,7 @@ export default function SystemMonitoringPage() {
             addToast({
                 type: "success",
                 title: "Worker restart initiated",
-                message: "The worker is being restarted gracefully",
+                description: "The worker is being restarted gracefully",
             })
             setRestartDialogOpen(false)
             fetchWorkerData()
@@ -657,7 +657,7 @@ export default function SystemMonitoringPage() {
             addToast({
                 type: "error",
                 title: "Failed to restart worker",
-                message: "An error occurred while restarting the worker",
+                description: "An error occurred while restarting the worker",
             })
         } finally {
             setIsRestarting(false)

@@ -497,6 +497,112 @@ const adminApi = {
     async getQuotaAlerts(): Promise<import("@/types/admin").QuotaAlertsResponse> {
         return apiClient.get("/admin/quota/alerts")
     },
+
+    // ==================== Compliance & Audit API ====================
+
+    /**
+     * Get audit logs with filtering
+     * Requirements: 8.1, 8.2
+     */
+    async getAuditLogs(
+        page: number = 1,
+        pageSize: number = 20,
+        filters?: import("@/types/admin").AuditLogFilters
+    ): Promise<import("@/types/admin").AuditLogListResponse> {
+        const searchParams = new URLSearchParams()
+        searchParams.set("page", page.toString())
+        searchParams.set("page_size", pageSize.toString())
+        if (filters?.date_from) searchParams.set("date_from", filters.date_from)
+        if (filters?.date_to) searchParams.set("date_to", filters.date_to)
+        if (filters?.actor_id) searchParams.set("actor_id", filters.actor_id)
+        if (filters?.action_type) searchParams.set("action_type", filters.action_type)
+        if (filters?.resource_type) searchParams.set("resource_type", filters.resource_type)
+        if (filters?.resource_id) searchParams.set("resource_id", filters.resource_id)
+        if (filters?.event_type) searchParams.set("event_type", filters.event_type)
+        if (filters?.search) searchParams.set("search", filters.search)
+        return apiClient.get(`/admin/audit-logs?${searchParams.toString()}`)
+    },
+
+    /**
+     * Export audit logs
+     * Requirements: 8.3
+     */
+    async exportAuditLogs(
+        data: import("@/types/admin").AuditLogExportRequest
+    ): Promise<import("@/types/admin").AuditLogExportResponse> {
+        return apiClient.post("/admin/audit-logs/export", data)
+    },
+
+    /**
+     * Get security dashboard
+     * Requirements: 8.4, 8.5
+     */
+    async getSecurityDashboard(): Promise<import("@/types/admin").SecurityDashboardResponse> {
+        return apiClient.get("/admin/security")
+    },
+
+    /**
+     * Get data export requests
+     * Requirements: 15.1
+     */
+    async getDataExportRequests(
+        page: number = 1,
+        pageSize: number = 20,
+        status?: string
+    ): Promise<import("@/types/admin").DataExportRequestListResponse> {
+        const searchParams = new URLSearchParams()
+        searchParams.set("page", page.toString())
+        searchParams.set("page_size", pageSize.toString())
+        if (status) searchParams.set("status", status)
+        return apiClient.get(`/admin/compliance/export-requests?${searchParams.toString()}`)
+    },
+
+    /**
+     * Process data export request
+     * Requirements: 15.1
+     */
+    async processDataExport(
+        requestId: string
+    ): Promise<import("@/types/admin").ProcessDataExportResponse> {
+        return apiClient.post(`/admin/compliance/export-requests/${requestId}/process`, {})
+    },
+
+    /**
+     * Get deletion requests
+     * Requirements: 15.2
+     */
+    async getDeletionRequests(
+        page: number = 1,
+        pageSize: number = 20,
+        status?: string
+    ): Promise<import("@/types/admin").DeletionRequestListResponse> {
+        const searchParams = new URLSearchParams()
+        searchParams.set("page", page.toString())
+        searchParams.set("page_size", pageSize.toString())
+        if (status) searchParams.set("status", status)
+        return apiClient.get(`/admin/compliance/deletion-requests?${searchParams.toString()}`)
+    },
+
+    /**
+     * Process deletion request
+     * Requirements: 15.2
+     */
+    async processDeletion(
+        requestId: string
+    ): Promise<import("@/types/admin").ProcessDeletionResponse> {
+        return apiClient.post(`/admin/compliance/deletion-requests/${requestId}/process`, {})
+    },
+
+    /**
+     * Cancel deletion request
+     * Requirements: 15.2
+     */
+    async cancelDeletion(
+        requestId: string,
+        data?: import("@/types/admin").CancelDeletionRequest
+    ): Promise<import("@/types/admin").CancelDeletionResponse> {
+        return apiClient.post(`/admin/compliance/deletion-requests/${requestId}/cancel`, data || {})
+    },
 }
 
 export default adminApi

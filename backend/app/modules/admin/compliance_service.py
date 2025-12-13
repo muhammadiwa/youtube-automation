@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Any
 
-from sqlalchemy import select, func, and_, or_, desc
+from sqlalchemy import select, func, and_, or_, desc, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.auth.audit import AuditLogger, AuditLog, AuditLogEntry
@@ -109,6 +109,13 @@ def filter_audit_logs(
             if log.details and log.details.get("resource_id") == filters.resource_id
         ]
     
+    # Filter by event type (from details.event)
+    if filters.event_type:
+        result = [
+            log for log in result 
+            if log.details and log.details.get("event") == filters.event_type
+        ]
+    
     # Search in details
     if filters.search:
         search_lower = filters.search.lower()
@@ -163,27 +170,69 @@ class AdminComplianceService:
         Returns:
             AuditLogListResponse: Paginated audit logs
         """
-        # Get all logs from the in-memory logger
-        all_logs = AuditLogger.get_logs(limit=10000)
+        # Build query from database
+        query = select(AuditLog)
         
         # Apply filters
-        filtered_logs = filter_audit_logs(all_logs, filters)
+        if filters.date_from:
+            query = query.where(AuditLog.timestamp >= filters.date_from)
         
-        # Sort by timestamp descending (most recent first)
-        filtered_logs.sort(key=lambda x: x.timestamp, reverse=True)
+        if filters.date_to:
+            query = query.where(AuditLog.timestamp <= filters.date_to)
+        
+        if filters.actor_id:
+            query = query.where(AuditLog.user_id == filters.actor_id)
+        
+        if filters.action_type:
+            query = query.where(AuditLog.action == filters.action_type)
+        
+        # Filter by resource_type (from JSONB details)
+        if filters.resource_type:
+            query = query.where(
+                AuditLog.details["resource_type"].astext == filters.resource_type
+            )
+        
+        # Filter by resource_id (from JSONB details)
+        if filters.resource_id:
+            query = query.where(
+                AuditLog.details["resource_id"].astext == filters.resource_id
+            )
+        
+        # Filter by event_type (from JSONB details)
+        if filters.event_type:
+            query = query.where(
+                AuditLog.details["event"].astext == filters.event_type
+            )
+        
+        # Search in details (case-insensitive)
+        if filters.search:
+            search_pattern = f"%{filters.search.lower()}%"
+            query = query.where(
+                or_(
+                    AuditLog.action.ilike(search_pattern),
+                    func.lower(func.cast(AuditLog.details, String)).like(search_pattern)
+                )
+            )
+        
+        # Get total count
+        count_query = select(func.count()).select_from(query.subquery())
+        total_result = await self.session.execute(count_query)
+        total = total_result.scalar() or 0
         
         # Calculate pagination
-        total = len(filtered_logs)
         total_pages = (total + page_size - 1) // page_size if total > 0 else 1
         
-        # Get page slice
-        start_idx = (page - 1) * page_size
-        end_idx = start_idx + page_size
-        page_logs = filtered_logs[start_idx:end_idx]
+        # Apply ordering and pagination
+        query = query.order_by(desc(AuditLog.timestamp))
+        query = query.offset((page - 1) * page_size).limit(page_size)
+        
+        # Execute query
+        result = await self.session.execute(query)
+        logs = result.scalars().all()
         
         # Convert to response format
         items = []
-        for log in page_logs:
+        for log in logs:
             # Extract resource info from details
             resource_type = None
             resource_id = None
@@ -239,14 +288,29 @@ class AdminComplianceService:
         Returns:
             AuditLogExportResponse: Export result with download URL
         """
-        # Get all logs from the in-memory logger
-        all_logs = AuditLogger.get_logs(limit=100000)
+        # Build query from database
+        query = select(AuditLog)
         
         # Apply filters
-        filtered_logs = filter_audit_logs(all_logs, filters)
+        if filters.date_from:
+            query = query.where(AuditLog.timestamp >= filters.date_from)
+        if filters.date_to:
+            query = query.where(AuditLog.timestamp <= filters.date_to)
+        if filters.actor_id:
+            query = query.where(AuditLog.user_id == filters.actor_id)
+        if filters.action_type:
+            query = query.where(AuditLog.action == filters.action_type)
+        if filters.resource_type:
+            query = query.where(AuditLog.details["resource_type"].astext == filters.resource_type)
+        if filters.event_type:
+            query = query.where(AuditLog.details["event"].astext == filters.event_type)
         
-        # Sort by timestamp descending
-        filtered_logs.sort(key=lambda x: x.timestamp, reverse=True)
+        # Order by timestamp descending
+        query = query.order_by(desc(AuditLog.timestamp)).limit(100000)
+        
+        # Execute query
+        result = await self.session.execute(query)
+        filtered_logs = result.scalars().all()
         
         # Generate export content
         export_id = uuid.uuid4()
@@ -342,24 +406,37 @@ class AdminComplianceService:
         day_ago = now - timedelta(days=1)
         week_ago = now - timedelta(days=7)
         
-        # Get all logs
-        all_logs = AuditLogger.get_logs(limit=10000)
+        # Count failed login attempts in last 24h from database
+        failed_24h_query = select(func.count()).select_from(AuditLog).where(
+            and_(
+                AuditLog.action == "login_failed",
+                AuditLog.timestamp >= day_ago
+            )
+        )
+        result_24h = await self.session.execute(failed_24h_query)
+        failed_logins_24h = result_24h.scalar() or 0
         
-        # Count failed login attempts
-        failed_logins_24h = len([
-            log for log in all_logs
-            if log.action == "login_failed" and log.timestamp >= day_ago
-        ])
+        # Count failed login attempts in last 7d from database
+        failed_7d_query = select(func.count()).select_from(AuditLog).where(
+            and_(
+                AuditLog.action == "login_failed",
+                AuditLog.timestamp >= week_ago
+            )
+        )
+        result_7d = await self.session.execute(failed_7d_query)
+        failed_logins_7d = result_7d.scalar() or 0
         
-        failed_logins_7d = len([
-            log for log in all_logs
-            if log.action == "login_failed" and log.timestamp >= week_ago
-        ])
+        # Get failed logins for suspicious IP analysis
+        failed_logins_query = select(AuditLog).where(
+            AuditLog.action == "login_failed"
+        ).order_by(desc(AuditLog.timestamp)).limit(1000)
+        result_failed = await self.session.execute(failed_logins_query)
+        failed_logs = result_failed.scalars().all()
         
         # Aggregate suspicious IPs (IPs with multiple failed logins)
         ip_failures: dict[str, list[datetime]] = {}
-        for log in all_logs:
-            if log.action == "login_failed" and log.ip_address:
+        for log in failed_logs:
+            if log.ip_address:
                 if log.ip_address not in ip_failures:
                     ip_failures[log.ip_address] = []
                 ip_failures[log.ip_address].append(log.timestamp)
@@ -380,22 +457,37 @@ class AdminComplianceService:
         suspicious_ips.sort(key=lambda x: x.failed_attempts, reverse=True)
         suspicious_ips = suspicious_ips[:20]  # Top 20
         
+        # Get recent security events from database
+        security_query = select(AuditLog).where(
+            AuditLog.action.in_(["login_failed", "admin_action", "2fa_disable"])
+        ).order_by(desc(AuditLog.timestamp)).limit(50)
+        result_security = await self.session.execute(security_query)
+        security_logs = result_security.scalars().all()
+        
         # Generate security events from logs
         security_events = []
-        for log in all_logs[:50]:  # Recent 50 logs
-            if log.action in ["login_failed", "admin_access_denied", "2fa_disable"]:
-                severity = "high" if log.action == "admin_access_denied" else "medium"
-                security_events.append(SecurityEvent(
-                    id=log.id,
-                    event_type=log.action,
-                    severity=severity,
-                    description=f"{log.action.replace('_', ' ').title()}",
-                    user_id=log.user_id,
-                    ip_address=log.ip_address,
-                    details=log.details,
-                    timestamp=log.timestamp,
-                    resolved=False,
-                ))
+        for log in security_logs:
+            event_type = log.action
+            # Check if it's an admin_access_denied event
+            if log.action == "admin_action" and log.details:
+                event = log.details.get("event", "")
+                if "denied" in event or "failed" in event:
+                    event_type = event
+                else:
+                    continue  # Skip non-security admin actions
+            
+            severity = "high" if "denied" in event_type or "admin" in event_type else "medium"
+            security_events.append(SecurityEvent(
+                id=log.id,
+                event_type=event_type,
+                severity=severity,
+                description=f"{event_type.replace('_', ' ').title()}",
+                user_id=log.user_id,
+                ip_address=log.ip_address,
+                details=log.details,
+                timestamp=log.timestamp,
+                resolved=False,
+            ))
         
         blocked_ips_count = len([ip for ip in suspicious_ips if ip.blocked])
         

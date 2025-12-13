@@ -95,7 +95,7 @@ const adminNavigation: NavSection[] = [
         items: [
             { name: "Audit Logs", href: "/admin/audit-logs", icon: FileText },
             { name: "Security", href: "/admin/security", icon: Shield },
-            { name: "Data Requests", href: "/admin/compliance", icon: Flag },
+            { name: "Data Requests", href: "/admin/compliance/requests", icon: Flag },
         ],
     },
     {

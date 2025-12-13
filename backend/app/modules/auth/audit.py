@@ -80,12 +80,19 @@ class AuditLogEntry(BaseModel):
 
 
 class AuditLogger:
-    """In-memory audit logger for tracking sensitive actions.
+    """Audit logger for tracking sensitive actions.
 
-    In production, this would write to database and/or external logging service.
+    Logs are stored in the database via AuditLog model.
+    Also maintains an in-memory cache for quick access during the same session.
     """
 
     _logs: list[AuditLogEntry] = []
+    _db_session = None
+
+    @classmethod
+    def set_session(cls, session) -> None:
+        """Set the database session for persisting logs."""
+        cls._db_session = session
 
     @classmethod
     def log(
@@ -120,8 +127,60 @@ class AuditLogger:
             timestamp=datetime.utcnow(),
         )
 
+        # Add to in-memory cache
         cls._logs.append(entry)
         return entry
+    
+    @classmethod
+    async def log_to_db(
+        cls,
+        session,
+        action: AuditAction | str,
+        user_id: uuid.UUID | None = None,
+        details: dict[str, Any] | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> AuditLog:
+        """Log an audit event directly to database.
+
+        Args:
+            session: Database session
+            action: Type of action being logged
+            user_id: User performing the action (if known)
+            details: Additional details about the action
+            ip_address: Client IP address
+            user_agent: Client user agent string
+
+        Returns:
+            AuditLog: The created database log entry
+        """
+        action_str = action.value if isinstance(action, AuditAction) else action
+
+        db_log = AuditLog(
+            user_id=user_id,
+            action=action_str,
+            details=details,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        
+        session.add(db_log)
+        await session.commit()
+        await session.refresh(db_log)
+        
+        # Also add to in-memory cache
+        entry = AuditLogEntry(
+            id=db_log.id,
+            user_id=db_log.user_id,
+            action=db_log.action,
+            details=db_log.details,
+            ip_address=db_log.ip_address,
+            user_agent=db_log.user_agent,
+            timestamp=db_log.timestamp,
+        )
+        cls._logs.append(entry)
+        
+        return db_log
 
     @classmethod
     def get_logs(

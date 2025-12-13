@@ -677,3 +677,178 @@ export interface QuotaAlertsResponse {
     critical_count: number
     warning_count: number
 }
+
+
+// ==================== Compliance & Audit Types ====================
+
+export type AuditLogSeverity = "low" | "medium" | "high" | "critical"
+export type DataExportStatus = "pending" | "processing" | "completed" | "failed"
+export type DeletionRequestStatus = "pending" | "scheduled" | "processing" | "completed" | "cancelled"
+
+export interface AuditLogFilters {
+    date_from?: string
+    date_to?: string
+    actor_id?: string
+    action_type?: string
+    resource_type?: string
+    resource_id?: string
+    event_type?: string
+    search?: string
+}
+
+export interface AuditLogEntry {
+    id: string
+    user_id: string | null
+    actor_email: string | null
+    actor_name: string | null
+    action: string
+    details: Record<string, unknown> | null
+    ip_address: string | null
+    user_agent: string | null
+    timestamp: string
+    resource_type: string | null
+    resource_id: string | null
+    event: string | null
+}
+
+export interface AuditLogListResponse {
+    items: AuditLogEntry[]
+    total: number
+    page: number
+    page_size: number
+    total_pages: number
+}
+
+export interface AuditLogExportRequest {
+    date_from?: string
+    date_to?: string
+    actor_id?: string
+    action_type?: string
+    resource_type?: string
+    format: "csv" | "json"
+}
+
+export interface AuditLogExportResponse {
+    export_id: string
+    format: string
+    record_count: number
+    file_size_bytes: number
+    download_url: string
+    expires_at: string
+    created_at: string
+}
+
+// Security Dashboard Types
+export interface FailedLoginAttempt {
+    user_id: string | null
+    email: string | null
+    ip_address: string | null
+    user_agent: string | null
+    timestamp: string
+    reason: string | null
+}
+
+export interface SuspiciousIP {
+    ip_address: string
+    failed_attempts: number
+    last_attempt: string
+    blocked: boolean
+    countries: string[]
+}
+
+export interface SecurityEvent {
+    id: string
+    event_type: string
+    severity: AuditLogSeverity
+    description: string
+    user_id: string | null
+    ip_address: string | null
+    details: Record<string, unknown> | null
+    timestamp: string
+    resolved: boolean
+}
+
+export interface SecurityDashboardResponse {
+    failed_login_attempts_24h: number
+    failed_login_attempts_7d: number
+    suspicious_ips: SuspiciousIP[]
+    recent_security_events: SecurityEvent[]
+    blocked_ips_count: number
+    active_sessions_count: number
+}
+
+// Data Export Request Types
+export interface DataExportRequestItem {
+    id: string
+    user_id: string
+    user_email: string | null
+    user_name: string | null
+    status: DataExportStatus
+    requested_at: string
+    processed_at: string | null
+    completed_at: string | null
+    download_url: string | null
+    expires_at: string | null
+    error_message: string | null
+}
+
+export interface DataExportRequestListResponse {
+    items: DataExportRequestItem[]
+    total: number
+    page: number
+    page_size: number
+    total_pages: number
+}
+
+export interface ProcessDataExportResponse {
+    request_id: string
+    status: string
+    download_url: string | null
+    expires_at: string | null
+    message: string
+}
+
+// Deletion Request Types
+export interface DeletionRequestItem {
+    id: string
+    user_id: string
+    user_email: string | null
+    user_name: string | null
+    status: DeletionRequestStatus
+    requested_at: string
+    scheduled_for: string
+    days_remaining: number
+    processed_at: string | null
+    completed_at: string | null
+    cancelled_at: string | null
+    cancelled_by: string | null
+    cancellation_reason: string | null
+}
+
+export interface DeletionRequestListResponse {
+    items: DeletionRequestItem[]
+    total: number
+    page: number
+    page_size: number
+    total_pages: number
+}
+
+export interface ProcessDeletionResponse {
+    request_id: string
+    user_id: string
+    status: string
+    scheduled_for: string | null
+    message: string
+}
+
+export interface CancelDeletionRequest {
+    reason?: string
+}
+
+export interface CancelDeletionResponse {
+    request_id: string
+    user_id: string
+    status: string
+    cancelled_at: string
+    message: string
+}

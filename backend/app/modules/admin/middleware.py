@@ -15,7 +15,47 @@ from app.core.database import get_session
 from app.modules.admin.models import Admin, AdminPermission
 from app.modules.admin.repository import AdminRepository
 from app.modules.auth.jwt import validate_token
-from app.modules.auth.audit import AuditLogger, AuditAction
+from app.modules.auth.audit import AuditLogger, AuditAction, AuditLog
+
+
+async def log_audit_to_db(
+    session: AsyncSession,
+    action: AuditAction | str,
+    user_id: uuid.UUID | None = None,
+    details: dict | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+) -> None:
+    """Log audit event to database.
+    
+    Args:
+        session: Database session
+        action: Type of action being logged
+        user_id: User performing the action
+        details: Additional details about the action
+        ip_address: Client IP address
+        user_agent: Client user agent string
+    """
+    action_str = action.value if isinstance(action, AuditAction) else action
+    
+    db_log = AuditLog(
+        user_id=user_id,
+        action=action_str,
+        details=details,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    
+    session.add(db_log)
+    # Don't commit here - let the caller handle transaction
+    # Also log to in-memory for backward compatibility
+    AuditLogger.log(
+        action=action,
+        user_id=user_id,
+        details=details,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
 
 
 security = HTTPBearer()
@@ -97,8 +137,9 @@ async def verify_admin_access(
     admin = await repo.get_by_user_id(user_id)
     
     if admin is None:
-        # Log failed access attempt
-        AuditLogger.log(
+        # Log failed access attempt to database
+        await log_audit_to_db(
+            session=session,
             action=AuditAction.ADMIN_ACTION,
             user_id=user_id,
             details={
@@ -109,11 +150,13 @@ async def verify_admin_access(
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
         )
+        await session.commit()
         raise AdminAccessDenied("User does not have admin privileges")
     
     if not admin.is_active:
-        # Log failed access attempt
-        AuditLogger.log(
+        # Log failed access attempt to database
+        await log_audit_to_db(
+            session=session,
             action=AuditAction.ADMIN_ACTION,
             user_id=user_id,
             details={
@@ -125,6 +168,7 @@ async def verify_admin_access(
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
         )
+        await session.commit()
         raise AdminAccessDenied("Admin account is inactive")
     
     return admin
@@ -203,12 +247,14 @@ def require_permission(permission: AdminPermission):
     async def verify_permission(
         request: Request,
         admin: Admin = Depends(verify_admin_access),
+        session: AsyncSession = Depends(get_session),
     ) -> Admin:
         """Verify admin has the required permission.
         
         Args:
             request: FastAPI request object
             admin: Admin instance
+            session: Database session
             
         Returns:
             Admin: Admin instance if permission verified
@@ -217,7 +263,8 @@ def require_permission(permission: AdminPermission):
             AdminAccessDenied: If admin lacks the permission
         """
         if not admin.has_permission(permission):
-            AuditLogger.log(
+            await log_audit_to_db(
+                session=session,
                 action=AuditAction.ADMIN_ACTION,
                 user_id=admin.user_id,
                 details={
@@ -229,6 +276,7 @@ def require_permission(permission: AdminPermission):
                 ip_address=request.client.host if request.client else None,
                 user_agent=request.headers.get("user-agent"),
             )
+            await session.commit()
             raise AdminAccessDenied(f"Permission '{permission.value}' required")
         
         return admin

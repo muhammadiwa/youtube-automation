@@ -65,6 +65,7 @@ async def get_audit_logs(
     action_type: Optional[str] = Query(None, description="Filter by action type"),
     resource_type: Optional[str] = Query(None, description="Filter by resource type"),
     resource_id: Optional[str] = Query(None, description="Filter by resource ID"),
+    event_type: Optional[str] = Query(None, description="Filter by event type (from details.event)"),
     search: Optional[str] = Query(None, description="Search in details"),
     admin: Admin = Depends(require_permission(AdminPermission.VIEW_AUDIT_LOGS)),
     session: AsyncSession = Depends(get_session),
@@ -110,6 +111,7 @@ async def get_audit_logs(
         action_type=action_type,
         resource_type=resource_type,
         resource_id=resource_id,
+        event_type=event_type,
         search=search,
     )
     

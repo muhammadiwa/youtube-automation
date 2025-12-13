@@ -112,7 +112,7 @@ class AdminAuditService:
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
     ) -> AuditLogEntry:
-        """Log an admin action.
+        """Log an admin action (in-memory only, for backward compatibility).
         
         Args:
             admin_id: Admin record ID
@@ -148,6 +148,65 @@ class AdminAuditService:
             ip_address=ip_address,
             user_agent=user_agent,
         )
+    
+    @classmethod
+    async def log_to_db(
+        cls,
+        session,
+        admin_id: uuid.UUID,
+        admin_user_id: uuid.UUID,
+        event: AdminAuditEvent,
+        resource_type: Optional[str] = None,
+        resource_id: Optional[str] = None,
+        details: Optional[dict[str, Any]] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ):
+        """Log an admin action to database.
+        
+        Args:
+            session: Database session
+            admin_id: Admin record ID
+            admin_user_id: User ID of the admin
+            event: Type of admin event
+            resource_type: Type of resource being acted upon
+            resource_id: ID of the resource being acted upon
+            details: Additional details about the action
+            ip_address: Client IP address
+            user_agent: Client user agent string
+            
+        Returns:
+            AuditLog: The created database audit log entry
+        """
+        from app.modules.auth.audit import AuditLog
+        
+        # Build comprehensive details
+        audit_details = {
+            "event": event.value,
+            "admin_id": str(admin_id),
+        }
+        
+        if resource_type:
+            audit_details["resource_type"] = resource_type
+        if resource_id:
+            audit_details["resource_id"] = str(resource_id)
+        if details:
+            audit_details.update(details)
+        
+        # Create database entry
+        db_log = AuditLog(
+            user_id=admin_user_id,
+            action=AuditAction.ADMIN_ACTION.value,
+            details=audit_details,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        
+        session.add(db_log)
+        await session.commit()
+        await session.refresh(db_log)
+        
+        return db_log
     
     @classmethod
     def log_authentication(

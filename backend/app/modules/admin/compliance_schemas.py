@@ -29,6 +29,7 @@ class AuditLogFilters(BaseModel):
     action_type: Optional[str] = Field(None, description="Filter by action type")
     resource_type: Optional[str] = Field(None, description="Filter by resource type")
     resource_id: Optional[str] = Field(None, description="Filter by resource ID")
+    event_type: Optional[str] = Field(None, description="Filter by event type (from details.event)")
     search: Optional[str] = Field(None, description="Search in details")
 
 
