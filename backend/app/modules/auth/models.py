@@ -7,10 +7,14 @@ from datetime import datetime
 from passlib.context import CryptContext
 from sqlalchemy import Boolean, DateTime, String, Text
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
+from typing import TYPE_CHECKING, List
 
 from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.modules.account.models import YouTubeAccount
 
 # Password hashing context with bcrypt (cost factor 12 as per design)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=12)
@@ -105,6 +109,11 @@ class User(Base):
     )
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     country: Mapped[str | None] = mapped_column(String(2), nullable=True, index=True)  # ISO 3166-1 alpha-2
+    
+    # Relationships
+    youtube_accounts: Mapped[List["YouTubeAccount"]] = relationship(
+        "YouTubeAccount", back_populates="user", lazy="selectin"
+    )
 
     def set_password(self, password: str, validate: bool = True) -> None:
         """Set user password with optional validation.

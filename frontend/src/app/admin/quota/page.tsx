@@ -293,8 +293,11 @@ export default function QuotaDashboardPage() {
     }, [fetchDashboardData, fetchAlertsData])
 
     useEffect(() => {
-        fetchDashboardData()
-        fetchAlertsData()
+        // Fetch all data in parallel for faster initial load
+        Promise.all([
+            fetchDashboardData(),
+            fetchAlertsData(),
+        ])
 
         // Auto-refresh every 60 seconds
         const interval = setInterval(refreshAll, 60000)
@@ -349,9 +352,15 @@ export default function QuotaDashboardPage() {
                     {isLoadingDashboard ? (
                         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                             {[...Array(4)].map((_, i) => (
-                                <Card key={i}>
+                                <Card key={i} className="border-0 shadow-lg">
                                     <CardContent className="p-6">
-                                        <Skeleton className="h-20 w-full" />
+                                        <div className="flex items-center justify-between mb-4">
+                                            <Skeleton className="h-12 w-12 rounded-xl" />
+                                            <Skeleton className="h-5 w-16 rounded-full" />
+                                        </div>
+                                        <Skeleton className="h-4 w-24 mb-2" />
+                                        <Skeleton className="h-8 w-20 mb-1" />
+                                        <Skeleton className="h-3 w-32" />
                                     </CardContent>
                                 </Card>
                             ))}
@@ -359,87 +368,96 @@ export default function QuotaDashboardPage() {
                     ) : dashboardData && (
                         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                             {/* Platform Usage */}
-                            <Card className="border border-slate-200/60 dark:border-slate-700/60">
+                            <Card className="relative overflow-hidden border-0 shadow-lg bg-gradient-to-br from-blue-500 to-indigo-600">
                                 <CardContent className="p-6">
                                     <div className="flex items-center justify-between mb-4">
-                                        <div className="h-10 w-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-                                            <TrendingUp className="h-5 w-5 text-blue-600" />
+                                        <div className="h-12 w-12 rounded-xl bg-white/20 flex items-center justify-center backdrop-blur-sm">
+                                            <TrendingUp className="h-6 w-6 text-white" />
                                         </div>
-                                        <Badge variant={dashboardData.platform_usage_percent >= 80 ? "destructive" : "secondary"}>
+                                        <Badge className={cn(
+                                            "text-xs font-semibold",
+                                            dashboardData.platform_usage_percent >= 80
+                                                ? "bg-red-500/90 hover:bg-red-500"
+                                                : "bg-white/20 hover:bg-white/30"
+                                        )}>
                                             {dashboardData.platform_usage_percent.toFixed(1)}%
                                         </Badge>
                                     </div>
-                                    <p className="text-sm text-slate-500 mb-1">Platform Usage</p>
-                                    <p className="text-2xl font-bold text-slate-900 dark:text-white">
+                                    <p className="text-sm text-white/80 mb-1">Platform Usage</p>
+                                    <p className="text-3xl font-bold text-white">
                                         {dashboardData.total_daily_quota_used.toLocaleString()}
                                     </p>
-                                    <p className="text-xs text-slate-400 mt-1">
+                                    <p className="text-xs text-white/60 mt-1">
                                         of {dashboardData.total_daily_quota_limit.toLocaleString()} total
                                     </p>
-                                    <Progress
-                                        value={dashboardData.platform_usage_percent}
-                                        className="mt-3 h-2"
-                                    />
+                                    <div className="mt-4 h-2 bg-white/20 rounded-full overflow-hidden">
+                                        <div
+                                            className="h-full bg-white rounded-full transition-all duration-500"
+                                            style={{ width: `${Math.min(dashboardData.platform_usage_percent, 100)}%` }}
+                                        />
+                                    </div>
                                 </CardContent>
                             </Card>
 
                             {/* Total Accounts */}
-                            <Card className="border border-slate-200/60 dark:border-slate-700/60">
+                            <Card className="relative overflow-hidden border-0 shadow-lg bg-gradient-to-br from-red-500 to-rose-600">
                                 <CardContent className="p-6">
                                     <div className="flex items-center justify-between mb-4">
-                                        <div className="h-10 w-10 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
-                                            <Youtube className="h-5 w-5 text-red-600" />
+                                        <div className="h-12 w-12 rounded-xl bg-white/20 flex items-center justify-center backdrop-blur-sm">
+                                            <Youtube className="h-6 w-6 text-white" />
                                         </div>
                                     </div>
-                                    <p className="text-sm text-slate-500 mb-1">YouTube Accounts</p>
-                                    <p className="text-2xl font-bold text-slate-900 dark:text-white">
+                                    <p className="text-sm text-white/80 mb-1">YouTube Accounts</p>
+                                    <p className="text-3xl font-bold text-white">
                                         {dashboardData.total_accounts}
                                     </p>
-                                    <p className="text-xs text-slate-400 mt-1">
+                                    <p className="text-xs text-white/60 mt-1">
                                         across {dashboardData.total_users_with_accounts} users
                                     </p>
                                 </CardContent>
                             </Card>
 
                             {/* High Usage Accounts */}
-                            <Card className="border border-slate-200/60 dark:border-slate-700/60">
+                            <Card className="relative overflow-hidden border-0 shadow-lg bg-gradient-to-br from-amber-500 to-orange-600">
                                 <CardContent className="p-6">
                                     <div className="flex items-center justify-between mb-4">
-                                        <div className="h-10 w-10 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
-                                            <AlertTriangle className="h-5 w-5 text-amber-600" />
+                                        <div className="h-12 w-12 rounded-xl bg-white/20 flex items-center justify-center backdrop-blur-sm">
+                                            <AlertTriangle className="h-6 w-6 text-white" />
                                         </div>
                                         {dashboardData.accounts_over_80_percent > 0 && (
-                                            <Badge variant="outline" className="border-amber-500 text-amber-600">
+                                            <Badge className="bg-white/20 hover:bg-white/30 text-white text-xs">
                                                 Warning
                                             </Badge>
                                         )}
                                     </div>
-                                    <p className="text-sm text-slate-500 mb-1">Accounts &gt;80%</p>
-                                    <p className="text-2xl font-bold text-amber-600">
+                                    <p className="text-sm text-white/80 mb-1">Accounts &gt;80%</p>
+                                    <p className="text-3xl font-bold text-white">
                                         {dashboardData.accounts_over_80_percent}
                                     </p>
-                                    <p className="text-xs text-slate-400 mt-1">
+                                    <p className="text-xs text-white/60 mt-1">
                                         approaching quota limit
                                     </p>
                                 </CardContent>
                             </Card>
 
                             {/* Critical Accounts */}
-                            <Card className="border border-slate-200/60 dark:border-slate-700/60">
+                            <Card className="relative overflow-hidden border-0 shadow-lg bg-gradient-to-br from-rose-600 to-red-700">
                                 <CardContent className="p-6">
                                     <div className="flex items-center justify-between mb-4">
-                                        <div className="h-10 w-10 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
-                                            <AlertCircle className="h-5 w-5 text-red-600" />
+                                        <div className="h-12 w-12 rounded-xl bg-white/20 flex items-center justify-center backdrop-blur-sm">
+                                            <AlertCircle className="h-6 w-6 text-white" />
                                         </div>
                                         {dashboardData.accounts_over_90_percent > 0 && (
-                                            <Badge variant="destructive">Critical</Badge>
+                                            <Badge className="bg-white/20 hover:bg-white/30 text-white text-xs">
+                                                Critical
+                                            </Badge>
                                         )}
                                     </div>
-                                    <p className="text-sm text-slate-500 mb-1">Accounts &gt;90%</p>
-                                    <p className="text-2xl font-bold text-red-600">
+                                    <p className="text-sm text-white/80 mb-1">Accounts &gt;90%</p>
+                                    <p className="text-3xl font-bold text-white">
                                         {dashboardData.accounts_over_90_percent}
                                     </p>
-                                    <p className="text-xs text-slate-400 mt-1">
+                                    <p className="text-xs text-white/60 mt-1">
                                         at critical usage level
                                     </p>
                                 </CardContent>

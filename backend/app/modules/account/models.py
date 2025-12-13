@@ -12,9 +12,13 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
+from typing import TYPE_CHECKING
 
 from app.core.database import Base
 from app.core.encryption import decrypt_token, encrypt_token, is_encrypted
+
+if TYPE_CHECKING:
+    from app.modules.auth.models import User
 
 
 class AccountStatus(str, Enum):
@@ -41,6 +45,9 @@ class YouTubeAccount(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    
+    # Relationship to User
+    user: Mapped["User"] = relationship("User", back_populates="youtube_accounts", lazy="selectin")
 
     # YouTube channel information
     channel_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)

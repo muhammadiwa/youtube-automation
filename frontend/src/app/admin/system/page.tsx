@@ -20,7 +20,7 @@ import {
     Loader2,
 } from "lucide-react"
 import { AdminLayout } from "@/components/admin"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -52,7 +52,6 @@ import type {
     WorkerStatusResponse,
     ErrorAlertsResponse,
     ComponentHealth,
-    WorkerInfo,
     HealthStatus,
     ComponentStatusType,
     WorkerStatusType,
@@ -620,10 +619,13 @@ export default function SystemMonitoringPage() {
     }, [fetchHealthData, fetchJobQueueData, fetchWorkerData, fetchAlertsData])
 
     useEffect(() => {
-        fetchHealthData()
-        fetchJobQueueData()
-        fetchWorkerData()
-        fetchAlertsData()
+        // Fetch all data in parallel for faster initial load
+        Promise.all([
+            fetchHealthData(),
+            fetchJobQueueData(),
+            fetchWorkerData(),
+            fetchAlertsData(),
+        ])
 
         // Auto-refresh every 30 seconds
         const interval = setInterval(refreshAll, 30000)

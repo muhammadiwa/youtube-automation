@@ -15,7 +15,6 @@ from typing import List, Optional
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.core.alerting import alert_manager, AlertSeverity, AlertThreshold
 from app.modules.admin.quota_schemas import (
@@ -59,10 +58,9 @@ class AdminQuotaService:
         from app.modules.account.models import YouTubeAccount, AccountStatus
         from app.modules.auth.models import User
         
-        # Get all active YouTube accounts with their users
+        # Get all active YouTube accounts (user relationship is lazy="selectin")
         result = await self.session.execute(
             select(YouTubeAccount)
-            .options(selectinload(YouTubeAccount.user))
             .where(YouTubeAccount.status == AccountStatus.ACTIVE.value)
         )
         accounts = list(result.scalars().all())
@@ -186,10 +184,9 @@ class AdminQuotaService:
         from app.modules.account.models import YouTubeAccount
         from app.modules.auth.models import User
         
-        # Get account and user info
+        # Get account and user info (user relationship is lazy="selectin")
         result = await self.session.execute(
             select(YouTubeAccount)
-            .options(selectinload(YouTubeAccount.user))
             .where(YouTubeAccount.id == account_id)
         )
         account = result.scalar_one_or_none()
@@ -252,10 +249,9 @@ class AdminQuotaService:
         """
         from app.modules.account.models import YouTubeAccount, AccountStatus
         
-        # Get all accounts over warning threshold
+        # Get all accounts over warning threshold (user relationship is lazy="selectin")
         result = await self.session.execute(
             select(YouTubeAccount)
-            .options(selectinload(YouTubeAccount.user))
             .where(YouTubeAccount.status == AccountStatus.ACTIVE.value)
         )
         accounts = list(result.scalars().all())
