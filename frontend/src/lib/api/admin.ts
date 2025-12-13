@@ -755,3 +755,330 @@ interface GatewayHealthAlert {
 }
 
 export default adminApi
+
+
+// ==================== Configuration API Types ====================
+
+export interface AuthConfig {
+    jwt_access_token_expire_minutes: number
+    jwt_refresh_token_expire_days: number
+    password_min_length: number
+    password_require_uppercase: boolean
+    password_require_lowercase: boolean
+    password_require_digit: boolean
+    password_require_special: boolean
+    max_login_attempts: number
+    lockout_duration_minutes: number
+    require_email_verification: boolean
+    allow_social_login: boolean
+    admin_require_2fa: boolean
+    session_timeout_minutes: number
+}
+
+export interface UploadConfig {
+    max_file_size_gb: number
+    allowed_formats: string[]
+    max_concurrent_uploads: number
+    upload_chunk_size_mb: number
+    max_retry_attempts: number
+    retry_delay_seconds: number
+    auto_generate_thumbnail: boolean
+    default_visibility: string
+    max_title_length: number
+    max_description_length: number
+    max_tags_count: number
+}
+
+export interface StreamingConfig {
+    max_concurrent_streams_per_account: number
+    max_stream_duration_hours: number
+    health_check_interval_seconds: number
+    reconnect_max_attempts: number
+    reconnect_initial_delay_seconds: number
+    reconnect_max_delay_seconds: number
+    default_latency_mode: string
+    enable_dvr_by_default: boolean
+    simulcast_max_platforms: number
+    playlist_max_videos: number
+    stream_start_tolerance_seconds: number
+}
+
+export interface AIConfig {
+    openai_model: string
+    openai_max_tokens: number
+    title_suggestions_count: number
+    thumbnail_variations_count: number
+    thumbnail_width: number
+    thumbnail_height: number
+    chatbot_response_timeout_seconds: number
+    chatbot_max_response_length: number
+    sentiment_analysis_enabled: boolean
+    ai_monthly_budget_usd: number
+    enable_content_moderation_ai: boolean
+}
+
+export interface ModerationConfig {
+    moderation_analysis_timeout_seconds: number
+    auto_slow_mode_threshold: number
+    slow_mode_duration_seconds: number
+    default_timeout_duration_seconds: number
+    max_warnings_before_ban: number
+    spam_detection_enabled: boolean
+    profanity_filter_enabled: boolean
+    link_filter_enabled: boolean
+    caps_filter_threshold_percent: number
+}
+
+export interface NotificationConfig {
+    email_enabled: boolean
+    sms_enabled: boolean
+    slack_enabled: boolean
+    telegram_enabled: boolean
+    whatsapp_enabled: boolean
+    notification_batch_interval_seconds: number
+    max_notifications_per_batch: number
+    critical_alert_channels: string[]
+    notification_retention_days: number
+}
+
+export interface JobQueueConfig {
+    max_job_retries: number
+    retry_backoff_multiplier: number
+    retry_initial_delay_seconds: number
+    retry_max_delay_seconds: number
+    job_timeout_minutes: number
+    dlq_alert_threshold: number
+    worker_heartbeat_interval_seconds: number
+    worker_unhealthy_threshold_seconds: number
+    max_jobs_per_worker: number
+    queue_priority_levels: number
+}
+
+export interface ConfigUpdateResponse {
+    key: string
+    category: string
+    previous_value: Record<string, unknown>
+    new_value: Record<string, unknown>
+    updated_by: string
+    updated_at: string
+    message: string
+}
+
+// ==================== Configuration API Methods ====================
+
+const configApi = {
+    // Auth Config (Requirements 19.1-19.5)
+    async getAuthConfig(): Promise<AuthConfig> {
+        return apiClient.get("/admin/config/auth")
+    },
+
+    async updateAuthConfig(data: Partial<AuthConfig>): Promise<ConfigUpdateResponse> {
+        return apiClient.put("/admin/config/auth", data)
+    },
+
+    // Upload Config (Requirements 20.1-20.5)
+    async getUploadConfig(): Promise<UploadConfig> {
+        return apiClient.get("/admin/config/upload")
+    },
+
+    async updateUploadConfig(data: Partial<UploadConfig>): Promise<ConfigUpdateResponse> {
+        return apiClient.put("/admin/config/upload", data)
+    },
+
+    // Streaming Config (Requirements 21.1-21.5)
+    async getStreamingConfig(): Promise<StreamingConfig> {
+        return apiClient.get("/admin/config/streaming")
+    },
+
+    async updateStreamingConfig(data: Partial<StreamingConfig>): Promise<ConfigUpdateResponse> {
+        return apiClient.put("/admin/config/streaming", data)
+    },
+
+    // AI Config (Requirements 22.1-22.5)
+    async getAIConfig(): Promise<AIConfig> {
+        return apiClient.get("/admin/config/ai")
+    },
+
+    async updateAIConfig(data: Partial<AIConfig>): Promise<ConfigUpdateResponse> {
+        return apiClient.put("/admin/config/ai", data)
+    },
+
+    // Moderation Config (Requirements 23.1-23.5)
+    async getModerationConfig(): Promise<ModerationConfig> {
+        return apiClient.get("/admin/config/moderation")
+    },
+
+    async updateModerationConfig(data: Partial<ModerationConfig>): Promise<ConfigUpdateResponse> {
+        return apiClient.put("/admin/config/moderation", data)
+    },
+
+    // Notification Config (Requirements 24.1-24.5)
+    async getNotificationConfig(): Promise<NotificationConfig> {
+        return apiClient.get("/admin/config/notification")
+    },
+
+    async updateNotificationConfig(data: Partial<NotificationConfig>): Promise<ConfigUpdateResponse> {
+        return apiClient.put("/admin/config/notification", data)
+    },
+
+    // Job Queue Config (Requirements 25.1-25.5)
+    async getJobQueueConfig(): Promise<JobQueueConfig> {
+        return apiClient.get("/admin/config/jobs")
+    },
+
+    async updateJobQueueConfig(data: Partial<JobQueueConfig>): Promise<ConfigUpdateResponse> {
+        return apiClient.put("/admin/config/jobs", data)
+    },
+
+    // Plan Config (Requirements 26.1-26.5)
+    async getPlanConfigs(): Promise<PlanConfigListResponse> {
+        return apiClient.get("/admin/config/plans")
+    },
+
+    async getPlanConfig(planId: string): Promise<PlanConfig> {
+        return apiClient.get(`/admin/config/plans/${planId}`)
+    },
+
+    async updatePlanConfig(planId: string, data: Partial<PlanConfig>): Promise<ConfigUpdateResponse> {
+        return apiClient.put(`/admin/config/plans/${planId}`, data)
+    },
+
+    // Email Template Config (Requirements 27.1-27.5)
+    async getEmailTemplates(): Promise<EmailTemplateListResponse> {
+        return apiClient.get("/admin/config/email-templates")
+    },
+
+    async getEmailTemplate(templateId: string): Promise<EmailTemplate> {
+        return apiClient.get(`/admin/config/email-templates/${templateId}`)
+    },
+
+    async updateEmailTemplate(templateId: string, data: Partial<EmailTemplate>): Promise<ConfigUpdateResponse> {
+        return apiClient.put(`/admin/config/email-templates/${templateId}`, data)
+    },
+
+    async previewEmailTemplate(templateId: string, sampleData: Record<string, string>): Promise<EmailTemplatePreviewResponse> {
+        return apiClient.post(`/admin/config/email-templates/${templateId}/preview`, { sample_data: sampleData })
+    },
+
+    // Feature Flag Config (Requirements 28.1-28.5)
+    async getFeatureFlags(): Promise<FeatureFlagListResponse> {
+        return apiClient.get("/admin/config/feature-flags")
+    },
+
+    async getFeatureFlag(flagName: string): Promise<FeatureFlag> {
+        return apiClient.get(`/admin/config/feature-flags/${flagName}`)
+    },
+
+    async updateFeatureFlag(flagName: string, data: Partial<FeatureFlag>): Promise<ConfigUpdateResponse> {
+        return apiClient.put(`/admin/config/feature-flags/${flagName}`, data)
+    },
+
+    // Branding Config (Requirements 29.1-29.5)
+    async getBrandingConfig(): Promise<BrandingConfig> {
+        return apiClient.get("/admin/config/branding")
+    },
+
+    async updateBrandingConfig(data: Partial<BrandingConfig>): Promise<ConfigUpdateResponse> {
+        return apiClient.put("/admin/config/branding", data)
+    },
+
+    async uploadLogo(file: File): Promise<ConfigUpdateResponse> {
+        const formData = new FormData()
+        formData.append("file", file)
+        return apiClient.post("/admin/config/branding/logo", formData, {
+            headers: { "Content-Type": "multipart/form-data" },
+        })
+    },
+}
+
+// ==================== Plan Config Types (Requirements 26.1-26.5) ====================
+
+export interface PlanConfig {
+    plan_id: string
+    plan_name: string
+    price_monthly: number
+    price_yearly: number
+    max_youtube_accounts: number
+    max_videos_per_month: number
+    max_streams_per_month: number
+    max_storage_gb: number
+    max_bandwidth_gb: number
+    max_ai_generations_per_month: number
+    max_concurrent_streams: number
+    max_simulcast_platforms: number
+    enable_analytics: boolean
+    enable_competitor_analysis: boolean
+    enable_ai_features: boolean
+    enable_api_access: boolean
+    api_rate_limit_per_minute: number
+    support_level: string
+    is_active: boolean
+}
+
+export interface PlanConfigListResponse {
+    plans: PlanConfig[]
+    total: number
+}
+
+// ==================== Email Template Types (Requirements 27.1-27.5) ====================
+
+export interface EmailTemplate {
+    template_id: string
+    template_name: string
+    subject: string
+    body_html: string
+    body_text: string
+    variables: string[]
+    is_active: boolean
+    category: string
+}
+
+export interface EmailTemplateListResponse {
+    templates: EmailTemplate[]
+    total: number
+}
+
+export interface EmailTemplatePreviewResponse {
+    subject: string
+    body_html: string
+    body_text: string
+}
+
+// ==================== Feature Flag Types (Requirements 28.1-28.5) ====================
+
+export interface FeatureFlag {
+    flag_name: string
+    description: string
+    is_enabled: boolean
+    enabled_for_plans: string[]
+    enabled_for_users: string[]
+    rollout_percentage: number
+}
+
+export interface FeatureFlagListResponse {
+    flags: FeatureFlag[]
+    total: number
+}
+
+// ==================== Branding Config Types (Requirements 29.1-29.5) ====================
+
+export interface BrandingConfig {
+    platform_name: string
+    tagline: string
+    logo_url: string | null
+    favicon_url: string | null
+    primary_color: string
+    secondary_color: string
+    accent_color: string
+    support_email: string
+    support_url: string | null
+    documentation_url: string | null
+    terms_of_service_url: string | null
+    privacy_policy_url: string | null
+    social_links: Record<string, string>
+    footer_text: string
+    maintenance_mode: boolean
+    maintenance_message: string | null
+}
+
+export { configApi }
