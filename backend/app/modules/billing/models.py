@@ -507,6 +507,10 @@ class Plan(Base):
     stripe_price_id_yearly: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     stripe_product_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     
+    # UI Customization
+    icon: Mapped[str] = mapped_column(String(50), default="Sparkles")  # Lucide icon name
+    color: Mapped[str] = mapped_column(String(20), default="slate")    # Tailwind color name
+    
     # Status
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_popular: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -542,6 +546,8 @@ class Plan(Base):
                 "max_bandwidth_gb": self.max_bandwidth_gb,
                 "ai_generations_per_month": self.ai_generations_per_month,
             },
+            "icon": self.icon,
+            "color": self.color,
             "is_popular": self.is_popular,
         }
 

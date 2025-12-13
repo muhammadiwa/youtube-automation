@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.admin.models import SystemConfig, ConfigCategory
+from app.modules.billing.models import Plan
 from app.modules.admin.config_schemas import (
     AuthConfig, AuthConfigUpdate,
     UploadConfig, UploadConfigUpdate,
@@ -21,7 +22,7 @@ from app.modules.admin.config_schemas import (
     NotificationConfig, NotificationConfigUpdate,
     JobQueueConfig, JobQueueConfigUpdate,
     ConfigUpdateResponse,
-    PlanConfig, PlanConfigUpdate, PlanConfigListResponse,
+    PlanConfig, PlanConfigCreate, PlanConfigUpdate, PlanConfigListResponse,
     EmailTemplate, EmailTemplateUpdate, EmailTemplateListResponse,
     EmailTemplatePreviewResponse,
     FeatureFlag, FeatureFlagUpdate, FeatureFlagListResponse,
@@ -286,15 +287,18 @@ class GlobalConfigService:
         Returns:
             ConfigUpdateResponse with previous and new values
         """
+        import copy
+        from sqlalchemy.orm.attributes import flag_modified
+        
         # Get or create config
         default_value = DEFAULT_CONFIGS.get(category, {})
         config = await self._get_or_create_config(key, category, default_value)
         
-        # Store previous value
-        previous_value = config.value.copy()
+        # Store previous value (deep copy to avoid reference issues)
+        previous_value = copy.deepcopy(config.value)
         
         # Merge update with existing config
-        new_value = {**config.value}
+        new_value = copy.deepcopy(config.value)
         for field, value in update_data.items():
             if value is not None:
                 new_value[field] = value
@@ -306,6 +310,9 @@ class GlobalConfigService:
         config.value = validated.model_dump()
         config.updated_by = admin_id
         config.updated_at = datetime.utcnow()
+        
+        # Mark the JSON column as modified to ensure SQLAlchemy persists the change
+        flag_modified(config, "value")
         
         await self.db.commit()
         await self.db.refresh(config)
@@ -616,102 +623,240 @@ class GlobalConfigService:
 
     # ==================== Plan Config (Requirements 26.1-26.5) ====================
 
+    def _plan_to_config(self, plan: Plan) -> PlanConfig:
+        """Convert Plan model to PlanConfig schema.
+        
+        Maps fields from the plans table to the admin config schema format.
+        """
+        return PlanConfig(
+            id=str(plan.id),
+            slug=plan.slug,
+            name=plan.name,
+            description=plan.description,
+            price_monthly=plan.price_monthly / 100,  # Convert cents to dollars
+            price_yearly=plan.price_yearly / 100,    # Convert cents to dollars
+            currency=plan.currency,
+            max_accounts=plan.max_accounts,
+            max_videos_per_month=plan.max_videos_per_month,
+            max_streams_per_month=plan.max_streams_per_month,
+            max_storage_gb=plan.max_storage_gb,
+            max_bandwidth_gb=plan.max_bandwidth_gb,
+            ai_generations_per_month=plan.ai_generations_per_month,
+            api_calls_per_month=plan.api_calls_per_month,
+            encoding_minutes_per_month=plan.encoding_minutes_per_month,
+            concurrent_streams=plan.concurrent_streams,
+            features=plan.features or [],
+            display_features=plan.display_features or [],
+            stripe_price_id_monthly=plan.stripe_price_id_monthly,
+            stripe_price_id_yearly=plan.stripe_price_id_yearly,
+            stripe_product_id=plan.stripe_product_id,
+            icon=plan.icon,
+            color=plan.color,
+            is_active=plan.is_active,
+            is_popular=plan.is_popular,
+            sort_order=plan.sort_order,
+        )
+
     async def get_plan_configs(self) -> PlanConfigListResponse:
-        """Get all subscription plan configurations.
+        """Get all subscription plan configurations from the plans table.
         
         Requirements: 26.1-26.5 - Subscription Plan Configuration
         
         Returns:
             PlanConfigListResponse with all plans
         """
-        config = await self._get_or_create_config(
-            ConfigCategory.PLANS.value,
-            ConfigCategory.PLANS.value,
-            {"plans": DEFAULT_PLANS}
+        result = await self.db.execute(
+            select(Plan).order_by(Plan.sort_order)
         )
-        plans_data = config.value.get("plans", DEFAULT_PLANS)
-        plans = [PlanConfig(**p) for p in plans_data]
-        return PlanConfigListResponse(plans=plans, total=len(plans))
+        plans = result.scalars().all()
+        
+        plan_configs = [self._plan_to_config(plan) for plan in plans]
+        return PlanConfigListResponse(plans=plan_configs, total=len(plan_configs))
 
     async def get_plan_config(self, plan_id: str) -> Optional[PlanConfig]:
-        """Get a specific plan configuration.
+        """Get a specific plan configuration from the plans table.
         
         Args:
-            plan_id: Plan identifier
+            plan_id: Plan slug identifier
             
         Returns:
             PlanConfig or None if not found
         """
-        config = await self._get_or_create_config(
-            ConfigCategory.PLANS.value,
-            ConfigCategory.PLANS.value,
-            {"plans": DEFAULT_PLANS}
+        result = await self.db.execute(
+            select(Plan).where(Plan.slug == plan_id)
         )
-        plans_data = config.value.get("plans", DEFAULT_PLANS)
-        for plan in plans_data:
-            if plan.get("plan_id") == plan_id:
-                return PlanConfig(**plan)
-        return None
+        plan = result.scalar_one_or_none()
+        
+        if plan is None:
+            return None
+        
+        return self._plan_to_config(plan)
 
-    async def update_plan_config(
+    async def create_plan_config(
         self,
-        plan_id: str,
-        data: PlanConfigUpdate,
+        data: PlanConfigCreate,
         admin_id: uuid.UUID
-    ) -> ConfigUpdateResponse:
-        """Update a specific plan configuration.
+    ) -> PlanConfig:
+        """Create a new plan configuration in the plans table.
         
         Requirements: 26.1-26.5 - Subscription Plan Configuration
         
         Args:
-            plan_id: Plan identifier
+            data: Plan creation data
+            admin_id: Admin performing the creation
+            
+        Returns:
+            Created PlanConfig
+        """
+        # Auto-generate slug from name if not provided
+        slug = data.slug
+        if not slug:
+            # Generate slug: lowercase, replace spaces with underscore, remove special chars
+            slug = re.sub(r'[^a-z0-9_]', '', data.name.lower().replace(' ', '_'))
+            if len(slug) < 2:
+                slug = f"plan_{slug}"
+        
+        # Check if slug already exists
+        result = await self.db.execute(
+            select(Plan).where(Plan.slug == slug)
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            raise ValueError(f"Plan with slug '{slug}' already exists")
+        
+        # Create new plan
+        plan = Plan(
+            slug=slug,
+            name=data.name,
+            description=data.description,
+            price_monthly=int(data.price_monthly * 100),  # Convert dollars to cents
+            price_yearly=int(data.price_yearly * 100),
+            currency=data.currency,
+            max_accounts=data.max_accounts,
+            max_videos_per_month=data.max_videos_per_month,
+            max_streams_per_month=data.max_streams_per_month,
+            max_storage_gb=data.max_storage_gb,
+            max_bandwidth_gb=data.max_bandwidth_gb,
+            ai_generations_per_month=data.ai_generations_per_month,
+            api_calls_per_month=data.api_calls_per_month,
+            encoding_minutes_per_month=data.encoding_minutes_per_month,
+            concurrent_streams=data.concurrent_streams,
+            features=data.features,
+            display_features=data.display_features,
+            stripe_price_id_monthly=data.stripe_price_id_monthly,
+            stripe_price_id_yearly=data.stripe_price_id_yearly,
+            stripe_product_id=data.stripe_product_id,
+            icon=data.icon,
+            color=data.color,
+            is_active=data.is_active,
+            is_popular=data.is_popular,
+            sort_order=data.sort_order,
+        )
+        
+        self.db.add(plan)
+        await self.db.commit()
+        await self.db.refresh(plan)
+        
+        return self._plan_to_config(plan)
+
+    async def update_plan_config(
+        self,
+        plan_slug: str,
+        data: PlanConfigUpdate,
+        admin_id: uuid.UUID
+    ) -> ConfigUpdateResponse:
+        """Update a specific plan configuration in the plans table.
+        
+        Requirements: 26.1-26.5 - Subscription Plan Configuration
+        
+        Args:
+            plan_slug: Plan slug identifier
             data: Partial update data
             admin_id: Admin performing the update
             
         Returns:
             ConfigUpdateResponse with previous and new values
         """
-        config = await self._get_or_create_config(
-            ConfigCategory.PLANS.value,
-            ConfigCategory.PLANS.value,
-            {"plans": DEFAULT_PLANS}
+        # Get the plan from the plans table
+        result = await self.db.execute(
+            select(Plan).where(Plan.slug == plan_slug)
         )
+        plan = result.scalar_one_or_none()
         
-        plans_data = config.value.get("plans", DEFAULT_PLANS)
-        previous_value = {"plans": plans_data.copy()}
+        if plan is None:
+            raise ValueError(f"Plan with slug '{plan_slug}' not found")
         
-        # Find and update the plan
-        plan_found = False
+        # Store previous value for response
+        previous_config = self._plan_to_config(plan)
+        previous_value = previous_config.model_dump()
+        
+        # Get update data
         update_data = data.model_dump(exclude_unset=True)
         
-        for i, plan in enumerate(plans_data):
-            if plan.get("plan_id") == plan_id:
-                plan_found = True
-                for field, value in update_data.items():
-                    if value is not None:
-                        plans_data[i][field] = value
-                break
+        # Update fields directly - schema fields match model fields
+        for field, value in update_data.items():
+            if value is None:
+                continue
+            
+            # Handle price conversion (dollars to cents)
+            if field == "price_monthly":
+                plan.price_monthly = int(value * 100)
+            elif field == "price_yearly":
+                plan.price_yearly = int(value * 100)
+            elif hasattr(plan, field):
+                setattr(plan, field, value)
         
-        if not plan_found:
-            raise ValueError(f"Plan with id '{plan_id}' not found")
-        
-        # Update config
-        config.value = {"plans": plans_data}
-        config.updated_by = admin_id
-        config.updated_at = datetime.utcnow()
+        # Update timestamp
+        plan.updated_at = datetime.utcnow()
         
         await self.db.commit()
-        await self.db.refresh(config)
+        await self.db.refresh(plan)
+        
+        # Get new value for response
+        new_config = self._plan_to_config(plan)
         
         return ConfigUpdateResponse(
             key=ConfigCategory.PLANS.value,
             category=ConfigCategory.PLANS.value,
             previous_value=previous_value,
-            new_value=config.value,
+            new_value=new_config.model_dump(),
             updated_by=admin_id,
-            updated_at=config.updated_at,
-            message=f"Plan '{plan_id}' configuration updated successfully"
+            updated_at=plan.updated_at,
+            message=f"Plan '{plan_slug}' configuration updated successfully"
         )
+
+    async def delete_plan_config(
+        self,
+        plan_slug: str,
+        admin_id: uuid.UUID
+    ) -> dict:
+        """Delete a plan configuration from the plans table.
+        
+        Args:
+            plan_slug: Plan slug identifier
+            admin_id: Admin performing the deletion
+            
+        Returns:
+            Deletion confirmation
+        """
+        # Get the plan from the plans table
+        result = await self.db.execute(
+            select(Plan).where(Plan.slug == plan_slug)
+        )
+        plan = result.scalar_one_or_none()
+        
+        if plan is None:
+            raise ValueError(f"Plan with slug '{plan_slug}' not found")
+        
+        # Delete the plan
+        await self.db.delete(plan)
+        await self.db.commit()
+        
+        return {
+            "message": f"Plan '{plan_slug}' deleted successfully",
+            "deleted_by": str(admin_id),
+            "deleted_at": datetime.utcnow().isoformat()
+        }
 
     # ==================== Email Template Config (Requirements 27.1-27.5) ====================
 
@@ -770,14 +915,18 @@ class GlobalConfigService:
         Returns:
             ConfigUpdateResponse with previous and new values
         """
+        import copy
+        from sqlalchemy.orm.attributes import flag_modified
+        
         config = await self._get_or_create_config(
             ConfigCategory.EMAIL_TEMPLATES.value,
             ConfigCategory.EMAIL_TEMPLATES.value,
             {"templates": DEFAULT_EMAIL_TEMPLATES}
         )
         
-        templates_data = config.value.get("templates", DEFAULT_EMAIL_TEMPLATES)
-        previous_value = {"templates": [t.copy() for t in templates_data]}
+        # Deep copy to avoid reference issues
+        templates_data = copy.deepcopy(config.value.get("templates", DEFAULT_EMAIL_TEMPLATES))
+        previous_value = {"templates": copy.deepcopy(templates_data)}
         
         # Find and update the template
         template_found = False
@@ -804,6 +953,9 @@ class GlobalConfigService:
         config.value = {"templates": templates_data}
         config.updated_by = admin_id
         config.updated_at = datetime.utcnow()
+        
+        # Mark the JSON column as modified
+        flag_modified(config, "value")
         
         await self.db.commit()
         await self.db.refresh(config)
@@ -942,14 +1094,18 @@ class GlobalConfigService:
         Returns:
             ConfigUpdateResponse with previous and new values
         """
+        import copy
+        from sqlalchemy.orm.attributes import flag_modified
+        
         config = await self._get_or_create_config(
             ConfigCategory.FEATURE_FLAGS.value,
             ConfigCategory.FEATURE_FLAGS.value,
             {"flags": DEFAULT_FEATURE_FLAGS}
         )
         
-        flags_data = config.value.get("flags", DEFAULT_FEATURE_FLAGS)
-        previous_value = {"flags": [f.copy() for f in flags_data]}
+        # Deep copy to avoid reference issues
+        flags_data = copy.deepcopy(config.value.get("flags", DEFAULT_FEATURE_FLAGS))
+        previous_value = {"flags": copy.deepcopy(flags_data)}
         
         # Find and update the flag
         flag_found = False
@@ -970,6 +1126,9 @@ class GlobalConfigService:
         config.value = {"flags": flags_data}
         config.updated_by = admin_id
         config.updated_at = datetime.utcnow()
+        
+        # Mark the JSON column as modified
+        flag_modified(config, "value")
         
         await self.db.commit()
         await self.db.refresh(config)

@@ -97,6 +97,9 @@ export interface Plan {
     price_yearly: number
     features: PlanFeature[]
     limits: PlanLimits
+    icon?: string  // Lucide icon name
+    color?: string // Tailwind color name
+    is_popular?: boolean
 }
 
 // ============ Subscription Types ============
@@ -214,6 +217,9 @@ export const billingApi = {
                     max_bandwidth_gb: 5,
                     ai_generations_per_month: 0,
                 },
+                icon: plan.icon,
+                color: plan.color,
+                is_popular: plan.is_popular,
             }))
         }
 

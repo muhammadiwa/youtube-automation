@@ -13,10 +13,12 @@ interface ConfigFormWrapperProps {
     description: string
     icon: React.ReactNode
     children: React.ReactNode
-    onSave: () => Promise<void>
-    onReset: () => void
-    isDirty: boolean
+    onSave?: () => Promise<void>
+    onReset?: () => void
+    isDirty?: boolean
     isLoading?: boolean
+    hideDefaultActions?: boolean
+    customActions?: React.ReactNode
 }
 
 export function ConfigFormWrapper({
@@ -26,14 +28,17 @@ export function ConfigFormWrapper({
     children,
     onSave,
     onReset,
-    isDirty,
+    isDirty = false,
     isLoading = false,
+    hideDefaultActions = false,
+    customActions,
 }: ConfigFormWrapperProps) {
     const [isSaving, setIsSaving] = useState(false)
     const [saveSuccess, setSaveSuccess] = useState(false)
     const { addToast } = useToast()
 
     const handleSave = async () => {
+        if (!onSave) return
         setIsSaving(true)
         setSaveSuccess(false)
         try {
@@ -79,38 +84,43 @@ export function ConfigFormWrapper({
                             </div>
                         </div>
                         <div className="flex items-center gap-2">
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={onReset}
-                                disabled={!isDirty || isSaving || isLoading}
-                            >
-                                <RotateCcw className="h-4 w-4 mr-2" />
-                                Reset
-                            </Button>
-                            <Button
-                                size="sm"
-                                onClick={handleSave}
-                                disabled={!isDirty || isSaving || isLoading}
-                                className="min-w-[100px]"
-                            >
-                                {isSaving ? (
-                                    <>
-                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                        Saving...
-                                    </>
-                                ) : saveSuccess ? (
-                                    <>
-                                        <CheckCircle2 className="h-4 w-4 mr-2 text-emerald-500" />
-                                        Saved
-                                    </>
-                                ) : (
-                                    <>
-                                        <Save className="h-4 w-4 mr-2" />
-                                        Save
-                                    </>
-                                )}
-                            </Button>
+                            {customActions}
+                            {!hideDefaultActions && (
+                                <>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={onReset}
+                                        disabled={!isDirty || isSaving || isLoading}
+                                    >
+                                        <RotateCcw className="h-4 w-4 mr-2" />
+                                        Reset
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        onClick={handleSave}
+                                        disabled={!isDirty || isSaving || isLoading}
+                                        className="min-w-[100px]"
+                                    >
+                                        {isSaving ? (
+                                            <>
+                                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                                Saving...
+                                            </>
+                                        ) : saveSuccess ? (
+                                            <>
+                                                <CheckCircle2 className="h-4 w-4 mr-2 text-emerald-500" />
+                                                Saved
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Save className="h-4 w-4 mr-2" />
+                                                Save
+                                            </>
+                                        )}
+                                    </Button>
+                                </>
+                            )}
                         </div>
                     </div>
                 </CardHeader>

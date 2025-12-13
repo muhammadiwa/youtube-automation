@@ -88,6 +88,9 @@ const defaultPlans: Plan[] = [
             { name: "Live Streaming", included: false },
         ],
         limits: { max_accounts: 1, max_videos_per_month: 5, max_streams_per_month: 0, max_storage_gb: 1, max_bandwidth_gb: 5, ai_generations_per_month: 0 },
+        icon: "Sparkles",
+        color: "slate",
+        is_popular: false,
     },
     {
         id: "basic",
@@ -103,6 +106,9 @@ const defaultPlans: Plan[] = [
             { name: "Live Streaming (5/month)", included: true },
         ],
         limits: { max_accounts: 3, max_videos_per_month: 50, max_streams_per_month: 5, max_storage_gb: 10, max_bandwidth_gb: 50, ai_generations_per_month: 100 },
+        icon: "Zap",
+        color: "blue",
+        is_popular: false,
     },
     {
         id: "pro",
@@ -118,6 +124,9 @@ const defaultPlans: Plan[] = [
             { name: "Unlimited Streaming", included: true },
         ],
         limits: { max_accounts: 10, max_videos_per_month: -1, max_streams_per_month: -1, max_storage_gb: 100, max_bandwidth_gb: 500, ai_generations_per_month: 500 },
+        icon: "Crown",
+        color: "violet",
+        is_popular: true,
     },
     {
         id: "enterprise",
@@ -133,6 +142,9 @@ const defaultPlans: Plan[] = [
             { name: "Dedicated Account Manager", included: true },
         ],
         limits: { max_accounts: -1, max_videos_per_month: -1, max_streams_per_month: -1, max_storage_gb: -1, max_bandwidth_gb: -1, ai_generations_per_month: -1 },
+        icon: "Building2",
+        color: "amber",
+        is_popular: false,
     },
 ]
 
@@ -202,9 +214,68 @@ function BillingContent() {
     }
     const handleResumeSubscription = async () => { try { await billingApi.resumeSubscription(); await loadAllData() } catch (error) { console.error("Failed to resume:", error) } }
 
-    const getPlanIcon = (slug: string) => ({ free: Sparkles, basic: Zap, pro: Crown, enterprise: Building2 }[slug] || Sparkles)
-    const getPlanGradient = (slug: string) => ({ free: "from-slate-500 to-slate-600", basic: "from-blue-500 to-cyan-500", pro: "from-violet-500 to-purple-600", enterprise: "from-amber-500 to-orange-500" }[slug] || "from-slate-500 to-slate-600")
-    const getPlanBg = (slug: string) => ({ free: "bg-slate-500/5 border-slate-500/20", basic: "bg-blue-500/5 border-blue-500/20", pro: "bg-violet-500/5 border-violet-500/20", enterprise: "bg-amber-500/5 border-amber-500/20" }[slug] || "bg-slate-500/5")
+    // Icon mapping from database icon name to component
+    const iconMap: Record<string, typeof Sparkles> = {
+        Sparkles, Zap, Crown, Building2, Rocket, Gift, Shield, Star
+    }
+
+    // Get icon from plan data or fallback to slug-based default
+    const getPlanIcon = (slug: string, iconName?: string) => {
+        if (iconName && iconMap[iconName]) return iconMap[iconName]
+        return { free: Sparkles, basic: Zap, pro: Crown, enterprise: Building2 }[slug] || Sparkles
+    }
+
+    // Color gradients mapping from database color name
+    const colorGradients: Record<string, string> = {
+        slate: "from-slate-500 to-slate-600",
+        blue: "from-blue-500 to-cyan-500",
+        violet: "from-violet-500 to-purple-600",
+        amber: "from-amber-500 to-orange-500",
+        emerald: "from-emerald-500 to-green-500",
+        rose: "from-rose-500 to-pink-500",
+        cyan: "from-cyan-500 to-teal-500",
+        orange: "from-orange-500 to-red-500",
+    }
+
+    // Get gradient from plan data or fallback to slug-based default
+    const getPlanGradient = (slug: string, colorName?: string) => {
+        if (colorName && colorGradients[colorName]) return colorGradients[colorName]
+        return { free: "from-slate-500 to-slate-600", basic: "from-blue-500 to-cyan-500", pro: "from-violet-500 to-purple-600", enterprise: "from-amber-500 to-orange-500" }[slug] || "from-slate-500 to-slate-600"
+    }
+
+    // Background colors mapping
+    const colorBgs: Record<string, string> = {
+        slate: "bg-slate-500/5 border-slate-500/20",
+        blue: "bg-blue-500/5 border-blue-500/20",
+        violet: "bg-violet-500/5 border-violet-500/20",
+        amber: "bg-amber-500/5 border-amber-500/20",
+        emerald: "bg-emerald-500/5 border-emerald-500/20",
+        rose: "bg-rose-500/5 border-rose-500/20",
+        cyan: "bg-cyan-500/5 border-cyan-500/20",
+        orange: "bg-orange-500/5 border-orange-500/20",
+    }
+
+    const getPlanBg = (slug: string, colorName?: string) => {
+        if (colorName && colorBgs[colorName]) return colorBgs[colorName]
+        return { free: "bg-slate-500/5 border-slate-500/20", basic: "bg-blue-500/5 border-blue-500/20", pro: "bg-violet-500/5 border-violet-500/20", enterprise: "bg-amber-500/5 border-amber-500/20" }[slug] || "bg-slate-500/5"
+    }
+
+    // Button gradients mapping
+    const buttonGradients: Record<string, string> = {
+        slate: "bg-gradient-to-r from-slate-500 to-slate-600 hover:from-slate-600 hover:to-slate-700 shadow-lg shadow-slate-500/30",
+        blue: "bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 shadow-lg shadow-blue-500/30",
+        violet: "bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 shadow-lg shadow-purple-500/30",
+        amber: "bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 shadow-lg shadow-amber-500/30",
+        emerald: "bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 shadow-lg shadow-emerald-500/30",
+        rose: "bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 shadow-lg shadow-rose-500/30",
+        cyan: "bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-600 hover:to-teal-600 shadow-lg shadow-cyan-500/30",
+        orange: "bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 shadow-lg shadow-orange-500/30",
+    }
+
+    const getButtonGradient = (slug: string, colorName?: string) => {
+        if (colorName && buttonGradients[colorName]) return buttonGradients[colorName]
+        return { free: buttonGradients.slate, basic: buttonGradients.blue, pro: buttonGradients.violet, enterprise: buttonGradients.amber }[slug] || buttonGradients.slate
+    }
     const formatPrice = (price: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(price)
     const formatCurrency = (amount: number, currency: string = "USD") => new Intl.NumberFormat("en-US", { style: "currency", currency }).format(amount)
     const getUsagePercentage = (used: number, limit: number): number => (limit === -1 || limit === 0) ? 0 : Math.min((used / limit) * 100, 100)
@@ -273,21 +344,24 @@ function BillingContent() {
                             Manage your plan, usage, and payments
                         </p>
                     </div>
-                    {subscription && (
-                        <div className="flex items-center gap-3 bg-muted/50 rounded-xl px-4 py-3">
-                            <div className={cn("flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br", getPlanGradient(subscription.plan_tier))}>
-                                {(() => { const Icon = getPlanIcon(subscription.plan_tier); return <Icon className="h-5 w-5 text-white" /> })()}
+                    {subscription && (() => {
+                        const currentPlanData = displayPlans.find(p => p.slug === subscription.plan_tier)
+                        return (
+                            <div className="flex items-center gap-3 bg-muted/50 rounded-xl px-4 py-3">
+                                <div className={cn("flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br", getPlanGradient(subscription.plan_tier, currentPlanData?.color))}>
+                                    {(() => { const Icon = getPlanIcon(subscription.plan_tier, currentPlanData?.icon); return <Icon className="h-5 w-5 text-white" /> })()}
+                                </div>
+                                <div>
+                                    <p className="text-xs text-muted-foreground">Current Plan</p>
+                                    <p className="font-semibold capitalize">{subscription.plan_tier} <span className="text-xs text-muted-foreground">({subscription.billing_cycle})</span></p>
+                                </div>
+                                <Badge variant="outline" className="ml-2">
+                                    <Calendar className="h-3 w-3 mr-1" />
+                                    Renews {new Date(subscription.current_period_end).toLocaleDateString()}
+                                </Badge>
                             </div>
-                            <div>
-                                <p className="text-xs text-muted-foreground">Current Plan</p>
-                                <p className="font-semibold capitalize">{subscription.plan_tier} <span className="text-xs text-muted-foreground">({subscription.billing_cycle})</span></p>
-                            </div>
-                            <Badge variant="outline" className="ml-2">
-                                <Calendar className="h-3 w-3 mr-1" />
-                                Renews {new Date(subscription.current_period_end).toLocaleDateString()}
-                            </Badge>
-                        </div>
-                    )}
+                        )
+                    })()}
                 </div>
 
                 {/* Modern Tabs */}
@@ -334,21 +408,13 @@ function BillingContent() {
                         {/* Plans Grid */}
                         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4 items-stretch">
                             {displayPlans.map((plan, index) => {
-                                const Icon = getPlanIcon(plan.slug)
+                                const Icon = getPlanIcon(plan.slug, plan.icon)
                                 const isCurrent = isCurrentPlan(plan.slug)
                                 const price = billingCycle === "monthly" ? plan.price_monthly : plan.price_yearly
                                 const planIndex = displayPlans.findIndex(p => p.slug === plan.slug)
                                 const currentIndex = displayPlans.findIndex(p => p.slug === currentPlan)
                                 const isUpgrade = planIndex > currentIndex
-                                const isPro = plan.slug === "pro"
-
-                                // Button gradient colors matching plan icon colors
-                                const getButtonGradient = (slug: string) => ({
-                                    free: "bg-gradient-to-r from-slate-500 to-slate-600 hover:from-slate-600 hover:to-slate-700 shadow-lg shadow-slate-500/30",
-                                    basic: "bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 shadow-lg shadow-blue-500/30",
-                                    pro: "bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 shadow-lg shadow-purple-500/30",
-                                    enterprise: "bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 shadow-lg shadow-amber-500/30"
-                                }[slug] || "bg-gradient-to-r from-slate-500 to-slate-600")
+                                const isPro = plan.slug === "pro" || plan.is_popular
 
                                 return (
                                     <div key={plan.id} className={cn("relative group flex", isPro && "lg:-mt-4 lg:mb-4")}>
@@ -380,7 +446,7 @@ function BillingContent() {
                                                 "relative overflow-hidden transition-all duration-500 hover:shadow-2xl flex flex-col w-full h-full",
                                                 isCurrent ? "border-0 shadow-lg shadow-red-500/20" : "border-2 border-transparent hover:border-primary/30",
                                                 isPro && !isCurrent && "shadow-xl shadow-purple-500/10",
-                                                getPlanBg(plan.slug)
+                                                getPlanBg(plan.slug, plan.color)
                                             )}>
                                                 {isCurrent && (
                                                     <div className="absolute top-4 right-4">
@@ -388,7 +454,7 @@ function BillingContent() {
                                                     </div>
                                                 )}
                                                 <CardHeader className="text-center pb-2 pt-8">
-                                                    <div className={cn("mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br shadow-lg mb-4 transition-transform duration-300 group-hover:scale-110", getPlanGradient(plan.slug))}>
+                                                    <div className={cn("mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br shadow-lg mb-4 transition-transform duration-300 group-hover:scale-110", getPlanGradient(plan.slug, plan.color))}>
                                                         <Icon className="h-8 w-8 text-white" />
                                                     </div>
                                                     <CardTitle className="text-xl">{plan.name}</CardTitle>
@@ -424,7 +490,7 @@ function BillingContent() {
                                                         <Button
                                                             className={cn(
                                                                 "w-full h-12 rounded-xl font-semibold transition-all duration-300",
-                                                                !isCurrent && getButtonGradient(plan.slug),
+                                                                !isCurrent && getButtonGradient(plan.slug, plan.color),
                                                                 !isCurrent && "text-white",
                                                                 isCurrent && "border-2"
                                                             )}

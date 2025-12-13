@@ -935,12 +935,20 @@ const configApi = {
         return apiClient.get("/admin/config/plans")
     },
 
-    async getPlanConfig(planId: string): Promise<PlanConfig> {
-        return apiClient.get(`/admin/config/plans/${planId}`)
+    async getPlanConfig(planSlug: string): Promise<PlanConfig> {
+        return apiClient.get(`/admin/config/plans/${planSlug}`)
     },
 
-    async updatePlanConfig(planId: string, data: Partial<PlanConfig>): Promise<ConfigUpdateResponse> {
-        return apiClient.put(`/admin/config/plans/${planId}`, data)
+    async createPlanConfig(data: PlanConfigCreate): Promise<PlanConfig> {
+        return apiClient.post("/admin/config/plans", data)
+    },
+
+    async updatePlanConfig(planSlug: string, data: PlanConfigUpdate): Promise<ConfigUpdateResponse> {
+        return apiClient.put(`/admin/config/plans/${planSlug}`, data)
+    },
+
+    async deletePlanConfig(planSlug: string): Promise<{ message: string }> {
+        return apiClient.delete(`/admin/config/plans/${planSlug}`)
     },
 
     // Email Template Config (Requirements 27.1-27.5)
@@ -985,40 +993,90 @@ const configApi = {
     async uploadLogo(file: File): Promise<ConfigUpdateResponse> {
         const formData = new FormData()
         formData.append("file", file)
-        return apiClient.post("/admin/config/branding/logo", formData, {
-            headers: { "Content-Type": "multipart/form-data" },
+
+        // Use fetch directly for multipart/form-data upload
+        const token = apiClient.getAccessToken()
+        const response = await fetch(`${apiClient.getBaseUrl()}/admin/config/branding/logo`, {
+            method: "POST",
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+            body: formData,
         })
+
+        if (!response.ok) {
+            const error = await response.json()
+            throw error
+        }
+
+        return response.json()
     },
 }
 
 // ==================== Plan Config Types (Requirements 26.1-26.5) ====================
 
 export interface PlanConfig {
-    plan_id: string
-    plan_name: string
+    id: string | null
+    slug: string
+    name: string
+    description: string | null
     price_monthly: number
     price_yearly: number
-    max_youtube_accounts: number
+    currency: string
+    max_accounts: number
     max_videos_per_month: number
     max_streams_per_month: number
     max_storage_gb: number
     max_bandwidth_gb: number
-    max_ai_generations_per_month: number
-    max_concurrent_streams: number
-    max_simulcast_platforms: number
-    enable_analytics: boolean
-    enable_competitor_analysis: boolean
-    enable_ai_features: boolean
-    enable_api_access: boolean
-    api_rate_limit_per_minute: number
-    support_level: string
+    ai_generations_per_month: number
+    api_calls_per_month: number
+    encoding_minutes_per_month: number
+    concurrent_streams: number
+    features: string[]
+    display_features: Array<{ name: string; included: boolean }>
+    stripe_price_id_monthly: string | null
+    stripe_price_id_yearly: string | null
+    stripe_product_id: string | null
+    icon: string
+    color: string
     is_active: boolean
+    is_popular: boolean
+    sort_order: number
+}
+
+export interface PlanConfigCreate {
+    name: string
+    slug?: string  // Optional - auto-generated from name if not provided
+    description?: string | null
+    price_monthly?: number
+    price_yearly?: number
+    currency?: string
+    max_accounts?: number
+    max_videos_per_month?: number
+    max_streams_per_month?: number
+    max_storage_gb?: number
+    max_bandwidth_gb?: number
+    ai_generations_per_month?: number
+    api_calls_per_month?: number
+    encoding_minutes_per_month?: number
+    concurrent_streams?: number
+    features?: string[]
+    display_features?: Array<{ name: string; included: boolean }>
+    stripe_price_id_monthly?: string | null
+    stripe_price_id_yearly?: string | null
+    stripe_product_id?: string | null
+    icon?: string
+    color?: string
+    is_active?: boolean
+    is_popular?: boolean
+    sort_order?: number
 }
 
 export interface PlanConfigListResponse {
     plans: PlanConfig[]
     total: number
 }
+
+// Update type that excludes slug (since it's in the URL path)
+export type PlanConfigUpdate = Omit<Partial<PlanConfig>, 'id' | 'slug'>
 
 // ==================== Email Template Types (Requirements 27.1-27.5) ====================
 

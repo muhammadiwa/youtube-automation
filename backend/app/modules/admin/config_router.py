@@ -21,7 +21,7 @@ from app.modules.admin.config_schemas import (
     NotificationConfig, NotificationConfigUpdate,
     JobQueueConfig, JobQueueConfigUpdate,
     ConfigUpdateResponse,
-    PlanConfig, PlanConfigUpdate, PlanConfigListResponse,
+    PlanConfig, PlanConfigCreate, PlanConfigUpdate, PlanConfigListResponse,
     EmailTemplate, EmailTemplateUpdate, EmailTemplateListResponse,
     EmailTemplatePreview, EmailTemplatePreviewResponse,
     FeatureFlag, FeatureFlagUpdate, FeatureFlagListResponse,
@@ -326,13 +326,13 @@ async def get_plan_configs(
 
 
 @router.get(
-    "/plans/{plan_id}",
+    "/plans/{plan_slug}",
     response_model=PlanConfig,
     summary="Get plan configuration",
     description="Get a specific subscription plan configuration."
 )
 async def get_plan_config(
-    plan_id: str,
+    plan_slug: str,
     admin: Annotated[Admin, Depends(require_permission(AdminPermission.VIEW_SYSTEM))],
     service: GlobalConfigService = Depends(get_config_service),
 ) -> PlanConfig:
@@ -340,23 +340,48 @@ async def get_plan_config(
     
     Requirements: 26.1-26.5 - Subscription Plan Configuration
     """
-    plan = await service.get_plan_config(plan_id)
+    plan = await service.get_plan_config(plan_slug)
     if plan is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Plan with id '{plan_id}' not found"
+            detail=f"Plan with slug '{plan_slug}' not found"
         )
     return plan
 
 
+@router.post(
+    "/plans",
+    response_model=PlanConfig,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create plan configuration",
+    description="Create a new subscription plan configuration."
+)
+async def create_plan_config(
+    data: PlanConfigCreate,
+    admin: Annotated[Admin, Depends(require_permission(AdminPermission.MANAGE_CONFIG))],
+    service: GlobalConfigService = Depends(get_config_service),
+) -> PlanConfig:
+    """Create a new plan configuration.
+    
+    Requirements: 26.1-26.5 - Subscription Plan Configuration
+    """
+    try:
+        return await service.create_plan_config(data, admin.id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+
 @router.put(
-    "/plans/{plan_id}",
+    "/plans/{plan_slug}",
     response_model=ConfigUpdateResponse,
     summary="Update plan configuration",
     description="Update a specific subscription plan configuration."
 )
 async def update_plan_config(
-    plan_id: str,
+    plan_slug: str,
     data: PlanConfigUpdate,
     admin: Annotated[Admin, Depends(require_permission(AdminPermission.MANAGE_CONFIG))],
     service: GlobalConfigService = Depends(get_config_service),
@@ -366,7 +391,30 @@ async def update_plan_config(
     Requirements: 26.1-26.5 - Subscription Plan Configuration
     """
     try:
-        return await service.update_plan_config(plan_id, data, admin.id)
+        return await service.update_plan_config(plan_slug, data, admin.id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+
+
+@router.delete(
+    "/plans/{plan_slug}",
+    summary="Delete plan configuration",
+    description="Delete a subscription plan configuration."
+)
+async def delete_plan_config(
+    plan_slug: str,
+    admin: Annotated[Admin, Depends(require_permission(AdminPermission.MANAGE_CONFIG))],
+    service: GlobalConfigService = Depends(get_config_service),
+) -> dict:
+    """Delete a plan configuration.
+    
+    Requirements: 26.1-26.5 - Subscription Plan Configuration
+    """
+    try:
+        return await service.delete_plan_config(plan_slug, admin.id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

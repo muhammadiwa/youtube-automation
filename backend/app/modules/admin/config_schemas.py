@@ -438,85 +438,118 @@ class ConfigUpdateResponse(BaseModel):
 
 
 class PlanConfig(BaseModel):
-    """Subscription Plan configuration.
+    """Subscription Plan configuration - maps to plans table.
     
     Requirements: 26.1-26.5 - Subscription Plan Configuration
     """
-    plan_id: str = Field(description="Unique plan identifier")
-    plan_name: str = Field(description="Display name of the plan")
-    price_monthly: float = Field(
-        default=0.0, ge=0, description="Monthly price in USD"
-    )
-    price_yearly: float = Field(
-        default=0.0, ge=0, description="Yearly price in USD"
-    )
-    max_youtube_accounts: int = Field(
-        default=1, ge=1, le=100, description="Max YouTube accounts"
-    )
-    max_videos_per_month: int = Field(
-        default=10, ge=1, le=10000, description="Max videos per month"
-    )
-    max_streams_per_month: int = Field(
-        default=10, ge=1, le=10000, description="Max streams per month"
-    )
-    max_storage_gb: float = Field(
-        default=5.0, ge=0.1, le=10000, description="Max storage in GB"
-    )
-    max_bandwidth_gb: float = Field(
-        default=50.0, ge=1, le=100000, description="Max bandwidth in GB"
-    )
-    max_ai_generations_per_month: int = Field(
-        default=50, ge=0, le=10000, description="Max AI generations per month"
-    )
-    max_concurrent_streams: int = Field(
-        default=1, ge=1, le=50, description="Max concurrent streams"
-    )
-    max_simulcast_platforms: int = Field(
-        default=1, ge=1, le=10, description="Max simulcast platforms"
-    )
-    enable_analytics: bool = Field(
-        default=False, description="Enable analytics features"
-    )
-    enable_competitor_analysis: bool = Field(
-        default=False, description="Enable competitor analysis"
-    )
-    enable_ai_features: bool = Field(
-        default=False, description="Enable AI features"
-    )
-    enable_api_access: bool = Field(
-        default=False, description="Enable API access"
-    )
-    api_rate_limit_per_minute: int = Field(
-        default=60, ge=1, le=10000, description="API rate limit per minute"
-    )
-    support_level: str = Field(
-        default="community", description="Support level (community, email, priority, dedicated)"
-    )
-    is_active: bool = Field(
-        default=True, description="Whether the plan is active"
-    )
+    # Identification
+    id: Optional[str] = Field(None, description="Plan UUID")
+    slug: str = Field(description="Unique plan slug identifier")
+    name: str = Field(description="Display name of the plan")
+    description: Optional[str] = Field(None, description="Plan description")
+    
+    # Pricing (in dollars for display, stored as cents in DB)
+    price_monthly: float = Field(default=0.0, ge=0, description="Monthly price in USD")
+    price_yearly: float = Field(default=0.0, ge=0, description="Yearly price in USD")
+    currency: str = Field(default="USD", description="Currency code")
+    
+    # Limits (-1 for unlimited)
+    max_accounts: int = Field(default=1, ge=-1, description="Max YouTube accounts (-1 = unlimited)")
+    max_videos_per_month: int = Field(default=5, ge=-1, description="Max videos per month")
+    max_streams_per_month: int = Field(default=0, ge=-1, description="Max streams per month")
+    max_storage_gb: int = Field(default=1, ge=-1, description="Max storage in GB")
+    max_bandwidth_gb: int = Field(default=5, ge=-1, description="Max bandwidth in GB")
+    ai_generations_per_month: int = Field(default=0, ge=-1, description="Max AI generations per month")
+    api_calls_per_month: int = Field(default=1000, ge=-1, description="Max API calls per month")
+    encoding_minutes_per_month: int = Field(default=60, ge=-1, description="Max encoding minutes per month")
+    concurrent_streams: int = Field(default=1, ge=-1, description="Max concurrent streams")
+    
+    # Features (JSON arrays)
+    features: list[str] = Field(default=[], description="Feature slugs for logic")
+    display_features: list[dict] = Field(default=[], description="Display features for UI")
+    
+    # Stripe integration
+    stripe_price_id_monthly: Optional[str] = Field(None, description="Stripe monthly price ID")
+    stripe_price_id_yearly: Optional[str] = Field(None, description="Stripe yearly price ID")
+    stripe_product_id: Optional[str] = Field(None, description="Stripe product ID")
+    
+    # UI Customization
+    icon: str = Field(default="Sparkles", description="Lucide icon name")
+    color: str = Field(default="slate", description="Tailwind color name")
+    
+    # Status
+    is_active: bool = Field(default=True, description="Whether the plan is active")
+    is_popular: bool = Field(default=False, description="Show popular badge")
+    sort_order: int = Field(default=0, description="Display order")
+
+
+class PlanConfigCreate(BaseModel):
+    """Create schema for plan configuration."""
+    name: str = Field(..., min_length=1, max_length=100, description="Display name")
+    slug: Optional[str] = Field(None, min_length=2, max_length=50, description="Unique plan slug (auto-generated from name if not provided)")
+    description: Optional[str] = None
+    
+    price_monthly: float = Field(default=0.0, ge=0)
+    price_yearly: float = Field(default=0.0, ge=0)
+    currency: str = Field(default="USD", max_length=3)
+    
+    max_accounts: int = Field(default=1, ge=-1)
+    max_videos_per_month: int = Field(default=5, ge=-1)
+    max_streams_per_month: int = Field(default=0, ge=-1)
+    max_storage_gb: int = Field(default=1, ge=-1)
+    max_bandwidth_gb: int = Field(default=5, ge=-1)
+    ai_generations_per_month: int = Field(default=0, ge=-1)
+    api_calls_per_month: int = Field(default=1000, ge=-1)
+    encoding_minutes_per_month: int = Field(default=60, ge=-1)
+    concurrent_streams: int = Field(default=1, ge=-1)
+    
+    features: list[str] = Field(default=[])
+    display_features: list[dict] = Field(default=[])
+    
+    stripe_price_id_monthly: Optional[str] = None
+    stripe_price_id_yearly: Optional[str] = None
+    stripe_product_id: Optional[str] = None
+    
+    icon: str = Field(default="Sparkles", max_length=50)
+    color: str = Field(default="slate", max_length=20)
+    
+    is_active: bool = Field(default=True)
+    is_popular: bool = Field(default=False)
+    sort_order: int = Field(default=0)
 
 
 class PlanConfigUpdate(BaseModel):
     """Update schema for plan configuration."""
-    plan_name: Optional[str] = None
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    description: Optional[str] = None
+    
     price_monthly: Optional[float] = Field(None, ge=0)
     price_yearly: Optional[float] = Field(None, ge=0)
-    max_youtube_accounts: Optional[int] = Field(None, ge=1, le=100)
-    max_videos_per_month: Optional[int] = Field(None, ge=1, le=10000)
-    max_streams_per_month: Optional[int] = Field(None, ge=1, le=10000)
-    max_storage_gb: Optional[float] = Field(None, ge=0.1, le=10000)
-    max_bandwidth_gb: Optional[float] = Field(None, ge=1, le=100000)
-    max_ai_generations_per_month: Optional[int] = Field(None, ge=0, le=10000)
-    max_concurrent_streams: Optional[int] = Field(None, ge=1, le=50)
-    max_simulcast_platforms: Optional[int] = Field(None, ge=1, le=10)
-    enable_analytics: Optional[bool] = None
-    enable_competitor_analysis: Optional[bool] = None
-    enable_ai_features: Optional[bool] = None
-    enable_api_access: Optional[bool] = None
-    api_rate_limit_per_minute: Optional[int] = Field(None, ge=1, le=10000)
-    support_level: Optional[str] = None
+    currency: Optional[str] = Field(None, max_length=3)
+    
+    max_accounts: Optional[int] = Field(None, ge=-1)
+    max_videos_per_month: Optional[int] = Field(None, ge=-1)
+    max_streams_per_month: Optional[int] = Field(None, ge=-1)
+    max_storage_gb: Optional[int] = Field(None, ge=-1)
+    max_bandwidth_gb: Optional[int] = Field(None, ge=-1)
+    ai_generations_per_month: Optional[int] = Field(None, ge=-1)
+    api_calls_per_month: Optional[int] = Field(None, ge=-1)
+    encoding_minutes_per_month: Optional[int] = Field(None, ge=-1)
+    concurrent_streams: Optional[int] = Field(None, ge=-1)
+    
+    features: Optional[list[str]] = None
+    display_features: Optional[list[dict]] = None
+    
+    stripe_price_id_monthly: Optional[str] = None
+    stripe_price_id_yearly: Optional[str] = None
+    stripe_product_id: Optional[str] = None
+    
+    icon: Optional[str] = Field(None, max_length=50)
+    color: Optional[str] = Field(None, max_length=20)
+    
     is_active: Optional[bool] = None
+    is_popular: Optional[bool] = None
+    sort_order: Optional[int] = None
 
 
 class PlanConfigListResponse(BaseModel):
