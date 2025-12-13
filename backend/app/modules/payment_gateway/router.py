@@ -377,7 +377,11 @@ async def get_gateway_statistics(
     """Get statistics for a specific gateway.
     
     Requirements: 30.6 - Transaction statistics, success rates, health status
+    
+    Volumes are shown in original currency and also converted to USD.
     """
+    from app.modules.admin.billing_service import convert_to_usd
+    
     service = GatewayManagerService(session)
     stats = await service.get_gateway_statistics(provider.value)
     
@@ -387,14 +391,25 @@ async def get_gateway_statistics(
             detail=f"Statistics for gateway {provider.value} not found",
         )
     
+    # Get gateway config to determine primary currency
+    config = await service.get_gateway(provider.value)
+    primary_currency = config.supported_currencies[0] if config and config.supported_currencies else "USD"
+    
+    # Convert volumes to USD
+    volume_usd = await convert_to_usd(stats.total_volume, primary_currency)
+    avg_usd = await convert_to_usd(stats.average_transaction, primary_currency)
+    
     return GatewayStatisticsResponse(
         provider=stats.provider,
+        primary_currency=primary_currency,
         total_transactions=stats.total_transactions,
         successful_transactions=stats.successful_transactions,
         failed_transactions=stats.failed_transactions,
         success_rate=stats.success_rate,
         total_volume=stats.total_volume,
         average_transaction=stats.average_transaction,
+        total_volume_usd=volume_usd,
+        average_transaction_usd=avg_usd,
         health_status=stats.health_status,
         last_transaction_at=stats.last_transaction_at,
         transactions_24h=stats.transactions_24h,
@@ -409,28 +424,50 @@ async def get_all_gateway_statistics(
     """Get statistics for all gateways.
     
     Requirements: 30.6 - Gateway dashboard with statistics
+    
+    All volumes are converted to USD for accurate comparison across gateways
+    with different currencies (e.g., IDR for Midtrans, USD for PayPal).
     """
+    from app.modules.admin.billing_service import convert_to_usd
+    
     service = GatewayManagerService(session)
     all_stats = await service.get_all_gateway_statistics()
     
-    gateway_stats = [
-        GatewayStatisticsResponse(
+    # Get gateway configs to determine primary currency
+    all_configs = await service.get_all_gateways()
+    config_map = {c.provider: c for c in all_configs}
+    
+    gateway_stats = []
+    total_volume_usd = 0.0
+    
+    for s in all_stats:
+        # Get primary currency for this gateway
+        config = config_map.get(s.provider)
+        primary_currency = config.supported_currencies[0] if config and config.supported_currencies else "USD"
+        
+        # Convert volumes to USD
+        volume_usd = await convert_to_usd(s.total_volume, primary_currency)
+        avg_usd = await convert_to_usd(s.average_transaction, primary_currency)
+        
+        gateway_stats.append(GatewayStatisticsResponse(
             provider=s.provider,
+            primary_currency=primary_currency,
             total_transactions=s.total_transactions,
             successful_transactions=s.successful_transactions,
             failed_transactions=s.failed_transactions,
             success_rate=s.success_rate,
             total_volume=s.total_volume,
             average_transaction=s.average_transaction,
+            total_volume_usd=volume_usd,
+            average_transaction_usd=avg_usd,
             health_status=s.health_status,
             last_transaction_at=s.last_transaction_at,
             transactions_24h=s.transactions_24h,
             success_rate_24h=s.success_rate_24h,
-        )
-        for s in all_stats
-    ]
+        ))
+        
+        total_volume_usd += volume_usd
     
-    total_volume = sum(s.total_volume for s in all_stats)
     total_transactions = sum(s.total_transactions for s in all_stats)
     total_successful = sum(s.successful_transactions for s in all_stats)
     overall_success_rate = (
@@ -440,7 +477,7 @@ async def get_all_gateway_statistics(
     
     return AllGatewayStatisticsResponse(
         gateways=gateway_stats,
-        total_volume=total_volume,
+        total_volume_usd=total_volume_usd,
         total_transactions=total_transactions,
         overall_success_rate=overall_success_rate,
     )

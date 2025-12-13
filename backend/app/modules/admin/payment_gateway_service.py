@@ -19,6 +19,7 @@ from app.modules.admin.payment_gateway_schemas import (
     GatewayStatsInfo,
     GatewayStatusUpdateRequest,
     GatewayStatusUpdateResponse,
+    GatewaySetDefaultResponse,
     GatewayCredentialsUpdateRequest,
     GatewayCredentialsUpdateResponse,
     GatewayDetailedStats,
@@ -171,6 +172,69 @@ class AdminPaymentGatewayService:
             message=message,
         )
     
+    async def set_default_gateway(
+        self,
+        provider: str,
+        reason: Optional[str] = None,
+        admin_id: Optional[uuid.UUID] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> GatewaySetDefaultResponse:
+        """Set a payment gateway as the default.
+        
+        Requirements: 5.2 - Set default payment gateway
+        
+        Args:
+            provider: Gateway provider identifier
+            reason: Optional reason for setting as default
+            admin_id: Admin performing the action
+            ip_address: Request IP address
+            user_agent: Request user agent
+            
+        Returns:
+            GatewaySetDefaultResponse
+            
+        Raises:
+            GatewayNotFoundError: If gateway not found
+            ValueError: If gateway is not enabled
+        """
+        config = await self.gateway_manager.get_gateway(provider)
+        if not config:
+            raise GatewayNotFoundError(f"Gateway {provider} not found")
+        
+        if not config.is_enabled:
+            raise ValueError(f"Cannot set disabled gateway {provider} as default. Enable it first.")
+        
+        # Set as default
+        updated = await self.gateway_manager.set_default_gateway(provider)
+        
+        if not updated:
+            raise GatewayNotFoundError(f"Failed to set gateway {provider} as default")
+        
+        # Create audit log
+        if admin_id:
+            AdminAuditService.log(
+                admin_id=admin_id,
+                admin_user_id=admin_id,
+                event=AdminAuditEvent.SYSTEM_CONFIG_CHANGED,
+                resource_type="payment_gateway",
+                resource_id=str(config.id),
+                details={
+                    "action": "gateway_set_default",
+                    "provider": provider,
+                    "reason": reason,
+                },
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+        
+        return GatewaySetDefaultResponse(
+            provider=provider,
+            is_default=True,
+            updated_at=datetime.utcnow(),
+            message=f"Gateway {provider} is now the default payment gateway",
+        )
+    
     async def update_gateway_credentials(
         self,
         provider: str,
@@ -277,9 +341,14 @@ class AdminPaymentGatewayService:
         Raises:
             GatewayNotFoundError: If gateway not found
         """
+        from app.modules.admin.billing_service import convert_to_usd
+        
         config = await self.gateway_manager.get_gateway(provider)
         if not config:
             raise GatewayNotFoundError(f"Gateway {provider} not found")
+        
+        # Get primary currency for this gateway
+        primary_currency = config.supported_currencies[0] if config.supported_currencies else "USD"
         
         # Get base statistics
         stats = await self._get_gateway_statistics(provider)
@@ -292,19 +361,32 @@ class AdminPaymentGatewayService:
         if stats and stats.total_transactions > 0:
             failure_rate = (stats.failed_transactions / stats.total_transactions) * 100
         
+        # Get volumes in original currency
+        total_volume = stats.total_volume if stats else 0.0
+        average_transaction = stats.average_transaction if stats else 0.0
+        
+        # Convert volumes to USD for comparison across gateways
+        total_volume_usd = await convert_to_usd(total_volume, primary_currency)
+        average_transaction_usd = await convert_to_usd(average_transaction, primary_currency)
+        volume_24h_usd = await convert_to_usd(volume_24h, primary_currency)
+        
         detailed_stats = GatewayDetailedStats(
             provider=provider,
             display_name=config.display_name,
+            primary_currency=primary_currency,
             total_transactions=stats.total_transactions if stats else 0,
             successful_transactions=stats.successful_transactions if stats else 0,
             failed_transactions=stats.failed_transactions if stats else 0,
             success_rate=stats.success_rate if stats else 0.0,
             failure_rate=failure_rate,
             success_rate_24h=stats.success_rate_24h if stats else 0.0,
-            total_volume=stats.total_volume if stats else 0.0,
-            average_transaction=stats.average_transaction if stats else 0.0,
+            total_volume=total_volume,
+            average_transaction=average_transaction,
+            total_volume_usd=total_volume_usd,
+            average_transaction_usd=average_transaction_usd,
             transactions_24h=stats.transactions_24h if stats else 0,
             volume_24h=volume_24h,
+            volume_24h_usd=volume_24h_usd,
             health_status=stats.health_status if stats else GatewayHealthStatus.HEALTHY.value,
             last_transaction_at=stats.last_transaction_at if stats else None,
             last_success_at=stats.last_success_at if stats else None,

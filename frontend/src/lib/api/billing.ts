@@ -33,16 +33,20 @@ export interface GatewayPublicInfo {
 
 export interface GatewayStatistics {
     provider: GatewayProvider
+    primary_currency: string
     total_transactions: number
     successful_transactions: number
     failed_transactions: number
     success_rate: number
     total_volume: number
     average_transaction: number
+    total_volume_usd: number
+    average_transaction_usd: number
     last_transaction_at?: string
     health_status: "healthy" | "degraded" | "down"
     transactions_24h?: number
     success_rate_24h?: number
+    volume_24h_usd?: number
 }
 
 export interface GatewayCredentials {
@@ -542,21 +546,21 @@ export const billingApi = {
 
     async getGatewayStatistics(): Promise<{
         gateways: GatewayStatistics[]
-        total_volume: number
+        total_volume_usd: number
         total_transactions: number
         overall_success_rate: number
     }> {
         try {
             const response = await apiClient.get<{
                 gateways: GatewayStatistics[]
-                total_volume: number
+                total_volume_usd: number
                 total_transactions: number
                 overall_success_rate: number
             }>("/admin/payment-gateways/statistics/all")
-            return response || { gateways: [], total_volume: 0, total_transactions: 0, overall_success_rate: 0 }
+            return response || { gateways: [], total_volume_usd: 0, total_transactions: 0, overall_success_rate: 0 }
         } catch (error) {
             console.error("Failed to fetch gateway statistics:", error)
-            return { gateways: [], total_volume: 0, total_transactions: 0, overall_success_rate: 0 }
+            return { gateways: [], total_volume_usd: 0, total_transactions: 0, overall_success_rate: 0 }
         }
     },
 

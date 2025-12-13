@@ -80,6 +80,25 @@ class GatewayStatusUpdateRequest(BaseModel):
     reason: Optional[str] = Field(None, max_length=500, description="Reason for status change")
 
 
+class GatewaySetDefaultRequest(BaseModel):
+    """Request to set a gateway as default.
+    
+    Requirements: 5.2 - Set default payment gateway
+    """
+    reason: Optional[str] = Field(None, max_length=500, description="Reason for setting as default")
+
+
+class GatewaySetDefaultResponse(BaseModel):
+    """Response after setting gateway as default.
+    
+    Requirements: 5.2 - Set default payment gateway
+    """
+    provider: str
+    is_default: bool
+    updated_at: datetime
+    message: str
+
+
 class GatewayStatusUpdateResponse(BaseModel):
     """Response after updating gateway status.
     
@@ -128,6 +147,7 @@ class GatewayDetailedStats(BaseModel):
     """
     provider: str
     display_name: str
+    primary_currency: str = Field("USD", description="Primary currency for this gateway")
     
     # Transaction counts
     total_transactions: int
@@ -139,13 +159,18 @@ class GatewayDetailedStats(BaseModel):
     failure_rate: float = Field(..., description="Overall failure rate percentage")
     success_rate_24h: float = Field(..., description="Success rate in last 24 hours")
     
-    # Volume
-    total_volume: float = Field(..., description="Total transaction volume")
-    average_transaction: float = Field(..., description="Average transaction amount")
+    # Volume in original currency
+    total_volume: float = Field(..., description="Total transaction volume in primary currency")
+    average_transaction: float = Field(..., description="Average transaction amount in primary currency")
+    
+    # Volume converted to USD for comparison
+    total_volume_usd: float = Field(0.0, description="Total transaction volume converted to USD")
+    average_transaction_usd: float = Field(0.0, description="Average transaction amount converted to USD")
     
     # Time-based stats
     transactions_24h: int = Field(..., description="Transactions in last 24 hours")
-    volume_24h: float = Field(0.0, description="Volume in last 24 hours")
+    volume_24h: float = Field(0.0, description="Volume in last 24 hours in primary currency")
+    volume_24h_usd: float = Field(0.0, description="Volume in last 24 hours converted to USD")
     
     # Health
     health_status: str

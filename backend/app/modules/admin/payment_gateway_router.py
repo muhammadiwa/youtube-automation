@@ -21,6 +21,8 @@ from app.modules.admin.payment_gateway_schemas import (
     GatewayResponse,
     GatewayStatusUpdateRequest,
     GatewayStatusUpdateResponse,
+    GatewaySetDefaultRequest,
+    GatewaySetDefaultResponse,
     GatewayCredentialsUpdateRequest,
     GatewayCredentialsUpdateResponse,
     GatewayStatsResponse,
@@ -76,6 +78,44 @@ async def update_gateway_status(
         return await service.update_gateway_status(
             provider=provider,
             data=data,
+            admin_id=admin.user_id,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+    except GatewayNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+# ==================== Gateway Set Default (5.2) ====================
+
+@router.put("/{provider}/default", response_model=GatewaySetDefaultResponse)
+async def set_default_gateway(
+    request: Request,
+    provider: str,
+    data: GatewaySetDefaultRequest = GatewaySetDefaultRequest(),
+    admin: Admin = Depends(require_permission(AdminPermission.MANAGE_BILLING)),
+    session: AsyncSession = Depends(get_session),
+):
+    """Set a payment gateway as the default.
+    
+    Requirements: 5.2 - Set default payment gateway
+    
+    Requires MANAGE_BILLING permission.
+    """
+    service = AdminPaymentGatewayService(session)
+    
+    try:
+        return await service.set_default_gateway(
+            provider=provider,
+            reason=data.reason,
             admin_id=admin.user_id,
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),

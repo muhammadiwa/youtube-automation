@@ -613,6 +613,145 @@ const adminApi = {
     ): Promise<import("@/types/admin").CancelDeletionResponse> {
         return apiClient.post(`/admin/compliance/deletion-requests/${requestId}/cancel`, data || {})
     },
+
+    // ==================== Payment Gateway API ====================
+
+    /**
+     * Get all payment gateways
+     * Requirements: 5.1
+     */
+    async getPaymentGateways(): Promise<PaymentGateway[]> {
+        // Backend returns array directly, not wrapped in { items: [...] }
+        return apiClient.get<PaymentGateway[]>("/admin/payment-gateways")
+    },
+
+    /**
+     * Update gateway status (enable/disable)
+     * Requirements: 5.2
+     */
+    async updateGatewayStatus(
+        provider: string,
+        data: { is_enabled: boolean; reason?: string }
+    ): Promise<{ provider: string; is_enabled: boolean; updated_at: string; message: string }> {
+        return apiClient.put(`/admin/payment-gateways/${provider}/status`, data)
+    },
+
+    /**
+     * Update gateway credentials
+     * Requirements: 5.3
+     */
+    async updateGatewayCredentials(
+        provider: string,
+        credentials: {
+            api_key: string
+            api_secret: string
+            webhook_secret?: string
+            sandbox_mode: boolean
+        }
+    ): Promise<{ provider: string; credentials_valid: boolean; sandbox_mode: boolean; updated_at: string; message: string }> {
+        return apiClient.put(`/admin/payment-gateways/${provider}/credentials`, {
+            ...credentials,
+            validate_before_save: true,
+        })
+    },
+
+    /**
+     * Set gateway as default
+     * Requirements: 5.2
+     */
+    async setDefaultGateway(
+        provider: string
+    ): Promise<{ provider: string; is_default: boolean; updated_at: string; message: string }> {
+        return apiClient.put(`/admin/payment-gateways/${provider}/default`, {})
+    },
+
+    /**
+     * Get gateway statistics
+     * Requirements: 5.4
+     */
+    async getGatewayStats(
+        provider: string,
+        params?: { start_date?: string; end_date?: string }
+    ): Promise<GatewayStatsResponse> {
+        const searchParams = new URLSearchParams()
+        if (params?.start_date) searchParams.set("start_date", params.start_date)
+        if (params?.end_date) searchParams.set("end_date", params.end_date)
+        const query = searchParams.toString()
+        return apiClient.get(`/admin/payment-gateways/${provider}/stats${query ? `?${query}` : ""}`)
+    },
+
+    /**
+     * Get gateway health
+     * Requirements: 5.5
+     */
+    async getGatewayHealth(provider: string): Promise<GatewayHealthAlert> {
+        return apiClient.get(`/admin/payment-gateways/${provider}/health`)
+    },
+}
+
+// Payment Gateway types for admin API - matches backend response exactly
+interface PaymentGateway {
+    id: string
+    provider: string
+    display_name: string
+    is_enabled: boolean
+    is_default: boolean
+    sandbox_mode: boolean
+    has_credentials: boolean
+    supported_currencies: string[]
+    supported_payment_methods: string[]
+    transaction_fee_percent: number
+    fixed_fee: number
+    min_amount: number
+    max_amount: number | null
+    created_at: string
+    updated_at: string
+}
+
+interface GatewayStatsResponse {
+    stats: {
+        provider: string
+        display_name: string
+        primary_currency: string
+        total_transactions: number
+        successful_transactions: number
+        failed_transactions: number
+        success_rate: number
+        failure_rate: number
+        success_rate_24h: number
+        // Volume in original currency
+        total_volume: number
+        average_transaction: number
+        // Volume converted to USD for comparison
+        total_volume_usd: number
+        average_transaction_usd: number
+        transactions_24h: number
+        volume_24h: number
+        volume_24h_usd: number
+        health_status: string
+        last_transaction_at?: string
+        last_success_at?: string
+        last_failure_at?: string
+        stats_since?: string
+    }
+    period_start?: string
+    period_end?: string
+}
+
+interface GatewayHealthAlert {
+    id: string
+    provider: string
+    alert_type: string
+    severity: string
+    message: string
+    health_status: string
+    success_rate: number
+    suggested_action?: string
+    alternative_gateways: string[]
+    created_at: string
+    acknowledged: boolean
+    acknowledged_at?: string
+    acknowledged_by?: string
 }
 
 export default adminApi

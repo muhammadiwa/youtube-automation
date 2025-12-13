@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { DashboardLayout } from "@/components/dashboard"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { useState, useEffect, useCallback } from "react"
+import { AdminLayout } from "@/components/admin"
+import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
@@ -21,37 +21,95 @@ import {
     Wallet,
     Building2,
     QrCode,
-    Settings,
     Star,
     Edit,
     BarChart3,
-    CheckCircle2,
-    XCircle,
     Loader2,
     Eye,
     EyeOff,
+    RefreshCw,
 } from "lucide-react"
-import billingApi, { PaymentGateway, GatewayProvider, GatewayCredentials } from "@/lib/api/billing"
+import adminApi from "@/lib/api/admin"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
+import { useToast } from "@/components/ui/toast"
 
-const gatewayIcons: Record<GatewayProvider, React.ComponentType<{ className?: string }>> = {
+// Types for payment gateway admin - must match backend response exactly
+interface PaymentGateway {
+    id: string
+    provider: string
+    display_name: string
+    is_enabled: boolean
+    is_default: boolean
+    sandbox_mode: boolean
+    has_credentials: boolean
+    supported_currencies: string[]
+    supported_payment_methods: string[]
+    transaction_fee_percent: number
+    fixed_fee: number
+    min_amount: number
+    max_amount: number | null
+    created_at: string
+    updated_at: string
+}
+
+interface GatewayCredentials {
+    api_key: string
+    api_secret: string
+    webhook_secret?: string
+    sandbox_mode: boolean
+}
+
+const gatewayIcons: Record<string, React.ComponentType<{ className?: string }>> = {
     stripe: CreditCard,
     paypal: Wallet,
     midtrans: QrCode,
     xendit: Building2,
 }
 
-const gatewayColors: Record<GatewayProvider, string> = {
+const gatewayColors: Record<string, string> = {
     stripe: "from-indigo-500 to-indigo-600",
     paypal: "from-blue-500 to-blue-600",
     midtrans: "from-teal-500 to-teal-600",
     xendit: "from-cyan-500 to-cyan-600",
 }
 
+const defaultGatewayIcon = CreditCard
+const defaultGatewayColor = "from-gray-500 to-gray-600"
+
+// Format amount with appropriate currency symbol based on gateway's primary currency
+const formatAmount = (amount: number, currencies: string[]): string => {
+    const primaryCurrency = currencies[0] || "USD"
+
+    // Currency formatting based on primary supported currency
+    const currencyFormats: Record<string, { symbol: string; locale: string; decimals: number }> = {
+        USD: { symbol: "$", locale: "en-US", decimals: 2 },
+        EUR: { symbol: "€", locale: "de-DE", decimals: 2 },
+        GBP: { symbol: "£", locale: "en-GB", decimals: 2 },
+        IDR: { symbol: "Rp", locale: "id-ID", decimals: 0 },
+        JPY: { symbol: "¥", locale: "ja-JP", decimals: 0 },
+        SGD: { symbol: "S$", locale: "en-SG", decimals: 2 },
+        AUD: { symbol: "A$", locale: "en-AU", decimals: 2 },
+        CAD: { symbol: "C$", locale: "en-CA", decimals: 2 },
+        PHP: { symbol: "₱", locale: "en-PH", decimals: 2 },
+        VND: { symbol: "₫", locale: "vi-VN", decimals: 0 },
+        THB: { symbol: "฿", locale: "th-TH", decimals: 2 },
+        MYR: { symbol: "RM", locale: "ms-MY", decimals: 2 },
+    }
+
+    const format = currencyFormats[primaryCurrency] || currencyFormats.USD
+    const formattedNumber = amount.toLocaleString(format.locale, {
+        minimumFractionDigits: format.decimals,
+        maximumFractionDigits: format.decimals,
+    })
+
+    return `${format.symbol}${formattedNumber}`
+}
+
 export default function PaymentGatewaysAdminPage() {
     const [gateways, setGateways] = useState<PaymentGateway[]>([])
     const [loading, setLoading] = useState(true)
+    const [isRefreshing, setIsRefreshing] = useState(false)
     const [editingGateway, setEditingGateway] = useState<PaymentGateway | null>(null)
     const [credentials, setCredentials] = useState<GatewayCredentials>({
         api_key: "",
@@ -61,44 +119,63 @@ export default function PaymentGatewaysAdminPage() {
     })
     const [showSecrets, setShowSecrets] = useState(false)
     const [saving, setSaving] = useState(false)
-    const [validating, setValidating] = useState(false)
-    const [validationResult, setValidationResult] = useState<{ valid: boolean; message?: string } | null>(null)
+    const [togglingGateway, setTogglingGateway] = useState<string | null>(null)
+    const { addToast } = useToast()
+
+    const loadGateways = useCallback(async () => {
+        try {
+            // Backend returns array directly
+            const gateways = await adminApi.getPaymentGateways()
+            if (Array.isArray(gateways)) {
+                setGateways(gateways)
+            } else {
+                console.error("Invalid response - expected array:", gateways)
+                setGateways([])
+            }
+        } catch (error) {
+            console.error("Failed to load gateways:", error)
+            setGateways([])
+            addToast({
+                type: "error",
+                title: "Failed to load gateways",
+                description: error instanceof Error ? error.message : "Please try again later",
+            })
+        } finally {
+            setLoading(false)
+            setIsRefreshing(false)
+        }
+    }, [addToast])
 
     useEffect(() => {
         loadGateways()
-    }, [])
+    }, [loadGateways])
 
-    const loadGateways = async () => {
-        setLoading(true)
-        try {
-            const data = await billingApi.getAllGateways()
-            setGateways(data)
-        } catch (error) {
-            console.error("Failed to load gateways:", error)
-        } finally {
-            setLoading(false)
-        }
+    const handleRefresh = () => {
+        setIsRefreshing(true)
+        loadGateways()
     }
 
     const handleToggleEnabled = async (gateway: PaymentGateway) => {
+        setTogglingGateway(gateway.provider)
         try {
-            if (gateway.is_enabled) {
-                await billingApi.disableGateway(gateway.provider)
-            } else {
-                await billingApi.enableGateway(gateway.provider)
-            }
+            await adminApi.updateGatewayStatus(gateway.provider, {
+                is_enabled: !gateway.is_enabled,
+            })
+            addToast({
+                type: "success",
+                title: gateway.is_enabled ? "Gateway disabled" : "Gateway enabled",
+                description: `${gateway.display_name} has been ${gateway.is_enabled ? "disabled" : "enabled"}`,
+            })
             await loadGateways()
         } catch (error) {
             console.error("Failed to toggle gateway:", error)
-        }
-    }
-
-    const handleSetDefault = async (provider: GatewayProvider) => {
-        try {
-            await billingApi.setDefaultGateway(provider)
-            await loadGateways()
-        } catch (error) {
-            console.error("Failed to set default gateway:", error)
+            addToast({
+                type: "error",
+                title: "Failed to update gateway",
+                description: "Please try again later",
+            })
+        } finally {
+            setTogglingGateway(null)
         }
     }
 
@@ -110,64 +187,90 @@ export default function PaymentGatewaysAdminPage() {
             webhook_secret: "",
             sandbox_mode: gateway.sandbox_mode,
         })
-        setValidationResult(null)
-    }
-
-    const handleValidateCredentials = async () => {
-        if (!editingGateway) return
-        setValidating(true)
-        setValidationResult(null)
-        try {
-            // First save credentials, then validate
-            await billingApi.configureGateway(editingGateway.provider, credentials)
-            const result = await billingApi.validateGatewayCredentials(editingGateway.provider)
-            setValidationResult(result)
-        } catch (error: any) {
-            setValidationResult({ valid: false, message: error.message || "Validation failed" })
-        } finally {
-            setValidating(false)
-        }
     }
 
     const handleSaveCredentials = async () => {
         if (!editingGateway) return
         setSaving(true)
         try {
-            await billingApi.configureGateway(editingGateway.provider, credentials)
+            await adminApi.updateGatewayCredentials(editingGateway.provider, credentials)
+            addToast({
+                type: "success",
+                title: "Credentials updated",
+                description: `${editingGateway.display_name} credentials have been updated`,
+            })
             await loadGateways()
             setEditingGateway(null)
         } catch (error) {
             console.error("Failed to save credentials:", error)
+            addToast({
+                type: "error",
+                title: "Failed to save credentials",
+                description: "Please check your credentials and try again",
+            })
         } finally {
             setSaving(false)
         }
     }
 
+    const handleSetDefault = async (provider: string) => {
+        try {
+            await adminApi.setDefaultGateway(provider)
+            addToast({
+                type: "success",
+                title: "Default gateway updated",
+                description: `${provider} is now the default payment gateway`,
+            })
+            await loadGateways()
+        } catch (error) {
+            console.error("Failed to set default gateway:", error)
+            addToast({
+                type: "error",
+                title: "Failed to set default gateway",
+                description: "Please try again later",
+            })
+        }
+    }
+
     return (
-        <DashboardLayout
+        <AdminLayout
             breadcrumbs={[
-                { label: "Admin", href: "/admin" },
+                { label: "Billing", href: "/admin/payment-gateways" },
                 { label: "Payment Gateways" },
             ]}
         >
             <div className="space-y-6">
                 {/* Header */}
                 <div className="flex items-center justify-between">
-                    <div>
-                        <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-                            <Settings className="h-7 w-7" />
-                            Payment Gateways
-                        </h1>
-                        <p className="text-muted-foreground">
-                            Configure and manage payment gateway integrations
-                        </p>
+                    <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/25">
+                            <CreditCard className="h-5 w-5 text-white" />
+                        </div>
+                        <div>
+                            <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+                                Payment Gateways
+                            </h1>
+                            <p className="text-sm text-slate-500 dark:text-slate-400">
+                                Configure and manage payment gateway integrations
+                            </p>
+                        </div>
                     </div>
-                    <Link href="/admin/payment-gateways/stats">
-                        <Button variant="outline">
-                            <BarChart3 className="h-4 w-4 mr-2" />
-                            View Statistics
+                    <div className="flex gap-2">
+                        <Button
+                            variant="outline"
+                            onClick={handleRefresh}
+                            disabled={isRefreshing}
+                        >
+                            <RefreshCw className={cn("h-4 w-4 mr-2", isRefreshing && "animate-spin")} />
+                            Refresh
                         </Button>
-                    </Link>
+                        <Link href="/admin/payment-gateways/stats">
+                            <Button variant="outline">
+                                <BarChart3 className="h-4 w-4 mr-2" />
+                                View Statistics
+                            </Button>
+                        </Link>
+                    </div>
                 </div>
 
                 {/* Gateways Grid */}
@@ -175,11 +278,21 @@ export default function PaymentGatewaysAdminPage() {
                     <div className="flex items-center justify-center py-12">
                         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                     </div>
+                ) : gateways.length === 0 ? (
+                    <Card className="border-0 shadow-lg">
+                        <CardContent className="flex flex-col items-center justify-center py-12">
+                            <CreditCard className="h-12 w-12 text-muted-foreground mb-4" />
+                            <h3 className="text-lg font-semibold mb-2">No Payment Gateways</h3>
+                            <p className="text-sm text-muted-foreground text-center max-w-md">
+                                No payment gateways have been configured yet.
+                            </p>
+                        </CardContent>
+                    </Card>
                 ) : (
                     <div className="grid gap-4 md:grid-cols-2">
                         {gateways.map((gateway) => {
-                            const Icon = gatewayIcons[gateway.provider]
-                            const gradient = gatewayColors[gateway.provider]
+                            const Icon = gatewayIcons[gateway.provider] || defaultGatewayIcon
+                            const gradient = gatewayColors[gateway.provider] || defaultGatewayColor
 
                             return (
                                 <Card key={gateway.id} className="border-0 shadow-lg">
@@ -207,10 +320,14 @@ export default function PaymentGatewaysAdminPage() {
                                                     </p>
                                                 </div>
                                             </div>
-                                            <Switch
-                                                checked={gateway.is_enabled}
-                                                onCheckedChange={() => handleToggleEnabled(gateway)}
-                                            />
+                                            {togglingGateway === gateway.provider ? (
+                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                            ) : (
+                                                <Switch
+                                                    checked={gateway.is_enabled}
+                                                    onCheckedChange={() => handleToggleEnabled(gateway)}
+                                                />
+                                            )}
                                         </div>
 
                                         <div className="space-y-3">
@@ -224,7 +341,7 @@ export default function PaymentGatewaysAdminPage() {
                                                 <span className="text-muted-foreground">Transaction Fee</span>
                                                 <span>
                                                     {gateway.transaction_fee_percent}%
-                                                    {gateway.fixed_fee > 0 && ` + $${gateway.fixed_fee.toFixed(2)}`}
+                                                    {gateway.fixed_fee > 0 && ` + ${formatAmount(gateway.fixed_fee, gateway.supported_currencies)}`}
                                                 </span>
                                             </div>
                                             <div className="flex items-center justify-between text-sm">
@@ -233,7 +350,7 @@ export default function PaymentGatewaysAdminPage() {
                                             </div>
                                             <div className="flex items-center justify-between text-sm">
                                                 <span className="text-muted-foreground">Min Amount</span>
-                                                <span>${gateway.min_amount.toFixed(2)}</span>
+                                                <span>{formatAmount(gateway.min_amount, gateway.supported_currencies)}</span>
                                             </div>
                                         </div>
 
@@ -343,43 +460,14 @@ export default function PaymentGatewaysAdminPage() {
                                 </div>
                             </div>
 
-                            {/* Validation Result */}
-                            {validationResult && (
-                                <div className={cn(
-                                    "p-3 rounded-lg flex items-center gap-2",
-                                    validationResult.valid
-                                        ? "bg-green-500/10 border border-green-500/20"
-                                        : "bg-red-500/10 border border-red-500/20"
-                                )}>
-                                    {validationResult.valid ? (
-                                        <CheckCircle2 className="h-5 w-5 text-green-500" />
-                                    ) : (
-                                        <XCircle className="h-5 w-5 text-red-500" />
-                                    )}
-                                    <span className={cn(
-                                        "text-sm",
-                                        validationResult.valid ? "text-green-600" : "text-red-600"
-                                    )}>
-                                        {validationResult.valid ? "Credentials are valid" : validationResult.message}
-                                    </span>
-                                </div>
-                            )}
                         </div>
 
-                        <DialogFooter className="flex-col sm:flex-row gap-2">
+                        <DialogFooter>
                             <Button
                                 variant="outline"
-                                onClick={handleValidateCredentials}
-                                disabled={validating || !credentials.api_key || !credentials.api_secret}
+                                onClick={() => setEditingGateway(null)}
                             >
-                                {validating ? (
-                                    <>
-                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                        Validating...
-                                    </>
-                                ) : (
-                                    "Validate Credentials"
-                                )}
+                                Cancel
                             </Button>
                             <Button
                                 onClick={handleSaveCredentials}
@@ -398,6 +486,6 @@ export default function PaymentGatewaysAdminPage() {
                     </DialogContent>
                 </Dialog>
             </div>
-        </DashboardLayout>
+        </AdminLayout>
     )
 }

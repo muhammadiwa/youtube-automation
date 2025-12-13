@@ -171,12 +171,17 @@ class RetryPaymentRequest(BaseModel):
 class GatewayStatisticsResponse(BaseModel):
     """Response for gateway statistics."""
     provider: str
+    primary_currency: str = "USD"
     total_transactions: int
     successful_transactions: int
     failed_transactions: int
     success_rate: float
+    # Volume in original currency
     total_volume: float
     average_transaction: float
+    # Volume converted to USD for comparison
+    total_volume_usd: float = 0.0
+    average_transaction_usd: float = 0.0
     health_status: str
     last_transaction_at: Optional[datetime]
     transactions_24h: int
@@ -189,7 +194,8 @@ class GatewayStatisticsResponse(BaseModel):
 class AllGatewayStatisticsResponse(BaseModel):
     """Response for all gateway statistics."""
     gateways: list[GatewayStatisticsResponse]
-    total_volume: float
+    # Total volume in USD (converted from all currencies)
+    total_volume_usd: float
     total_transactions: int
     overall_success_rate: float
 
