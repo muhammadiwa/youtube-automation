@@ -12,6 +12,9 @@ from sqlalchemy import select, func, or_, and_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+# Import models to ensure SQLAlchemy relationships are resolved
+from app.modules.account.models import YouTubeAccount  # noqa: F401
+
 from app.modules.admin.models import (
     SupportTicket,
     TicketMessage,

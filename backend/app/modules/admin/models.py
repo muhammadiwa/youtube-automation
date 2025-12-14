@@ -942,17 +942,32 @@ class Announcement(Base):
         Returns:
             bool: True if announcement is visible
         """
+        from datetime import timezone
+        
         if current_date is None:
-            current_date = datetime.utcnow()
+            current_date = datetime.now(timezone.utc)
+        
+        # Ensure current_date is timezone-aware
+        if current_date.tzinfo is None:
+            current_date = current_date.replace(tzinfo=timezone.utc)
         
         if not self.is_active:
             return False
         
-        if current_date < self.start_date:
+        # Make start_date timezone-aware if needed
+        start_date = self.start_date
+        if start_date.tzinfo is None:
+            start_date = start_date.replace(tzinfo=timezone.utc)
+        
+        if current_date < start_date:
             return False
         
-        if self.end_date and current_date > self.end_date:
-            return False
+        if self.end_date:
+            end_date = self.end_date
+            if end_date.tzinfo is None:
+                end_date = end_date.replace(tzinfo=timezone.utc)
+            if current_date > end_date:
+                return False
         
         return True
 

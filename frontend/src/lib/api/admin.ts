@@ -757,6 +757,57 @@ const adminApi = {
     async getGatewayHealth(provider: string): Promise<GatewayHealthAlert> {
         return apiClient.get(`/admin/payment-gateways/${provider}/health`)
     },
+
+    // ==================== Announcements API ====================
+
+    /**
+     * Get paginated list of announcements
+     * Requirements: 10.5
+     */
+    async getAnnouncements(params: {
+        page?: number
+        page_size?: number
+        active_only?: boolean
+    }): Promise<AnnouncementListResponse> {
+        const searchParams = new URLSearchParams()
+        if (params.page) searchParams.set("page", params.page.toString())
+        if (params.page_size) searchParams.set("page_size", params.page_size.toString())
+        if (params.active_only) searchParams.set("active_only", "true")
+        const query = searchParams.toString()
+        return apiClient.get(`/admin/communication/announcements${query ? `?${query}` : ""}`)
+    },
+
+    /**
+     * Get announcement by ID
+     * Requirements: 10.5
+     */
+    async getAnnouncement(announcementId: string): Promise<Announcement> {
+        return apiClient.get(`/admin/communication/announcements/${announcementId}`)
+    },
+
+    /**
+     * Create a new announcement
+     * Requirements: 10.5
+     */
+    async createAnnouncement(data: AnnouncementCreateRequest): Promise<Announcement> {
+        return apiClient.post("/admin/communication/announcements", data)
+    },
+
+    /**
+     * Update an announcement
+     * Requirements: 10.5
+     */
+    async updateAnnouncement(announcementId: string, data: AnnouncementUpdateRequest): Promise<Announcement> {
+        return apiClient.put(`/admin/communication/announcements/${announcementId}`, data)
+    },
+
+    /**
+     * Delete an announcement
+     * Requirements: 10.5
+     */
+    async deleteAnnouncement(announcementId: string): Promise<void> {
+        return apiClient.delete(`/admin/communication/announcements/${announcementId}`)
+    },
 }
 
 // Payment Gateway types for admin API - matches backend response exactly
@@ -822,6 +873,53 @@ interface GatewayHealthAlert {
     acknowledged: boolean
     acknowledged_at?: string
     acknowledged_by?: string
+}
+
+// Announcement types for admin API
+export interface Announcement {
+    id: string
+    title: string
+    content: string
+    announcement_type: "info" | "warning" | "success" | "error"
+    is_active: boolean
+    is_dismissible: boolean
+    is_visible: boolean
+    target_plans: string[] | null
+    start_date: string | null
+    end_date: string | null
+    created_by: string | null
+    created_by_name: string | null
+    created_at: string
+    updated_at: string
+}
+
+export interface AnnouncementListResponse {
+    items: Announcement[]
+    total: number
+    page: number
+    page_size: number
+    total_pages: number
+}
+
+export interface AnnouncementCreateRequest {
+    title: string
+    content: string
+    announcement_type?: "info" | "warning" | "success" | "error"
+    is_dismissible?: boolean
+    start_date?: string
+    end_date?: string | null
+    target_plans?: string[] | null
+}
+
+export interface AnnouncementUpdateRequest {
+    title?: string
+    content?: string
+    announcement_type?: "info" | "warning" | "success" | "error"
+    is_active?: boolean
+    is_dismissible?: boolean
+    start_date?: string
+    end_date?: string | null
+    target_plans?: string[] | null
 }
 
 export default adminApi

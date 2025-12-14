@@ -13,6 +13,8 @@ from app.core.database import get_session
 from app.modules.admin.middleware import (
     require_permission,
 )
+# Import models to ensure SQLAlchemy relationships are resolved
+from app.modules.account.models import YouTubeAccount  # noqa: F401
 from app.modules.admin.models import Admin, AdminPermission
 from app.modules.admin.support_schemas import (
     TicketFilters,
