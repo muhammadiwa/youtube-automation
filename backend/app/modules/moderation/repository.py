@@ -40,21 +40,21 @@ class ModerationRuleRepository:
 
     async def get_by_account(
         self,
-        account_id: uuid.UUID,
+        account_id: Optional[uuid.UUID] = None,
         enabled_only: bool = True,
     ) -> list[ModerationRule]:
         """Get all moderation rules for an account.
         
         Args:
-            account_id: YouTube account ID
+            account_id: YouTube account ID (optional, if None returns all rules)
             enabled_only: Only return enabled rules
             
         Returns:
             List of moderation rules ordered by priority (descending)
         """
-        query = select(ModerationRule).where(
-            ModerationRule.account_id == account_id
-        )
+        query = select(ModerationRule)
+        if account_id:
+            query = query.where(ModerationRule.account_id == account_id)
         if enabled_only:
             query = query.where(ModerationRule.is_enabled == True)
         query = query.order_by(ModerationRule.priority.desc())
@@ -316,13 +316,18 @@ class CustomCommandRepository:
 
     async def get_by_account(
         self,
-        account_id: uuid.UUID,
+        account_id: Optional[uuid.UUID] = None,
         enabled_only: bool = True,
     ) -> list[CustomCommand]:
-        """Get all custom commands for an account."""
-        query = select(CustomCommand).where(
-            CustomCommand.account_id == account_id
-        )
+        """Get all custom commands for an account.
+        
+        Args:
+            account_id: YouTube account ID (optional, if None returns all commands)
+            enabled_only: Only return enabled commands
+        """
+        query = select(CustomCommand)
+        if account_id:
+            query = query.where(CustomCommand.account_id == account_id)
         if enabled_only:
             query = query.where(CustomCommand.is_enabled == True)
         

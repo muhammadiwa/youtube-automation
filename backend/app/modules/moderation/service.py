@@ -356,13 +356,13 @@ class ModerationService:
 
     async def get_rules(
         self,
-        account_id: uuid.UUID,
+        account_id: Optional[uuid.UUID] = None,
         enabled_only: bool = True,
     ) -> list[ModerationRule]:
         """Get moderation rules for an account.
         
         Args:
-            account_id: YouTube account ID
+            account_id: YouTube account ID (optional, if None returns all rules)
             enabled_only: Only return enabled rules
             
         Returns:
@@ -670,13 +670,13 @@ class ModerationService:
 
     async def get_commands(
         self,
-        account_id: uuid.UUID,
+        account_id: Optional[uuid.UUID] = None,
         enabled_only: bool = True,
     ) -> list[CustomCommand]:
         """Get custom commands for an account.
         
         Args:
-            account_id: YouTube account ID
+            account_id: YouTube account ID (optional, if None returns all commands)
             enabled_only: Only return enabled commands
             
         Returns:

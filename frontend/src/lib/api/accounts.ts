@@ -78,7 +78,10 @@ export const accountsApi = {
     async getAccounts(filters?: AccountFilters): Promise<YouTubeAccount[]> {
         try {
             const params = filters ? { ...filters } as Record<string, string | number | boolean | undefined> : undefined
+            console.log("[accountsApi.getAccounts] Fetching accounts with params:", params)
+
             const response = await apiClient.get<BackendYouTubeAccount[] | { items: BackendYouTubeAccount[] } | { accounts: BackendYouTubeAccount[] }>("/accounts", params)
+            console.log("[accountsApi.getAccounts] Raw response:", response)
 
             // Handle different response formats and transform
             let accounts: BackendYouTubeAccount[] = []
@@ -91,9 +94,11 @@ export const accountsApi = {
                     accounts = response.accounts
                 }
             }
+
+            console.log("[accountsApi.getAccounts] Parsed accounts:", accounts.length, "accounts found")
             return accounts.map(transformAccount)
         } catch (error) {
-            console.error("Failed to fetch accounts:", error)
+            console.error("[accountsApi.getAccounts] Failed to fetch accounts:", error)
             return []
         }
     },

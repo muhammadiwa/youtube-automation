@@ -36,17 +36,13 @@ router = APIRouter(prefix="/moderation", tags=["moderation"])
 @router.get("/rules", response_model=list[ModerationRuleResponse])
 async def get_moderation_rules(
     account_id: Optional[uuid.UUID] = Query(None, description="Filter by account ID"),
-    enabled_only: bool = Query(True, description="Only return enabled rules"),
+    enabled_only: bool = Query(False, description="Only return enabled rules"),
     session: AsyncSession = Depends(get_session),
 ):
     """Get moderation rules.
     
     Requirements: 12.1
     """
-    if not account_id:
-        # Return empty list if no account specified
-        return []
-    
     service = ModerationService(session)
     rules = await service.get_rules(account_id, enabled_only)
     return [ModerationRuleResponse.model_validate(r) for r in rules]
@@ -246,16 +242,13 @@ async def create_auto_reply_rule(
 @router.get("/commands", response_model=list[CustomCommandResponse])
 async def get_custom_commands(
     account_id: Optional[uuid.UUID] = Query(None),
-    enabled_only: bool = Query(True),
+    enabled_only: bool = Query(False),
     session: AsyncSession = Depends(get_session),
 ):
     """Get custom commands.
     
     Requirements: 12.4
     """
-    if not account_id:
-        return []
-    
     service = ModerationService(session)
     commands = await service.get_commands(account_id, enabled_only)
     return [CustomCommandResponse.model_validate(c) for c in commands]
