@@ -28,6 +28,10 @@ import {
     Eye,
     EyeOff,
     RefreshCw,
+    CheckCircle2,
+    AlertTriangle,
+    XCircle,
+    ShieldCheck,
 } from "lucide-react"
 import adminApi from "@/lib/api/admin"
 import Link from "next/link"
@@ -58,6 +62,13 @@ interface GatewayCredentials {
     api_secret: string
     webhook_secret?: string
     sandbox_mode: boolean
+}
+
+interface GatewayHealth {
+    provider: string
+    health_status: "healthy" | "degraded" | "down"
+    success_rate: number
+    message?: string
 }
 
 const gatewayIcons: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -108,6 +119,7 @@ const formatAmount = (amount: number, currencies: string[]): string => {
 
 export default function PaymentGatewaysAdminPage() {
     const [gateways, setGateways] = useState<PaymentGateway[]>([])
+    const [gatewayHealth, setGatewayHealth] = useState<Record<string, GatewayHealth>>({})
     const [loading, setLoading] = useState(true)
     const [isRefreshing, setIsRefreshing] = useState(false)
     const [editingGateway, setEditingGateway] = useState<PaymentGateway | null>(null)
@@ -119,6 +131,8 @@ export default function PaymentGatewaysAdminPage() {
     })
     const [showSecrets, setShowSecrets] = useState(false)
     const [saving, setSaving] = useState(false)
+    const [validating, setValidating] = useState(false)
+    const [validationResult, setValidationResult] = useState<{ valid: boolean; message: string } | null>(null)
     const [togglingGateway, setTogglingGateway] = useState<string | null>(null)
     const { addToast } = useToast()
 
@@ -128,6 +142,38 @@ export default function PaymentGatewaysAdminPage() {
             const gateways = await adminApi.getPaymentGateways()
             if (Array.isArray(gateways)) {
                 setGateways(gateways)
+                // Load health status for each enabled gateway
+                const healthPromises = gateways
+                    .filter(g => g.is_enabled)
+                    .map(async (g) => {
+                        try {
+                            const healthResponse = await adminApi.getGatewayHealth(g.provider)
+                            // Map the response to our local GatewayHealth type
+                            const health: GatewayHealth = {
+                                provider: healthResponse.provider,
+                                health_status: healthResponse.health_status as "healthy" | "degraded" | "down",
+                                success_rate: healthResponse.success_rate,
+                                message: healthResponse.message
+                            }
+                            return { provider: g.provider, health }
+                        } catch {
+                            return {
+                                provider: g.provider,
+                                health: {
+                                    provider: g.provider,
+                                    health_status: "down" as const,
+                                    success_rate: 0,
+                                    message: "Unable to fetch health status"
+                                }
+                            }
+                        }
+                    })
+                const healthResults = await Promise.all(healthPromises)
+                const healthMap: Record<string, GatewayHealth> = {}
+                healthResults.forEach(({ provider, health }) => {
+                    healthMap[provider] = health
+                })
+                setGatewayHealth(healthMap)
             } else {
                 console.error("Invalid response - expected array:", gateways)
                 setGateways([])
@@ -187,6 +233,43 @@ export default function PaymentGatewaysAdminPage() {
             webhook_secret: "",
             sandbox_mode: gateway.sandbox_mode,
         })
+        setValidationResult(null)
+    }
+
+    const handleValidateCredentials = async () => {
+        if (!editingGateway || !credentials.api_key || !credentials.api_secret) return
+        setValidating(true)
+        setValidationResult(null)
+        try {
+            // Use the update endpoint with validate_before_save to test credentials
+            const result = await adminApi.updateGatewayCredentials(editingGateway.provider, {
+                ...credentials,
+                api_key: credentials.api_key,
+                api_secret: credentials.api_secret,
+                webhook_secret: credentials.webhook_secret,
+                sandbox_mode: credentials.sandbox_mode,
+            })
+            if (result.credentials_valid) {
+                setValidationResult({ valid: true, message: "Credentials are valid!" })
+                addToast({
+                    type: "success",
+                    title: "Credentials validated",
+                    description: "The credentials are valid and have been saved",
+                })
+                await loadGateways()
+                setEditingGateway(null)
+            } else {
+                setValidationResult({ valid: false, message: "Credentials validation failed" })
+            }
+        } catch (error) {
+            console.error("Failed to validate credentials:", error)
+            setValidationResult({
+                valid: false,
+                message: error instanceof Error ? error.message : "Validation failed"
+            })
+        } finally {
+            setValidating(false)
+        }
     }
 
     const handleSaveCredentials = async () => {
@@ -332,6 +415,34 @@ export default function PaymentGatewaysAdminPage() {
 
                                         <div className="space-y-3">
                                             <div className="flex items-center justify-between text-sm">
+                                                <span className="text-muted-foreground">Health</span>
+                                                {gateway.is_enabled && gatewayHealth[gateway.provider] ? (
+                                                    <Badge
+                                                        className={cn(
+                                                            gatewayHealth[gateway.provider].health_status === "healthy" && "bg-green-500",
+                                                            gatewayHealth[gateway.provider].health_status === "degraded" && "bg-amber-500",
+                                                            gatewayHealth[gateway.provider].health_status === "down" && "bg-red-500"
+                                                        )}
+                                                    >
+                                                        {gatewayHealth[gateway.provider].health_status === "healthy" && (
+                                                            <CheckCircle2 className="h-3 w-3 mr-1" />
+                                                        )}
+                                                        {gatewayHealth[gateway.provider].health_status === "degraded" && (
+                                                            <AlertTriangle className="h-3 w-3 mr-1" />
+                                                        )}
+                                                        {gatewayHealth[gateway.provider].health_status === "down" && (
+                                                            <XCircle className="h-3 w-3 mr-1" />
+                                                        )}
+                                                        {gatewayHealth[gateway.provider].health_status.charAt(0).toUpperCase() +
+                                                            gatewayHealth[gateway.provider].health_status.slice(1)}
+                                                    </Badge>
+                                                ) : (
+                                                    <Badge variant="secondary">
+                                                        {gateway.is_enabled ? "Loading..." : "Disabled"}
+                                                    </Badge>
+                                                )}
+                                            </div>
+                                            <div className="flex items-center justify-between text-sm">
                                                 <span className="text-muted-foreground">Mode</span>
                                                 <Badge variant={gateway.sandbox_mode ? "secondary" : "default"}>
                                                     {gateway.sandbox_mode ? "Sandbox" : "Production"}
@@ -460,14 +571,48 @@ export default function PaymentGatewaysAdminPage() {
                                 </div>
                             </div>
 
+                            {/* Validation Result */}
+                            {validationResult && (
+                                <div className={cn(
+                                    "flex items-center gap-2 p-3 rounded-lg text-sm",
+                                    validationResult.valid
+                                        ? "bg-green-500/10 text-green-600 dark:text-green-400"
+                                        : "bg-red-500/10 text-red-600 dark:text-red-400"
+                                )}>
+                                    {validationResult.valid ? (
+                                        <CheckCircle2 className="h-4 w-4" />
+                                    ) : (
+                                        <XCircle className="h-4 w-4" />
+                                    )}
+                                    {validationResult.message}
+                                </div>
+                            )}
+
                         </div>
 
-                        <DialogFooter>
+                        <DialogFooter className="flex-col sm:flex-row gap-2">
                             <Button
                                 variant="outline"
                                 onClick={() => setEditingGateway(null)}
                             >
                                 Cancel
+                            </Button>
+                            <Button
+                                variant="secondary"
+                                onClick={handleValidateCredentials}
+                                disabled={validating || !credentials.api_key || !credentials.api_secret}
+                            >
+                                {validating ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        Validating...
+                                    </>
+                                ) : (
+                                    <>
+                                        <ShieldCheck className="h-4 w-4 mr-2" />
+                                        Validate & Save
+                                    </>
+                                )}
                             </Button>
                             <Button
                                 onClick={handleSaveCredentials}
@@ -479,7 +624,7 @@ export default function PaymentGatewaysAdminPage() {
                                         Saving...
                                     </>
                                 ) : (
-                                    "Save Credentials"
+                                    "Save Without Validation"
                                 )}
                             </Button>
                         </DialogFooter>

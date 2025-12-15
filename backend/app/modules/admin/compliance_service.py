@@ -1178,6 +1178,86 @@ class AdminTermsOfServiceService:
             activated_at=terms.activated_at,
             message=f"Terms of service version {terms.version} activated successfully",
         )
+    
+    async def update_terms_of_service(
+        self,
+        terms_id: uuid.UUID,
+        admin_id: uuid.UUID,
+        title: Optional[str] = None,
+        content: Optional[str] = None,
+        content_html: Optional[str] = None,
+        summary: Optional[str] = None,
+        effective_date: Optional[datetime] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ):
+        """
+        Update a draft terms of service version.
+        
+        Requirements: 15.4 - Update draft version
+        
+        Only draft versions can be updated. Active and archived versions are immutable.
+        
+        Args:
+            terms_id: ID of the terms to update
+            admin_id: Admin updating the terms
+            title: New title (optional)
+            content: New content (optional)
+            content_html: New HTML content (optional)
+            summary: New summary (optional)
+            effective_date: New effective date (optional)
+            ip_address: Client IP address
+            user_agent: Client user agent
+            
+        Returns:
+            TermsOfService: Updated terms of service
+        """
+        from app.modules.admin.models import TermsOfService, TermsOfServiceStatus
+        
+        # Get the terms
+        result = await self.session.execute(
+            select(TermsOfService).where(TermsOfService.id == terms_id)
+        )
+        terms = result.scalar_one_or_none()
+        
+        if not terms:
+            raise TermsOfServiceNotFoundError(f"Terms of service {terms_id} not found")
+        
+        # Only draft versions can be updated
+        if terms.status != TermsOfServiceStatus.DRAFT.value:
+            raise ValueError(f"Cannot update terms of service with status '{terms.status}'. Only draft versions can be updated.")
+        
+        # Update fields if provided
+        if title is not None:
+            terms.title = title
+        if content is not None:
+            terms.content = content
+        if content_html is not None:
+            terms.content_html = content_html
+        if summary is not None:
+            terms.summary = summary
+        if effective_date is not None:
+            terms.effective_date = effective_date
+        
+        await self.session.commit()
+        await self.session.refresh(terms)
+        
+        # Log the action
+        AdminAuditService.log(
+            admin_id=admin_id,
+            admin_user_id=admin_id,
+            event=AdminAuditEvent.TERMS_UPDATED,
+            resource_type="terms_of_service",
+            resource_id=str(terms.id),
+            details={
+                "version": terms.version,
+                "title": terms.title,
+            },
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        
+        return terms
 
 
 # ==================== Compliance Report Service (Requirements 15.5) ====================

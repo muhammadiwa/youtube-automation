@@ -1,21 +1,22 @@
-"""Public API Router for announcements.
+"""Public API Router for announcements and terms of service.
 
 Requirements: 10.5 - Display banner in user dashboard with dismiss option
+Requirements: 15.4 - Terms of Service versioning and display
 """
 
 from typing import List, Optional
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
 from app.core.database import get_session
-from app.modules.admin.models import Announcement
+from app.modules.admin.models import Announcement, TermsOfService, TermsOfServiceStatus
 
 
-router = APIRouter(tags=["announcements"])
+router = APIRouter(tags=["public"])
 
 
 class PublicAnnouncementResponse(BaseModel):
@@ -82,3 +83,100 @@ async def get_active_announcements(
         ))
     
     return PublicAnnouncementListResponse(items=items)
+
+
+# ==================== Terms of Service Public Endpoints ====================
+
+
+class PublicTermsOfServiceResponse(BaseModel):
+    """Public terms of service response for client display."""
+    id: str
+    version: str
+    title: str
+    content: str
+    content_html: Optional[str] = None
+    summary: Optional[str] = None
+    effective_date: Optional[datetime] = None
+    activated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+@router.get("/terms-of-service", response_model=PublicTermsOfServiceResponse)
+async def get_active_terms_of_service(
+    session: AsyncSession = Depends(get_session),
+):
+    """Get the currently active terms of service.
+    
+    Requirements: 15.4 - Display active terms of service to users
+    
+    This endpoint is public and returns the currently active ToS version.
+    """
+    # Get the active terms of service
+    query = select(TermsOfService).where(
+        TermsOfService.status == TermsOfServiceStatus.ACTIVE.value
+    )
+    
+    result = await session.execute(query)
+    terms = result.scalar_one_or_none()
+    
+    if not terms:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active terms of service found",
+        )
+    
+    return PublicTermsOfServiceResponse(
+        id=str(terms.id),
+        version=terms.version,
+        title=terms.title,
+        content=terms.content,
+        content_html=terms.content_html,
+        summary=terms.summary,
+        effective_date=terms.effective_date,
+        activated_at=terms.activated_at,
+    )
+
+
+@router.get("/terms-of-service/{version}", response_model=PublicTermsOfServiceResponse)
+async def get_terms_of_service_by_version(
+    version: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """Get a specific version of terms of service.
+    
+    Requirements: 15.4 - Allow users to view specific ToS versions
+    
+    Only active or archived versions can be viewed publicly.
+    """
+    # Get the terms of service by version (only active or archived)
+    query = select(TermsOfService).where(
+        and_(
+            TermsOfService.version == version,
+            TermsOfService.status.in_([
+                TermsOfServiceStatus.ACTIVE.value,
+                TermsOfServiceStatus.ARCHIVED.value,
+            ])
+        )
+    )
+    
+    result = await session.execute(query)
+    terms = result.scalar_one_or_none()
+    
+    if not terms:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Terms of service version '{version}' not found",
+        )
+    
+    return PublicTermsOfServiceResponse(
+        id=str(terms.id),
+        version=terms.version,
+        title=terms.title,
+        content=terms.content,
+        content_html=terms.content_html,
+        summary=terms.summary,
+        effective_date=terms.effective_date,
+        activated_at=terms.activated_at,
+    )

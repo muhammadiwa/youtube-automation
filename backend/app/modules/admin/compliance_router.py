@@ -33,6 +33,7 @@ from app.modules.admin.compliance_schemas import (
     CancelDeletionResponse,
     # Terms of Service schemas (Requirements 15.4)
     CreateTermsOfServiceRequest,
+    UpdateTermsOfServiceRequest,
     TermsOfServiceResponse,
     TermsOfServiceListResponse,
     ActivateTermsOfServiceResponse,
@@ -549,6 +550,74 @@ async def get_terms_of_service_list(
         page_size=page_size,
         status=status_filter,
     )
+
+
+@router.put(
+    "/compliance/terms/{terms_id}",
+    response_model=TermsOfServiceResponse,
+)
+async def update_terms_of_service(
+    request: Request,
+    terms_id: uuid.UUID,
+    data: "UpdateTermsOfServiceRequest",
+    admin: Admin = Depends(require_permission(AdminPermission.MANAGE_COMPLIANCE)),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Update a draft terms of service version.
+    
+    Requirements: 15.4 - Update draft version
+    
+    Only draft versions can be updated. Active and archived versions are immutable.
+    
+    Requires MANAGE_COMPLIANCE permission.
+    """
+    from app.modules.admin.compliance_service import (
+        AdminTermsOfServiceService,
+        TermsOfServiceNotFoundError,
+    )
+    from app.modules.admin.compliance_schemas import UpdateTermsOfServiceRequest, TermsOfServiceResponse
+    
+    service = AdminTermsOfServiceService(session)
+    
+    try:
+        terms = await service.update_terms_of_service(
+            terms_id=terms_id,
+            admin_id=admin.user_id,
+            title=data.title,
+            content=data.content,
+            content_html=data.content_html,
+            summary=data.summary,
+            effective_date=data.effective_date,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+        
+        return TermsOfServiceResponse(
+            id=terms.id,
+            version=terms.version,
+            title=terms.title,
+            content=terms.content,
+            content_html=terms.content_html,
+            summary=terms.summary,
+            status=terms.status,
+            effective_date=terms.effective_date,
+            created_by=terms.created_by,
+            activated_by=terms.activated_by,
+            activated_at=terms.activated_at,
+            created_at=terms.created_at,
+            updated_at=terms.updated_at,
+        )
+    except TermsOfServiceNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
 
 
 @router.put(

@@ -944,3 +944,238 @@ export interface FeatureAdoptionResponse {
     period_start: string
     period_end: string
 }
+
+
+// ==================== Referral Program Types (14.3) ====================
+
+export interface ReferralRewards {
+    referrer_reward_type: "credit" | "discount" | "free_days"
+    referrer_reward_value: number
+    referee_reward_type: "credit" | "discount" | "free_days" | "extended_trial"
+    referee_reward_value: number
+}
+
+export interface ReferralProgramConfig {
+    is_enabled: boolean
+    rewards: ReferralRewards
+    max_referrals_per_user: number
+    referral_code_prefix: string
+    minimum_subscription_days: number
+    eligible_plans: string[]
+    created_at: string | null
+    updated_at: string | null
+}
+
+export interface ReferralProgramConfigResponse {
+    config: ReferralProgramConfig
+    updated_by: string | null
+    message: string
+}
+
+export interface ReferralProgramConfigUpdate {
+    is_enabled?: boolean
+    rewards?: Partial<ReferralRewards>
+    max_referrals_per_user?: number
+    referral_code_prefix?: string
+    minimum_subscription_days?: number
+    eligible_plans?: string[]
+}
+
+// ==================== Trial Code Types (14.4) ====================
+
+export interface TrialCode {
+    id: string
+    code: string
+    trial_days: number
+    valid_from: string
+    valid_until: string
+    usage_limit: number | null
+    usage_count: number
+    applicable_plans: string[]
+    description: string | null
+    is_active: boolean
+    is_valid: boolean
+    created_by: string
+    created_at: string
+    updated_at: string
+}
+
+export interface TrialCodeListResponse {
+    items: TrialCode[]
+    total: number
+    page: number
+    page_size: number
+    total_pages: number
+}
+
+export interface TrialCodeCreateRequest {
+    code: string
+    trial_days: number
+    valid_from: string
+    valid_until: string
+    usage_limit?: number | null
+    applicable_plans?: string[]
+    description?: string | null
+}
+
+export interface TrialExtensionRequest {
+    days: number
+    reason?: string
+}
+
+export interface TrialExtensionResponse {
+    user_id: string
+    previous_trial_end: string | null
+    new_trial_end: string
+    days_extended: number
+    reason: string | null
+    extended_at: string
+    extended_by: string
+    message: string
+}
+
+// ==================== Promotion Analytics Types (14.5) ====================
+
+export interface DiscountCodeAnalytics {
+    code: string
+    usage_count: number
+    total_discount_given: number
+    revenue_generated: number
+    conversion_rate: number
+    average_order_value: number
+}
+
+export interface ReferralAnalytics {
+    total_referrals: number
+    successful_referrals: number
+    pending_referrals: number
+    total_rewards_given: number
+    conversion_rate: number
+}
+
+export interface TopReferrer {
+    user_id: string
+    user_email: string | null
+    user_name: string | null
+    referral_count: number
+    successful_referrals: number
+    total_rewards_earned: number
+}
+
+export interface PromotionAnalyticsResponse {
+    total_discount_codes: number
+    active_discount_codes: number
+    total_trial_codes: number
+    active_trial_codes: number
+    total_discount_usage: number
+    total_discount_amount: number
+    discount_revenue_impact: number
+    referral_analytics: ReferralAnalytics
+    top_discount_codes: DiscountCodeAnalytics[]
+    top_referrers: TopReferrer[]
+    period_start: string
+    period_end: string
+    overall_conversion_rate: number
+    discount_conversion_rate: number
+    referral_conversion_rate: number
+}
+
+// ==================== Terms of Service Types (Requirements 15.4) ====================
+
+export type TermsOfServiceStatus = "draft" | "active" | "archived"
+
+export interface TermsOfService {
+    id: string
+    version: string
+    title: string
+    content: string
+    content_html: string | null
+    summary: string | null
+    status: TermsOfServiceStatus
+    effective_date: string | null
+    created_by: string | null
+    activated_by: string | null
+    activated_at: string | null
+    created_at: string
+    updated_at: string
+}
+
+export interface TermsOfServiceListResponse {
+    items: TermsOfService[]
+    total: number
+    page: number
+    page_size: number
+    total_pages: number
+}
+
+export interface CreateTermsOfServiceRequest {
+    version: string
+    title: string
+    content: string
+    content_html?: string
+    summary?: string
+    effective_date?: string
+}
+
+export interface UpdateTermsOfServiceRequest {
+    title?: string
+    content?: string
+    content_html?: string
+    summary?: string
+    effective_date?: string
+}
+
+export interface ActivateTermsOfServiceResponse {
+    id: string
+    version: string
+    status: string
+    activated_at: string
+    message: string
+}
+
+// ==================== Compliance Report Types (Requirements 15.5) ====================
+
+export type ComplianceReportType =
+    | "data_processing"
+    | "user_activity"
+    | "security_audit"
+    | "gdpr_compliance"
+    | "full_audit"
+
+export type ComplianceReportStatus = "pending" | "generating" | "completed" | "failed"
+
+export interface ComplianceReport {
+    id: string
+    report_type: ComplianceReportType
+    title: string
+    description: string | null
+    status: ComplianceReportStatus
+    start_date: string | null
+    end_date: string | null
+    parameters: Record<string, unknown> | null
+    file_path: string | null
+    file_size: number | null
+    download_url: string | null
+    expires_at: string | null
+    error_message: string | null
+    requested_by: string
+    created_at: string
+    completed_at: string | null
+}
+
+export interface ComplianceReportListResponse {
+    items: ComplianceReport[]
+    total: number
+    page: number
+    page_size: number
+    total_pages: number
+}
+
+export interface CreateComplianceReportRequest {
+    report_type: ComplianceReportType
+    title: string
+    description?: string
+    start_date?: string
+    end_date?: string
+    parameters?: Record<string, unknown>
+}

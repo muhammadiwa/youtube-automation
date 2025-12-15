@@ -451,6 +451,78 @@ const adminApi = {
         return apiClient.post("/admin/promotions/discount-codes/validate", { code, plan })
     },
 
+    // ==================== Referral Program API (14.3) ====================
+
+    /**
+     * Get referral program configuration
+     * Requirements: 14.3
+     */
+    async getReferralConfig(): Promise<import("@/types/admin").ReferralProgramConfigResponse> {
+        return apiClient.get("/admin/promotions/referral")
+    },
+
+    /**
+     * Update referral program configuration
+     * Requirements: 14.3
+     */
+    async updateReferralConfig(data: import("@/types/admin").ReferralProgramConfigUpdate): Promise<import("@/types/admin").ReferralProgramConfigResponse> {
+        return apiClient.put("/admin/promotions/referral", data)
+    },
+
+    // ==================== Trial Codes API (14.4) ====================
+
+    /**
+     * Get paginated list of trial codes
+     * Requirements: 14.4
+     */
+    async getTrialCodes(params: {
+        page?: number
+        page_size?: number
+        is_active?: boolean
+        search?: string
+    }): Promise<import("@/types/admin").TrialCodeListResponse> {
+        const searchParams = new URLSearchParams()
+        if (params.page) searchParams.set("page", params.page.toString())
+        if (params.page_size) searchParams.set("page_size", params.page_size.toString())
+        if (params.is_active !== undefined) searchParams.set("is_active", params.is_active.toString())
+        if (params.search) searchParams.set("search", params.search)
+        const query = searchParams.toString()
+        return apiClient.get(`/admin/promotions/trial-codes${query ? `?${query}` : ""}`)
+    },
+
+    /**
+     * Create a new trial code
+     * Requirements: 14.4
+     */
+    async createTrialCode(data: import("@/types/admin").TrialCodeCreateRequest): Promise<import("@/types/admin").TrialCode> {
+        return apiClient.post("/admin/promotions/trial-codes", data)
+    },
+
+    /**
+     * Extend user trial
+     * Requirements: 14.4
+     */
+    async extendUserTrial(userId: string, data: import("@/types/admin").TrialExtensionRequest): Promise<import("@/types/admin").TrialExtensionResponse> {
+        return apiClient.post(`/admin/users/${userId}/extend-trial`, data)
+    },
+
+    // ==================== Promotion Analytics API (14.5) ====================
+
+    /**
+     * Get promotion analytics
+     * Requirements: 14.5
+     */
+    async getPromotionAnalytics(params?: {
+        start_date?: string
+        end_date?: string
+    }): Promise<import("@/types/admin").PromotionAnalyticsResponse> {
+        const searchParams = new URLSearchParams()
+        if (params?.start_date) searchParams.set("start_date", params.start_date)
+        if (params?.end_date) searchParams.set("end_date", params.end_date)
+        const query = searchParams.toString()
+        return apiClient.get(`/admin/promotions/analytics${query ? `?${query}` : ""}`)
+    },
+
     // ==================== Moderation API ====================
 
     /**
@@ -807,6 +879,78 @@ const adminApi = {
      */
     async deleteAnnouncement(announcementId: string): Promise<void> {
         return apiClient.delete(`/admin/communication/announcements/${announcementId}`)
+    },
+
+    // ==================== Terms of Service API (Requirements 15.4) ====================
+
+    /**
+     * Get list of terms of service versions
+     * Requirements: 15.4
+     */
+    async getTermsOfServiceList(params: {
+        page?: number
+        page_size?: number
+        status?: string
+    }): Promise<import("@/types/admin").TermsOfServiceListResponse> {
+        const searchParams = new URLSearchParams()
+        if (params.page) searchParams.set("page", params.page.toString())
+        if (params.page_size) searchParams.set("page_size", params.page_size.toString())
+        if (params.status) searchParams.set("status", params.status)
+        const query = searchParams.toString()
+        return apiClient.get(`/admin/compliance/terms${query ? `?${query}` : ""}`)
+    },
+
+    /**
+     * Create a new terms of service version
+     * Requirements: 15.4
+     */
+    async createTermsOfService(data: import("@/types/admin").CreateTermsOfServiceRequest): Promise<import("@/types/admin").TermsOfService> {
+        return apiClient.post("/admin/compliance/terms", data)
+    },
+
+    /**
+     * Update a draft terms of service version
+     * Requirements: 15.4
+     */
+    async updateTermsOfService(termsId: string, data: import("@/types/admin").UpdateTermsOfServiceRequest): Promise<import("@/types/admin").TermsOfService> {
+        return apiClient.put(`/admin/compliance/terms/${termsId}`, data)
+    },
+
+    /**
+     * Activate a terms of service version
+     * Requirements: 15.4
+     */
+    async activateTermsOfService(termsId: string): Promise<import("@/types/admin").ActivateTermsOfServiceResponse> {
+        return apiClient.put(`/admin/compliance/terms/${termsId}/activate`, {})
+    },
+
+    // ==================== Compliance Reports API (Requirements 15.5) ====================
+
+    /**
+     * Get list of compliance reports
+     * Requirements: 15.5
+     */
+    async getComplianceReports(params: {
+        page?: number
+        page_size?: number
+        report_type?: string
+        status?: string
+    }): Promise<import("@/types/admin").ComplianceReportListResponse> {
+        const searchParams = new URLSearchParams()
+        if (params.page) searchParams.set("page", params.page.toString())
+        if (params.page_size) searchParams.set("page_size", params.page_size.toString())
+        if (params.report_type) searchParams.set("report_type", params.report_type)
+        if (params.status) searchParams.set("status", params.status)
+        const query = searchParams.toString()
+        return apiClient.get(`/admin/compliance/reports${query ? `?${query}` : ""}`)
+    },
+
+    /**
+     * Generate a compliance report
+     * Requirements: 15.5
+     */
+    async createComplianceReport(data: import("@/types/admin").CreateComplianceReportRequest): Promise<import("@/types/admin").ComplianceReport> {
+        return apiClient.post("/admin/compliance/reports", data)
     },
 }
 

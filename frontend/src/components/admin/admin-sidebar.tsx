@@ -93,6 +93,8 @@ const adminNavigation: NavSection[] = [
             { name: "Audit Logs", href: "/admin/audit-logs", icon: FileText },
             { name: "Security", href: "/admin/security", icon: Shield },
             { name: "Data Requests", href: "/admin/compliance/requests", icon: Flag },
+            { name: "Terms of Service", href: "/admin/compliance/terms", icon: FileText },
+            { name: "Reports", href: "/admin/compliance/reports", icon: FileText },
         ],
     },
     {
@@ -102,10 +104,23 @@ const adminNavigation: NavSection[] = [
         items: [
             { name: "Global Config", href: "/admin/config", icon: Settings },
             { name: "Promotions", href: "/admin/promotions", icon: Gift },
+            { name: "Referral Program", href: "/admin/referral", icon: Users },
             { name: "Announcements", href: "/admin/announcements", icon: Bell },
         ],
     },
 ]
+
+// Helper function to check if a route is active
+// Uses exact match or child route check to prevent parent routes from staying active
+function checkIsActiveRoute(pathname: string, href: string): boolean {
+    if (href === "/admin") {
+        return pathname === "/admin"
+    }
+    if (pathname === href) {
+        return true
+    }
+    return pathname.startsWith(href + "/")
+}
 
 interface AdminSidebarProps {
     className?: string
@@ -241,12 +256,7 @@ export function AdminSidebar({ className }: AdminSidebarProps) {
         }))
     }
 
-    const isActiveRoute = (href: string) => {
-        if (href === "/admin") {
-            return pathname === "/admin"
-        }
-        return pathname.startsWith(href)
-    }
+    const isActiveRoute = (href: string) => checkIsActiveRoute(pathname, href)
 
     return (
         <div className={cn(
@@ -361,12 +371,7 @@ export function MobileAdminSidebar() {
         }))
     }
 
-    const isActiveRoute = (href: string) => {
-        if (href === "/admin") {
-            return pathname === "/admin"
-        }
-        return pathname.startsWith(href)
-    }
+    const isActiveRoute = (href: string) => checkIsActiveRoute(pathname, href)
 
     return (
         <Sheet open={open} onOpenChange={setOpen}>

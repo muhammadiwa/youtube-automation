@@ -5,6 +5,7 @@ import { Youtube, Zap, Shield, BarChart3 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { LegalLink } from "@/components/legal-modal"
 
 const features = [
   {
@@ -108,8 +109,16 @@ export default function Home() {
 
       {/* Footer */}
       <footer className="border-t py-8">
-        <div className="container text-center text-sm text-muted-foreground">
-          <p>© 2024 YouTube Automation Platform. All rights reserved.</p>
+        <div className="container">
+          <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-between">
+            <p className="text-sm text-muted-foreground">
+              © 2024 YouTube Automation Platform. All rights reserved.
+            </p>
+            <div className="flex items-center gap-6 text-sm text-muted-foreground">
+              <LegalLink type="terms" className="hover:text-foreground transition-colors" />
+              <LegalLink type="privacy" className="hover:text-foreground transition-colors" />
+            </div>
+          </div>
         </div>
       </footer>
     </div>

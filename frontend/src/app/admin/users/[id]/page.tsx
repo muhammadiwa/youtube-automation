@@ -51,6 +51,7 @@ import { SuspendUserDialog } from "@/components/admin/users/suspend-user-dialog"
 import { ActivateUserDialog } from "@/components/admin/users/activate-user-dialog"
 import { ResetPasswordDialog } from "@/components/admin/users/reset-password-dialog"
 import { ImpersonateUserDialog } from "@/components/admin/users/impersonate-user-dialog"
+import { ExtendTrialDialog } from "@/components/admin/users/extend-trial-dialog"
 
 const statusConfig: Record<UserStatus, { color: string; bg: string; gradient: string }> = {
     active: {
@@ -90,6 +91,7 @@ export default function AdminUserDetailPage() {
     const [showActivateDialog, setShowActivateDialog] = useState(false)
     const [showResetPasswordDialog, setShowResetPasswordDialog] = useState(false)
     const [showImpersonateDialog, setShowImpersonateDialog] = useState(false)
+    const [showExtendTrialDialog, setShowExtendTrialDialog] = useState(false)
 
     const fetchUser = useCallback(async () => {
         setIsLoading(true)
@@ -235,6 +237,14 @@ export default function AdminUserDetailPage() {
                         >
                             <UserCog className="h-4 w-4 mr-2" />
                             Impersonate
+                        </Button>
+                        <Button
+                            variant="outline"
+                            onClick={() => setShowExtendTrialDialog(true)}
+                            className="rounded-xl border-blue-500/30 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                        >
+                            <Calendar className="h-4 w-4 mr-2" />
+                            Extend Trial
                         </Button>
                     </div>
                 </motion.div>
@@ -561,6 +571,12 @@ export default function AdminUserDetailPage() {
                 open={showImpersonateDialog}
                 onOpenChange={setShowImpersonateDialog}
                 user={user}
+            />
+            <ExtendTrialDialog
+                open={showExtendTrialDialog}
+                onOpenChange={setShowExtendTrialDialog}
+                user={user}
+                onSuccess={handleActionComplete}
             />
         </AdminLayout>
     )

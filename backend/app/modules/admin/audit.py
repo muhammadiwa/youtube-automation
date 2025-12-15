@@ -60,6 +60,7 @@ class AdminAuditEvent(str, Enum):
     
     # Terms of Service events (Requirements 15.4)
     TERMS_CREATED = "terms_created"
+    TERMS_UPDATED = "terms_updated"
     TERMS_ACTIVATED = "terms_activated"
     
     # Compliance Report events (Requirements 15.5)

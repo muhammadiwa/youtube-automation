@@ -321,6 +321,18 @@ class ActivateTermsOfServiceResponse(BaseModel):
     message: str
 
 
+class UpdateTermsOfServiceRequest(BaseModel):
+    """Request to update a draft terms of service version.
+    
+    Requirements: 15.4 - Update draft version
+    """
+    title: Optional[str] = Field(None, min_length=1, max_length=255, description="Title of the terms")
+    content: Optional[str] = Field(None, min_length=1, description="Plain text content of the terms")
+    content_html: Optional[str] = Field(None, description="HTML formatted content")
+    summary: Optional[str] = Field(None, description="Summary of changes from previous version")
+    effective_date: Optional[datetime] = Field(None, description="When the terms become effective")
+
+
 # ==================== Compliance Report Schemas (Requirements 15.5) ====================
 
 
