@@ -221,8 +221,11 @@ export const moderationApi = {
         page_size?: number
     }): Promise<CommentsResponse> {
         try {
-            return await apiClient.get("/moderation/comments", params)
-        } catch (error) {
+            // Try moderation endpoint first, fallback to empty response
+            const response = await apiClient.get<CommentsResponse>("/moderation/comments", params)
+            return response
+        } catch {
+            // Return empty response on error - this is expected if no data
             return { items: [], total: 0, page: 1, page_size: 10 }
         }
     },

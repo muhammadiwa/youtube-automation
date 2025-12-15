@@ -25,6 +25,7 @@ from app.modules.ai.router import router as ai_router
 from app.modules.analytics.router import router as analytics_router
 from app.modules.competitor.router import router as competitor_router
 from app.modules.comment.router import router as comment_router
+from app.modules.moderation.router import router as moderation_router
 from app.modules.monitoring import monitoring_router
 from app.modules.agent import agent_router
 from app.modules.job.router import router as job_router
@@ -287,6 +288,7 @@ app.include_router(ai_router, prefix=settings.API_V1_PREFIX)
 app.include_router(analytics_router, prefix=settings.API_V1_PREFIX)
 app.include_router(competitor_router, prefix=settings.API_V1_PREFIX)
 app.include_router(comment_router, prefix=settings.API_V1_PREFIX)
+app.include_router(moderation_router, prefix=settings.API_V1_PREFIX)
 app.include_router(monitoring_router, prefix=settings.API_V1_PREFIX)
 app.include_router(agent_router, prefix=settings.API_V1_PREFIX)
 app.include_router(job_router, prefix=settings.API_V1_PREFIX)

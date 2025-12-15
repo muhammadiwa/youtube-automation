@@ -120,6 +120,14 @@ export interface LiveEventsResponse {
     page_size: number
 }
 
+// Backend response format
+interface BackendLiveEventsResponse {
+    events: LiveEvent[]
+    total: number
+    page: number
+    page_size: number
+}
+
 export const streamsApi = {
     // ============ Live Events ============
     async getEvents(params?: {
@@ -129,7 +137,21 @@ export const streamsApi = {
         page_size?: number
     }): Promise<LiveEventsResponse> {
         try {
-            return await apiClient.get("/streams/events", params)
+            const response = await apiClient.get<BackendLiveEventsResponse | LiveEventsResponse>("/streams/events", params)
+
+            // Handle backend response format (events) vs frontend format (items)
+            if ('events' in response && Array.isArray(response.events)) {
+                return {
+                    items: response.events,
+                    total: response.total || 0,
+                    page: response.page || 1,
+                    page_size: response.page_size || 10,
+                }
+            }
+            if ('items' in response && Array.isArray(response.items)) {
+                return response as LiveEventsResponse
+            }
+            return { items: [], total: 0, page: 1, page_size: 10 }
         } catch (error) {
             console.error("Failed to fetch events:", error)
             return { items: [], total: 0, page: 1, page_size: 10 }

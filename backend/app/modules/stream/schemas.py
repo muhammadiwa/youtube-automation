@@ -263,6 +263,8 @@ class LiveEventListResponse(BaseModel):
 
     events: list[LiveEventResponse]
     total: int
+    page: int = 1
+    page_size: int = 10
 
 
 class YouTubeBroadcastInfo(BaseModel):

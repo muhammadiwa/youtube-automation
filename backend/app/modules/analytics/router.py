@@ -465,3 +465,54 @@ async def get_ai_insights(
         period_start=start_date,
         period_end=end_date,
     )
+
+
+@router.get("/ai-insights", response_model=list[AIInsight])
+async def get_ai_insights_simple(
+    account_id: Optional[str] = Query(None, description="Filter by account ID"),
+    limit: int = Query(5, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get AI-powered insights for dashboard (simplified endpoint).
+    
+    This is an alias endpoint that returns insights in a simpler format
+    for the frontend dashboard.
+
+    Requirements: 17.4
+    """
+    service = AnalyticsService(db)
+    
+    # Default to last 30 days
+    end_date = date.today()
+    start_date = end_date - timedelta(days=30)
+
+    parsed_account_ids = None
+    if account_id:
+        try:
+            parsed_account_ids = [uuid.UUID(account_id)]
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid account ID format",
+            )
+
+    insights = await service.generate_ai_insights(
+        start_date, end_date, parsed_account_ids
+    )
+
+    return insights[:limit]
+
+
+@router.get("/revenue/top-videos")
+async def get_top_earning_videos(
+    account_id: Optional[str] = Query(None, description="Filter by account ID"),
+    period: str = Query("30d", description="Period: 7d, 30d, 90d, 1y"),
+    limit: int = Query(5, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get top earning videos.
+    
+    Returns mock data for now - in production would query actual revenue data.
+    """
+    # Return empty list - frontend handles this gracefully
+    return []

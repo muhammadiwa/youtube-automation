@@ -1,6 +1,5 @@
 "use client"
 
-import { useState } from "react"
 import Link from "next/link"
 import {
     User,
@@ -9,12 +8,9 @@ import {
     Webhook,
     ChevronRight,
     Settings,
-    FileText,
-    Shield,
 } from "lucide-react"
 import { DashboardLayout } from "@/components/dashboard"
 import { Card, CardContent } from "@/components/ui/card"
-import { LegalModal } from "@/components/legal-modal"
 
 const settingsLinks = [
     {
@@ -43,26 +39,7 @@ const settingsLinks = [
     },
 ]
 
-type LegalModalType = "terms" | "privacy" | null
-
-const legalItems = [
-    {
-        title: "Terms of Service",
-        description: "Read our terms and conditions for using the platform",
-        type: "terms" as const,
-        icon: FileText,
-    },
-    {
-        title: "Privacy Policy",
-        description: "Learn how we collect, use, and protect your data",
-        type: "privacy" as const,
-        icon: Shield,
-    },
-]
-
 export default function SettingsPage() {
-    const [legalModal, setLegalModal] = useState<LegalModalType>(null)
-
     return (
         <DashboardLayout
             breadcrumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Settings" }]}
@@ -104,45 +81,7 @@ export default function SettingsPage() {
                         </Link>
                     ))}
                 </div>
-
-                {/* Legal Section */}
-                <div className="pt-6 border-t">
-                    <h2 className="text-lg font-semibold mb-4">Legal</h2>
-                    <div className="grid gap-4 md:grid-cols-2">
-                        {legalItems.map((item) => (
-                            <Card
-                                key={item.type}
-                                onClick={() => setLegalModal(item.type)}
-                                className="border-0 shadow-lg hover:shadow-xl transition-all duration-300 cursor-pointer group h-full bg-slate-50 dark:bg-slate-900/50"
-                            >
-                                <CardContent className="p-6">
-                                    <div className="flex items-start gap-4">
-                                        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-200 dark:bg-slate-800 group-hover:bg-slate-300 dark:group-hover:bg-slate-700 transition-colors">
-                                            <item.icon className="h-6 w-6 text-slate-600 dark:text-slate-400" />
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center justify-between">
-                                                <h3 className="font-semibold group-hover:text-primary transition-colors">
-                                                    {item.title}
-                                                </h3>
-                                                <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" />
-                                            </div>
-                                            <p className="text-sm text-muted-foreground mt-1">
-                                                {item.description}
-                                            </p>
-                                        </div>
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        ))}
-                    </div>
-                </div>
             </div>
-
-            {/* Legal Modal */}
-            {legalModal && (
-                <LegalModal type={legalModal} onClose={() => setLegalModal(null)} />
-            )}
         </DashboardLayout>
     )
 }

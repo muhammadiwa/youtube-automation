@@ -79,17 +79,22 @@ export const jobsApi = {
      * Backend: GET /jobs
      */
     async getJobs(filters?: JobFilters): Promise<JobsResponse> {
-        const params: Record<string, string | number | boolean | undefined> = {
-            status: filters?.status,
-            job_type: filters?.job_type,
-            page: filters?.page || 1,
-            page_size: filters?.page_size || 50,
-        };
-        const response = await apiClient.get<JobsResponse>("/jobs", params);
-        return {
-            ...response,
-            items: response.items.map(normalizeJob),
-        };
+        try {
+            const params: Record<string, string | number | boolean | undefined> = {
+                status: filters?.status,
+                job_type: filters?.job_type,
+                page: filters?.page || 1,
+                page_size: filters?.page_size || 50,
+            };
+            const response = await apiClient.get<JobsResponse>("/jobs", params);
+            return {
+                ...response,
+                items: (response.items || []).map(normalizeJob),
+            };
+        } catch (error) {
+            console.error("Failed to fetch jobs:", error);
+            return { items: [], total: 0, page: 1, page_size: 50, total_pages: 0 };
+        }
     },
 
     /**
@@ -106,7 +111,21 @@ export const jobsApi = {
      * Backend: GET /jobs/stats/queue
      */
     async getQueueStats(): Promise<QueueStats> {
-        return apiClient.get<QueueStats>("/jobs/stats/queue");
+        try {
+            return await apiClient.get<QueueStats>("/jobs/stats/queue");
+        } catch (error) {
+            console.error("Failed to fetch queue stats:", error);
+            return {
+                total_jobs: 0,
+                queued: 0,
+                processing: 0,
+                completed: 0,
+                failed: 0,
+                dlq: 0,
+                processing_rate: 0,
+                average_duration: 0,
+            };
+        }
     },
 
     /**
@@ -114,15 +133,20 @@ export const jobsApi = {
      * Backend: GET /jobs/dlq/jobs
      */
     async getDLQJobs(limit?: number, offset?: number): Promise<DLQResponse> {
-        const params: Record<string, string | number | boolean | undefined> = {
-            limit: limit || 100,
-            offset: offset || 0,
-        };
-        const response = await apiClient.get<DLQResponse>("/jobs/dlq/jobs", params);
-        return {
-            ...response,
-            items: response.items.map(normalizeJob),
-        };
+        try {
+            const params: Record<string, string | number | boolean | undefined> = {
+                limit: limit || 100,
+                offset: offset || 0,
+            };
+            const response = await apiClient.get<DLQResponse>("/jobs/dlq/jobs", params);
+            return {
+                ...response,
+                items: (response.items || []).map(normalizeJob),
+            };
+        } catch (error) {
+            console.error("Failed to fetch DLQ jobs:", error);
+            return { items: [], total: 0, limit: 100, offset: 0 };
+        }
     },
 
     /**

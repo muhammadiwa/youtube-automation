@@ -337,6 +337,34 @@ class StreamService:
             offset=offset,
         )
 
+    async def get_user_events(
+        self,
+        user_id: uuid.UUID,
+        account_id: Optional[uuid.UUID] = None,
+        status: Optional[LiveEventStatus] = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> tuple[list[LiveEvent], int]:
+        """Get all live events for a user across all accounts.
+
+        Args:
+            user_id: User UUID
+            account_id: Optional account filter
+            status: Optional status filter
+            page: Page number (1-indexed)
+            page_size: Items per page
+
+        Returns:
+            tuple: (list of events, total count)
+        """
+        return await self.event_repository.get_by_user_id(
+            user_id=user_id,
+            account_id=account_id,
+            status=status,
+            page=page,
+            page_size=page_size,
+        )
+
     async def update_live_event(
         self,
         event_id: uuid.UUID,

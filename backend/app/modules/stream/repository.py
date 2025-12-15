@@ -171,6 +171,68 @@ class LiveEventRepository:
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
+    async def get_by_user_id(
+        self,
+        user_id: uuid.UUID,
+        account_id: Optional[uuid.UUID] = None,
+        status: Optional[LiveEventStatus] = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> tuple[list[LiveEvent], int]:
+        """Get all live events for a user across all accounts.
+
+        Args:
+            user_id: User UUID
+            account_id: Optional account filter
+            status: Optional status filter
+            page: Page number (1-indexed)
+            page_size: Items per page
+
+        Returns:
+            tuple: (list of events, total count)
+        """
+        from app.modules.account.models import YouTubeAccount
+        from sqlalchemy import func as sql_func
+
+        # Base query - join with accounts to filter by user
+        base_query = (
+            select(LiveEvent)
+            .join(YouTubeAccount, LiveEvent.account_id == YouTubeAccount.id)
+            .where(YouTubeAccount.user_id == user_id)
+        )
+        count_query = (
+            select(sql_func.count(LiveEvent.id))
+            .join(YouTubeAccount, LiveEvent.account_id == YouTubeAccount.id)
+            .where(YouTubeAccount.user_id == user_id)
+        )
+
+        # Apply filters
+        if account_id:
+            base_query = base_query.where(LiveEvent.account_id == account_id)
+            count_query = count_query.where(LiveEvent.account_id == account_id)
+
+        if status:
+            base_query = base_query.where(LiveEvent.status == status.value)
+            count_query = count_query.where(LiveEvent.status == status.value)
+
+        # Get total count
+        count_result = await self.session.execute(count_query)
+        total = count_result.scalar_one() or 0
+
+        # Apply sorting and pagination
+        offset = (page - 1) * page_size
+        base_query = (
+            base_query
+            .order_by(LiveEvent.scheduled_start_at.desc().nullsfirst())
+            .offset(offset)
+            .limit(page_size)
+        )
+
+        result = await self.session.execute(base_query)
+        events = list(result.scalars().all())
+
+        return events, total
+
     async def get_scheduled_events(
         self,
         account_id: Optional[uuid.UUID] = None,

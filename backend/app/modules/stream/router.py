@@ -41,14 +41,97 @@ from app.modules.stream.service import (
     StreamServiceError,
 )
 from app.modules.stream.youtube_api import YouTubeAPIError
+from app.modules.auth.jwt import get_current_user
 
 
-router = APIRouter(prefix="/stream", tags=["stream"])
+router = APIRouter(prefix="/streams", tags=["streams"])
 
 
 def get_stream_service(session: AsyncSession = Depends(get_db)) -> StreamService:
     """Dependency for getting stream service."""
     return StreamService(session)
+
+
+@router.get(
+    "/events",
+    response_model=LiveEventListResponse,
+    summary="List all events",
+    description="Get all live events for the current user across all accounts.",
+)
+async def list_all_events(
+    account_id: Optional[uuid.UUID] = Query(None, alias="account_id", description="Filter by account"),
+    status_filter: Optional[str] = Query(None, alias="status", description="Filter by status"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(10, ge=1, le=100, alias="page_size", description="Items per page"),
+    current_user=Depends(get_current_user),
+    service: StreamService = Depends(get_stream_service),
+) -> LiveEventListResponse:
+    """List all live events for the current user.
+
+    Args:
+        account_id: Optional account filter
+        status_filter: Optional status filter
+        page: Page number
+        page_size: Items per page
+        current_user: Current authenticated user
+        service: Stream service instance
+
+    Returns:
+        LiveEventListResponse: List of live events with pagination
+    """
+    status_enum = None
+    if status_filter:
+        try:
+            status_enum = LiveEventStatus(status_filter)
+        except ValueError:
+            pass  # Ignore invalid status
+
+    events, total = await service.get_user_events(
+        user_id=current_user.id,
+        account_id=account_id,
+        status=status_enum,
+        page=page,
+        page_size=page_size,
+    )
+
+    return LiveEventListResponse(
+        events=[
+            LiveEventResponse(
+                id=e.id,
+                account_id=e.account_id,
+                youtube_broadcast_id=e.youtube_broadcast_id,
+                youtube_stream_id=e.youtube_stream_id,
+                rtmp_url=e.rtmp_url,
+                title=e.title,
+                description=e.description,
+                thumbnail_url=e.thumbnail_url,
+                category_id=e.category_id,
+                tags=e.tags,
+                latency_mode=e.latency_mode,
+                enable_dvr=e.enable_dvr,
+                enable_auto_start=e.enable_auto_start,
+                enable_auto_stop=e.enable_auto_stop,
+                privacy_status=e.privacy_status,
+                made_for_kids=e.made_for_kids,
+                scheduled_start_at=e.scheduled_start_at,
+                scheduled_end_at=e.scheduled_end_at,
+                actual_start_at=e.actual_start_at,
+                actual_end_at=e.actual_end_at,
+                is_recurring=e.is_recurring,
+                parent_event_id=e.parent_event_id,
+                status=e.status,
+                last_error=e.last_error,
+                peak_viewers=e.peak_viewers,
+                total_chat_messages=e.total_chat_messages,
+                created_at=e.created_at,
+                updated_at=e.updated_at,
+            )
+            for e in events
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.post(

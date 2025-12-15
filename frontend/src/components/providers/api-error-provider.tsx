@@ -36,6 +36,31 @@ const SILENT_ENDPOINTS = [
     "/admin/me", // Don't show error when checking admin status (may not be admin)
     "/strikes/alerts", // Don't show error for strike alerts (handled gracefully in component)
     "/strikes/summaries", // Don't show error for strike summaries
+    // Analytics endpoints - handled gracefully with fallback data
+    "/analytics/overview",
+    "/analytics/ai-insights",
+    "/analytics/insights",
+    "/analytics/views/timeseries",
+    "/analytics/subscribers/timeseries",
+    "/analytics/reports",
+    "/analytics/revenue/top-videos",
+    // Revenue endpoints - handled gracefully with fallback data
+    "/revenue/dashboard",
+    "/revenue/monthly-breakdown",
+    "/revenue/goals",
+    // Moderation endpoints - handled gracefully with empty arrays
+    "/moderation/rules",
+    "/moderation/comments",
+    "/moderation/auto-reply",
+    "/moderation/commands",
+    "/moderation/chatbot",
+    "/moderation/logs",
+    // Jobs endpoints - handled gracefully
+    "/jobs",
+    "/jobs/queue-stats",
+    "/jobs/dlq",
+    // Notifications endpoints - handled gracefully
+    "/notifications",
 ]
 
 export function ApiErrorProvider({ children }: { children: React.ReactNode }) {
