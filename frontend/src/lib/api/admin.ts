@@ -952,6 +952,91 @@ const adminApi = {
     async createComplianceReport(data: import("@/types/admin").CreateComplianceReportRequest): Promise<import("@/types/admin").ComplianceReport> {
         return apiClient.post("/admin/compliance/reports", data)
     },
+
+    // ==================== Backup & Disaster Recovery API (Requirements 18.1-18.5) ====================
+
+    /**
+     * Get list of backups with pagination
+     * Requirements: 18.1
+     */
+    async getBackups(params: {
+        page?: number
+        page_size?: number
+        status?: string
+        backup_type?: string
+    }): Promise<import("@/types/admin").BackupListResponse> {
+        const searchParams = new URLSearchParams()
+        if (params.page) searchParams.set("page", params.page.toString())
+        if (params.page_size) searchParams.set("page_size", params.page_size.toString())
+        if (params.status) searchParams.set("status", params.status)
+        if (params.backup_type) searchParams.set("backup_type", params.backup_type)
+        const query = searchParams.toString()
+        return apiClient.get(`/admin/backups${query ? `?${query}` : ""}`)
+    },
+
+    /**
+     * Get backup status summary
+     * Requirements: 18.1
+     */
+    async getBackupStatusSummary(): Promise<import("@/types/admin").BackupStatusSummary> {
+        return apiClient.get("/admin/backups/status")
+    },
+
+    /**
+     * Get a single backup by ID
+     * Requirements: 18.1
+     */
+    async getBackup(backupId: string): Promise<import("@/types/admin").Backup> {
+        return apiClient.get(`/admin/backups/${backupId}`)
+    },
+
+    /**
+     * Create a manual backup
+     * Requirements: 18.3
+     */
+    async createBackup(data: import("@/types/admin").CreateBackupRequest): Promise<import("@/types/admin").CreateBackupResponse> {
+        return apiClient.post("/admin/backups", data)
+    },
+
+    /**
+     * Get backup schedules
+     * Requirements: 18.2
+     */
+    async getBackupSchedules(): Promise<import("@/types/admin").BackupScheduleListResponse> {
+        return apiClient.get("/admin/backups/schedule/list")
+    },
+
+    /**
+     * Update backup schedule
+     * Requirements: 18.2
+     */
+    async updateBackupSchedule(scheduleId: string, data: import("@/types/admin").UpdateBackupScheduleRequest): Promise<import("@/types/admin").UpdateBackupScheduleResponse> {
+        return apiClient.put(`/admin/backups/schedule?schedule_id=${scheduleId}`, data)
+    },
+
+    /**
+     * Request a restore from a backup
+     * Requirements: 18.4
+     */
+    async requestRestore(backupId: string, data?: import("@/types/admin").RestoreBackupRequest): Promise<import("@/types/admin").RestoreBackupResponse> {
+        return apiClient.post(`/admin/backups/${backupId}/restore`, data || {})
+    },
+
+    /**
+     * Approve a restore request (super_admin only)
+     * Requirements: 18.4
+     */
+    async approveRestore(restoreId: string): Promise<import("@/types/admin").ApproveRestoreResponse> {
+        return apiClient.post(`/admin/backups/restore/${restoreId}/approve`, {})
+    },
+
+    /**
+     * Reject a restore request (super_admin only)
+     * Requirements: 18.4
+     */
+    async rejectRestore(restoreId: string, data: import("@/types/admin").RejectRestoreRequest): Promise<import("@/types/admin").RejectRestoreResponse> {
+        return apiClient.post(`/admin/backups/restore/${restoreId}/reject`, data)
+    },
 }
 
 // Payment Gateway types for admin API - matches backend response exactly

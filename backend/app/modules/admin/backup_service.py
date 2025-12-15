@@ -284,17 +284,24 @@ class AdminBackupService:
             user_agent=user_agent,
         )
         
-        # In production, this would trigger an async job to perform the backup
-        # For now, simulate starting the backup
-        backup.status = BackupStatus.IN_PROGRESS.value
-        backup.started_at = datetime.utcnow()
-        await self.session.commit()
+        # Execute the actual backup using BackupWorker
+        from app.modules.admin.backup_worker import BackupWorker
+        
+        worker = BackupWorker(self.session)
+        success, error = await worker.execute_backup(backup)
+        
         await self.session.refresh(backup)
         
-        return CreateBackupResponse(
-            backup=self._backup_to_response(backup),
-            message="Backup initiated successfully",
-        )
+        if success:
+            return CreateBackupResponse(
+                backup=self._backup_to_response(backup),
+                message="Backup completed successfully",
+            )
+        else:
+            return CreateBackupResponse(
+                backup=self._backup_to_response(backup),
+                message=f"Backup failed: {error}",
+            )
     
     async def get_backup_schedules(self) -> BackupScheduleListResponse:
         """
@@ -563,11 +570,33 @@ class AdminBackupService:
             user_agent=user_agent,
         )
         
-        # In production, this would trigger the actual restore process
-        # For now, mark as in progress
+        # Start the actual restore process
         restore.status = RestoreStatus.IN_PROGRESS.value
         restore.started_at = datetime.utcnow()
         await self.session.commit()
+        
+        # Get the backup to restore from
+        backup_result = await self.session.execute(
+            select(Backup).where(Backup.id == restore.backup_id)
+        )
+        backup = backup_result.scalar_one_or_none()
+        
+        if backup and backup.location:
+            from pathlib import Path
+            from app.modules.admin.backup_worker import BackupWorker
+            
+            worker = BackupWorker(self.session)
+            success, error = await worker.execute_restore(backup, Path(backup.location))
+            
+            if success:
+                restore.status = RestoreStatus.COMPLETED.value
+                restore.completed_at = datetime.utcnow()
+            else:
+                restore.status = RestoreStatus.FAILED.value
+                restore.error_message = error
+            
+            await self.session.commit()
+        
         await self.session.refresh(restore)
         
         return ApproveRestoreResponse(

@@ -1179,3 +1179,151 @@ export interface CreateComplianceReportRequest {
     end_date?: string
     parameters?: Record<string, unknown>
 }
+
+
+// ==================== Backup & Disaster Recovery Types (Requirements 18.1-18.5) ====================
+
+export type BackupType = "full" | "incremental" | "differential"
+export type BackupStatus = "pending" | "in_progress" | "completed" | "failed" | "verified"
+export type RestoreStatus = "pending_approval" | "approved" | "rejected" | "in_progress" | "completed" | "failed" | "rolled_back"
+
+export interface Backup {
+    id: string
+    backup_type: BackupType
+    name: string
+    description: string | null
+    status: BackupStatus
+    progress: number
+    error_message: string | null
+    size_bytes: number | null
+    location: string | null
+    storage_provider: string
+    is_verified: boolean
+    verified_at: string | null
+    checksum: string | null
+    retention_days: number | null
+    expires_at: string | null
+    retry_count: number
+    max_retries: number
+    next_retry_at: string | null
+    initiated_by: string | null
+    is_scheduled: boolean
+    created_at: string
+    started_at: string | null
+    completed_at: string | null
+}
+
+export interface BackupListResponse {
+    items: Backup[]
+    total: number
+    page: number
+    page_size: number
+    total_pages: number
+    last_successful_backup: Backup | null
+}
+
+export interface CreateBackupRequest {
+    backup_type?: BackupType
+    name?: string
+    description?: string
+    storage_provider?: string
+    retention_days?: number
+}
+
+export interface CreateBackupResponse {
+    backup: Backup
+    message: string
+}
+
+export interface BackupSchedule {
+    id: string
+    name: string
+    backup_type: BackupType
+    frequency: string
+    cron_expression: string | null
+    retention_days: number
+    max_backups: number | null
+    storage_provider: string
+    storage_location: string | null
+    is_active: boolean
+    last_run_at: string | null
+    next_run_at: string | null
+    last_backup_id: string | null
+    configured_by: string
+    created_at: string
+    updated_at: string
+}
+
+export interface BackupScheduleListResponse {
+    items: BackupSchedule[]
+    total: number
+}
+
+export interface UpdateBackupScheduleRequest {
+    name?: string
+    backup_type?: BackupType
+    frequency?: "hourly" | "daily" | "weekly" | "monthly"
+    cron_expression?: string
+    retention_days?: number
+    max_backups?: number
+    storage_provider?: string
+    storage_location?: string
+    is_active?: boolean
+}
+
+export interface UpdateBackupScheduleResponse {
+    schedule: BackupSchedule
+    message: string
+}
+
+export interface BackupRestore {
+    id: string
+    backup_id: string
+    pre_restore_snapshot_id: string | null
+    status: RestoreStatus
+    progress: number
+    error_message: string | null
+    requested_by: string
+    approved_by: string | null
+    approved_at: string | null
+    rejection_reason: string | null
+    created_at: string
+    started_at: string | null
+    completed_at: string | null
+}
+
+export interface RestoreBackupRequest {
+    reason?: string
+}
+
+export interface RestoreBackupResponse {
+    restore: BackupRestore
+    message: string
+    requires_approval: boolean
+}
+
+export interface ApproveRestoreResponse {
+    restore: BackupRestore
+    message: string
+}
+
+export interface RejectRestoreRequest {
+    reason: string
+}
+
+export interface RejectRestoreResponse {
+    restore: BackupRestore
+    message: string
+}
+
+export interface BackupStatusSummary {
+    total_backups: number
+    successful_backups: number
+    failed_backups: number
+    pending_backups: number
+    total_size_bytes: number
+    last_backup: Backup | null
+    last_successful_backup: Backup | null
+    next_scheduled_backup: string | null
+    active_schedules: number
+}
