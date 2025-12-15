@@ -265,3 +265,25 @@ class AIInsightsResponse(BaseModel):
     generated_at: datetime
     period_start: date
     period_end: date
+
+
+class AnalyticsOverviewResponse(BaseModel):
+    """Response schema for analytics overview (simplified dashboard).
+    
+    Used by client dashboard home page.
+    """
+    total_views: int = 0
+    total_subscribers: int = 0
+    total_watch_time: int = 0  # in minutes
+    total_revenue: float = 0.0
+    views_change: float = 0.0  # percentage change
+    subscribers_change: float = 0.0  # percentage change
+    watch_time_change: float = 0.0  # percentage change
+    revenue_change: float = 0.0  # percentage change
+    period: str = "30d"
+
+
+class TimeSeriesDataPoint(BaseModel):
+    """Single data point for time series charts."""
+    date: str  # ISO format date string
+    value: int = 0

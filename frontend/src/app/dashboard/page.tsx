@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/dashboard";
 import { OverviewCard } from "@/components/dashboard/overview-card";
 import { QuickActions } from "@/components/dashboard/quick-actions";
@@ -7,27 +8,73 @@ import { RecentActivity } from "@/components/dashboard/recent-activity";
 import { PerformanceChart } from "@/components/dashboard/performance-chart";
 import { Users, Eye, DollarSign, Radio } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { analyticsApi, type AnalyticsOverview } from "@/lib/api/analytics";
+
+// Helper function to format numbers
+function formatNumber(num: number): string {
+    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
+    if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
+    return num.toString();
+}
+
+// Helper function to format currency
+function formatCurrency(num: number): string {
+    return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+    }).format(num);
+}
 
 export default function DashboardPage() {
     const { user } = useAuth();
+    const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
+    const [loading, setLoading] = useState(true);
 
-    // Mock data - will be replaced with real API data
+    useEffect(() => {
+        const loadOverview = async () => {
+            try {
+                const data = await analyticsApi.getOverview({ period: "30d" });
+                setOverview(data);
+            } catch (error) {
+                console.error("Failed to load analytics overview:", error);
+            } finally {
+                setLoading(false);
+            }
+        };
+        loadOverview();
+    }, []);
+
+    // Calculate stats from real API data
     const stats = {
         subscribers: {
-            value: "12,345",
-            trend: { value: 12.5, isPositive: true },
+            value: loading ? "..." : formatNumber(overview?.total_subscribers || 0),
+            trend: {
+                value: overview?.subscribers_change || 0,
+                isPositive: (overview?.subscribers_change || 0) >= 0
+            },
         },
         views: {
-            value: "1.2M",
-            trend: { value: 8.3, isPositive: true },
+            value: loading ? "..." : formatNumber(overview?.total_views || 0),
+            trend: {
+                value: overview?.views_change || 0,
+                isPositive: (overview?.views_change || 0) >= 0
+            },
         },
         revenue: {
-            value: "$4,231",
-            trend: { value: 15.2, isPositive: true },
+            value: loading ? "..." : formatCurrency(overview?.total_revenue || 0),
+            trend: {
+                value: overview?.revenue_change || 0,
+                isPositive: (overview?.revenue_change || 0) >= 0
+            },
         },
         activeStreams: {
-            value: "3",
-            trend: { value: 2.1, isPositive: false },
+            value: loading ? "..." : formatNumber(overview?.total_watch_time || 0),
+            trend: {
+                value: overview?.watch_time_change || 0,
+                isPositive: (overview?.watch_time_change || 0) >= 0
+            },
         },
     };
 
@@ -68,7 +115,7 @@ export default function DashboardPage() {
                         gradient="from-green-500 to-green-600"
                     />
                     <OverviewCard
-                        title="Active Streams"
+                        title="Watch Time (hrs)"
                         value={stats.activeStreams.value}
                         icon={Radio}
                         trend={stats.activeStreams.trend}

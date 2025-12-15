@@ -19,13 +19,17 @@ from app.core.middleware import (
 )
 from app.modules.auth.router import router as auth_router
 from app.modules.account import account_router
+from app.modules.video.router import router as video_router
 from app.modules.stream import router as stream_router
 from app.modules.ai.router import router as ai_router
+from app.modules.analytics.router import router as analytics_router
 from app.modules.competitor.router import router as competitor_router
+from app.modules.comment.router import router as comment_router
 from app.modules.monitoring import monitoring_router
 from app.modules.agent import agent_router
 from app.modules.job.router import router as job_router
 from app.modules.notification import notification_router
+from app.modules.strike.router import router as strike_router
 from app.modules.system_monitoring import system_monitoring_router
 from app.modules.security.router import router as security_router
 from app.modules.billing import router as billing_router
@@ -277,13 +281,17 @@ async def health_check() -> dict[str, str]:
 # Include routers
 app.include_router(auth_router, prefix=settings.API_V1_PREFIX)
 app.include_router(account_router, prefix=settings.API_V1_PREFIX)
+app.include_router(video_router, prefix=settings.API_V1_PREFIX)
 app.include_router(stream_router, prefix=settings.API_V1_PREFIX)
 app.include_router(ai_router, prefix=settings.API_V1_PREFIX)
+app.include_router(analytics_router, prefix=settings.API_V1_PREFIX)
 app.include_router(competitor_router, prefix=settings.API_V1_PREFIX)
+app.include_router(comment_router, prefix=settings.API_V1_PREFIX)
 app.include_router(monitoring_router, prefix=settings.API_V1_PREFIX)
 app.include_router(agent_router, prefix=settings.API_V1_PREFIX)
 app.include_router(job_router, prefix=settings.API_V1_PREFIX)
 app.include_router(notification_router, prefix=settings.API_V1_PREFIX)
+app.include_router(strike_router, prefix=settings.API_V1_PREFIX)
 app.include_router(system_monitoring_router, prefix=settings.API_V1_PREFIX)
 app.include_router(security_router, prefix=settings.API_V1_PREFIX)
 app.include_router(billing_router, prefix=settings.API_V1_PREFIX)

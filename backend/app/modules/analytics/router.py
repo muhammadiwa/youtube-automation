@@ -5,7 +5,7 @@ Requirements: 17.1, 17.2, 17.3, 17.4, 17.5, 18.1, 18.2, 18.3, 18.4, 18.5
 """
 
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -28,6 +28,8 @@ from app.modules.analytics.schemas import (
     AnalyticsSnapshotResponse,
     AIInsightsResponse,
     AIInsight,
+    AnalyticsOverviewResponse,
+    TimeSeriesDataPoint,
 )
 from app.modules.analytics.revenue_router import router as revenue_router
 
@@ -35,6 +37,223 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 # Include revenue sub-router
 router.include_router(revenue_router)
+
+
+def _parse_period_to_dates(period: str) -> tuple[date, date]:
+    """Convert period string to start and end dates."""
+    end_date = date.today()
+    if period == "7d":
+        start_date = end_date - timedelta(days=7)
+    elif period == "30d":
+        start_date = end_date - timedelta(days=30)
+    elif period == "90d":
+        start_date = end_date - timedelta(days=90)
+    elif period == "1y":
+        start_date = end_date - timedelta(days=365)
+    else:
+        start_date = end_date - timedelta(days=30)
+    return start_date, end_date
+
+
+@router.get("/overview", response_model=AnalyticsOverviewResponse)
+async def get_analytics_overview(
+    account_id: Optional[str] = Query(None, description="Filter by account ID"),
+    period: str = Query("30d", description="Period: 7d, 30d, 90d, 1y"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get analytics overview for dashboard.
+    
+    This endpoint provides a simplified overview with period-based filtering.
+    Used by the client dashboard home page.
+    
+    Requirements: 17.1, 17.2
+    """
+    service = AnalyticsService(db)
+    
+    # Parse period to dates
+    start_date, end_date = _parse_period_to_dates(period)
+    
+    # Parse account ID if provided
+    account_ids = None
+    if account_id:
+        try:
+            account_ids = [uuid.UUID(account_id)]
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid account ID format",
+            )
+    
+    try:
+        # Get dashboard metrics
+        user_id = uuid.uuid4()  # Placeholder - in production from auth
+        metrics = await service.get_dashboard_metrics(
+            user_id, start_date, end_date, account_ids
+        )
+        
+        # Calculate watch time change (compare with previous period)
+        period_days = (end_date - start_date).days + 1
+        comparison_end = start_date - timedelta(days=1)
+        comparison_start = comparison_end - timedelta(days=period_days - 1)
+        
+        comparison_metrics = await service.snapshot_repo.get_aggregated_metrics(
+            comparison_start, comparison_end, account_ids
+        )
+        
+        current_watch_time = metrics.total_watch_time_minutes
+        previous_watch_time = comparison_metrics.get("total_watch_time_minutes", 0)
+        
+        if previous_watch_time > 0:
+            watch_time_change = ((current_watch_time - previous_watch_time) / previous_watch_time) * 100
+        else:
+            watch_time_change = 100.0 if current_watch_time > 0 else 0.0
+        
+        return AnalyticsOverviewResponse(
+            total_views=metrics.total_views,
+            total_subscribers=metrics.total_subscribers,
+            total_watch_time=metrics.total_watch_time_minutes,
+            total_revenue=metrics.total_revenue,
+            views_change=metrics.views_change_percent,
+            subscribers_change=metrics.subscriber_change_percent,
+            watch_time_change=watch_time_change,
+            revenue_change=metrics.revenue_change_percent,
+            period=period,
+        )
+    except InvalidDateRangeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@router.get("/views/timeseries", response_model=list[TimeSeriesDataPoint])
+async def get_views_timeseries(
+    account_id: Optional[str] = Query(None, description="Filter by account ID"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    granularity: str = Query("day", description="Granularity: hour, day, week, month"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get views time series data for charts.
+    
+    Returns daily/weekly/monthly view counts for the specified period.
+    
+    Requirements: 17.1, 17.2
+    """
+    service = AnalyticsService(db)
+    
+    # Parse dates
+    if start_date and end_date:
+        try:
+            start = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end = datetime.strptime(end_date, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid date format. Use YYYY-MM-DD",
+            )
+    else:
+        end = date.today()
+        start = end - timedelta(days=30)
+    
+    # Parse account ID
+    account_ids = None
+    if account_id:
+        try:
+            account_ids = [uuid.UUID(account_id)]
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid account ID format",
+            )
+    
+    # Get snapshots for the date range
+    snapshots = await service.get_snapshots_by_date_range(start, end, account_ids)
+    
+    # Aggregate by date
+    views_by_date: dict[date, int] = {}
+    for snapshot in snapshots:
+        snapshot_date = snapshot.snapshot_date
+        if snapshot_date not in views_by_date:
+            views_by_date[snapshot_date] = 0
+        views_by_date[snapshot_date] += snapshot.total_views
+    
+    # Convert to time series format
+    result = []
+    current_date = start
+    while current_date <= end:
+        result.append(TimeSeriesDataPoint(
+            date=current_date.isoformat(),
+            value=views_by_date.get(current_date, 0),
+        ))
+        current_date += timedelta(days=1)
+    
+    return result
+
+
+@router.get("/subscribers/timeseries", response_model=list[TimeSeriesDataPoint])
+async def get_subscribers_timeseries(
+    account_id: Optional[str] = Query(None, description="Filter by account ID"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    granularity: str = Query("day", description="Granularity: hour, day, week, month"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get subscribers time series data for charts.
+    
+    Returns daily/weekly/monthly subscriber counts for the specified period.
+    
+    Requirements: 17.1, 17.2
+    """
+    service = AnalyticsService(db)
+    
+    # Parse dates
+    if start_date and end_date:
+        try:
+            start = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end = datetime.strptime(end_date, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid date format. Use YYYY-MM-DD",
+            )
+    else:
+        end = date.today()
+        start = end - timedelta(days=30)
+    
+    # Parse account ID
+    account_ids = None
+    if account_id:
+        try:
+            account_ids = [uuid.UUID(account_id)]
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid account ID format",
+            )
+    
+    # Get snapshots for the date range
+    snapshots = await service.get_snapshots_by_date_range(start, end, account_ids)
+    
+    # Aggregate by date (use subscriber_change for daily change)
+    subscribers_by_date: dict[date, int] = {}
+    for snapshot in snapshots:
+        snapshot_date = snapshot.snapshot_date
+        if snapshot_date not in subscribers_by_date:
+            subscribers_by_date[snapshot_date] = 0
+        subscribers_by_date[snapshot_date] += snapshot.subscriber_change
+    
+    # Convert to time series format
+    result = []
+    current_date = start
+    while current_date <= end:
+        result.append(TimeSeriesDataPoint(
+            date=current_date.isoformat(),
+            value=subscribers_by_date.get(current_date, 0),
+        ))
+        current_date += timedelta(days=1)
+    
+    return result
 
 
 @router.get("/dashboard", response_model=DashboardMetrics)
