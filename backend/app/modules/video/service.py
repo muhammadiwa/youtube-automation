@@ -193,6 +193,64 @@ class VideoService:
             account_id, status, limit, offset
         )
 
+    async def get_all_videos_paginated(
+        self,
+        user_id: uuid.UUID,
+        account_id: Optional[uuid.UUID] = None,
+        status: Optional[VideoStatus] = None,
+        visibility: Optional[str] = None,
+        search: Optional[str] = None,
+        sort_by: str = "date",
+        sort_order: str = "desc",
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[Video], int]:
+        """Get all videos for a user with pagination.
+
+        Args:
+            user_id: User UUID
+            account_id: Optional account filter
+            status: Optional status filter
+            visibility: Optional visibility filter
+            search: Optional search query
+            sort_by: Sort field (date, views, status)
+            sort_order: Sort order (asc, desc)
+            page: Page number
+            page_size: Items per page
+
+        Returns:
+            tuple: (list of videos, total count)
+        """
+        from app.modules.video.models import VideoVisibility
+
+        # Map frontend sort_by to database column
+        sort_mapping = {
+            "date": "created_at",
+            "views": "view_count",
+            "status": "status",
+        }
+        db_sort_by = sort_mapping.get(sort_by, "created_at")
+
+        # Parse visibility
+        visibility_enum = None
+        if visibility:
+            try:
+                visibility_enum = VideoVisibility(visibility)
+            except ValueError:
+                pass
+
+        return await self.video_repo.get_all_paginated(
+            user_id=user_id,
+            account_id=account_id,
+            status=status,
+            visibility=visibility_enum,
+            search=search,
+            sort_by=db_sort_by,
+            sort_order=sort_order,
+            page=page,
+            page_size=page_size,
+        )
+
     async def get_upload_progress(self, video_id: uuid.UUID) -> dict:
         """Get upload progress for a video.
 

@@ -4,13 +4,15 @@ Implements REST endpoints for video management.
 Requirements: 3.1, 3.2, 3.4, 3.5, 4.1, 4.2, 4.3, 4.4, 4.5
 """
 
+import math
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.modules.auth.jwt import get_current_user
 from app.modules.video.models import VideoStatus
 from app.modules.video.schemas import (
     VideoUploadRequest,
@@ -25,6 +27,7 @@ from app.modules.video.schemas import (
     VideoTemplateRequest,
     VideoTemplateResponse,
     ApplyTemplateRequest,
+    PaginatedVideoResponse,
 )
 from app.modules.video.service import (
     VideoService,
@@ -36,6 +39,57 @@ from app.modules.video.service import (
 )
 
 router = APIRouter(prefix="/videos", tags=["videos"])
+
+
+@router.get("", response_model=PaginatedVideoResponse)
+async def get_videos(
+    page: int = Query(1, ge=1, description="Page number"),
+    pageSize: int = Query(20, ge=1, le=100, alias="pageSize", description="Items per page"),
+    accountId: Optional[uuid.UUID] = Query(None, alias="accountId", description="Filter by account"),
+    status_filter: Optional[str] = Query(None, alias="status", description="Filter by status"),
+    visibility: Optional[str] = Query(None, description="Filter by visibility"),
+    search: Optional[str] = Query(None, description="Search in title/description"),
+    sortBy: str = Query("date", alias="sortBy", description="Sort field"),
+    sortOrder: str = Query("desc", alias="sortOrder", description="Sort order"),
+    current_user = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get paginated list of videos for the current user.
+
+    Returns all videos across all accounts owned by the authenticated user.
+    """
+    service = VideoService(db)
+    user_id = current_user.id
+
+    # Parse status filter
+    video_status = None
+    if status_filter:
+        try:
+            video_status = VideoStatus(status_filter)
+        except ValueError:
+            pass
+
+    videos, total = await service.get_all_videos_paginated(
+        user_id=user_id,
+        account_id=accountId,
+        status=video_status,
+        visibility=visibility,
+        search=search,
+        sort_by=sortBy,
+        sort_order=sortOrder,
+        page=page,
+        page_size=pageSize,
+    )
+
+    total_pages = math.ceil(total / pageSize) if total > 0 else 0
+
+    return PaginatedVideoResponse(
+        items=videos,
+        total=total,
+        page=page,
+        pageSize=pageSize,
+        totalPages=total_pages,
+    )
 
 
 @router.post("", response_model=UploadJobResponse, status_code=status.HTTP_201_CREATED)

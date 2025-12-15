@@ -11,7 +11,7 @@ from typing import Optional
 from celery import shared_task
 
 from app.core.celery_app import celery_app
-from app.core.database import get_async_session
+from app.core.database import get_db as get_async_session
 
 
 @celery_app.task(

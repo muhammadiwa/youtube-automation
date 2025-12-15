@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { DashboardLayout } from "@/components/dashboard"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
     Dialog,
     DialogContent,
@@ -31,12 +32,14 @@ import {
     CheckCircle,
     AlertTriangle,
     TrendingUp,
+    PartyPopper,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export default function AccountDetailPage() {
     const params = useParams()
     const router = useRouter()
+    const searchParams = useSearchParams()
     const accountId = params.id as string
 
     const [account, setAccount] = useState<YouTubeAccount | null>(null)
@@ -46,10 +49,21 @@ export default function AccountDetailPage() {
     const [refreshing, setRefreshing] = useState(false)
     const [disconnectDialogOpen, setDisconnectDialogOpen] = useState(false)
     const [disconnecting, setDisconnecting] = useState(false)
+    const [showConnectedAlert, setShowConnectedAlert] = useState(false)
+    const [connectedChannel, setConnectedChannel] = useState<string | null>(null)
 
     useEffect(() => {
+        // Check if this is a redirect from OAuth callback
+        const connected = searchParams.get("connected")
+        const channel = searchParams.get("channel")
+        if (connected === "true") {
+            setShowConnectedAlert(true)
+            setConnectedChannel(channel ? decodeURIComponent(channel) : null)
+            // Clear the query params from URL
+            window.history.replaceState({}, "", `/dashboard/accounts/${accountId}`)
+        }
         loadAccountData()
-    }, [accountId])
+    }, [accountId, searchParams])
 
     const loadAccountData = async () => {
         try {
@@ -161,42 +175,61 @@ export default function AccountDetailPage() {
         )
     }
 
-    const status = statusConfig[account.status]
+    const status = statusConfig[account.status] || statusConfig.error
     const StatusIcon = status.icon
+
+    // Safe access to account properties with fallbacks
+    const channelTitle = account.channelTitle || "Unknown Channel"
+    const channelId = account.channelId || "N/A"
+    const thumbnailUrl = account.thumbnailUrl || ""
+    const subscriberCount = account.subscriberCount ?? 0
+    const videoCount = account.videoCount ?? 0
+    const strikeCount = account.strikeCount ?? 0
 
     return (
         <DashboardLayout
             breadcrumbs={[
                 { label: "Dashboard", href: "/dashboard" },
                 { label: "Accounts", href: "/dashboard/accounts" },
-                { label: account.channelTitle },
+                { label: channelTitle },
             ]}
         >
             <div className="space-y-6">
+                {/* Success Alert for newly connected account */}
+                {showConnectedAlert && (
+                    <Alert className="bg-green-500/10 border-green-500/20">
+                        <PartyPopper className="h-4 w-4 text-green-500" />
+                        <AlertTitle className="text-green-600 dark:text-green-400">Account Connected Successfully!</AlertTitle>
+                        <AlertDescription className="text-green-600/80 dark:text-green-400/80">
+                            {connectedChannel ? `"${connectedChannel}" has been connected to your account.` : "Your YouTube account has been connected successfully."} You can now manage your channel from this dashboard.
+                        </AlertDescription>
+                    </Alert>
+                )}
+
                 {/* Header */}
                 <Card>
                     <CardContent className="p-6">
                         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
                             <Avatar className="h-20 w-20">
-                                <AvatarImage src={account.thumbnailUrl} alt={account.channelTitle} />
-                                <AvatarFallback>{account.channelTitle.substring(0, 2).toUpperCase()}</AvatarFallback>
+                                <AvatarImage src={thumbnailUrl} alt={channelTitle} />
+                                <AvatarFallback>{channelTitle.substring(0, 2).toUpperCase()}</AvatarFallback>
                             </Avatar>
 
                             <div className="flex-1 space-y-2">
                                 <div className="flex items-center gap-2">
-                                    <h1 className="text-2xl font-bold">{account.channelTitle}</h1>
+                                    <h1 className="text-2xl font-bold">{channelTitle}</h1>
                                     <Badge variant={status.badgeVariant} className="flex items-center gap-1">
                                         <StatusIcon className="h-3 w-3" />
                                         {status.label}
                                     </Badge>
                                 </div>
                                 <p className="text-sm text-muted-foreground">
-                                    Channel ID: {account.channelId}
+                                    Channel ID: {channelId}
                                 </p>
                                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                     <Clock className="h-4 w-4" />
                                     <span>
-                                        Last synced: {new Date(account.lastSyncAt).toLocaleString()}
+                                        Last synced: {account.lastSyncAt ? new Date(account.lastSyncAt).toLocaleString() : "Never"}
                                     </span>
                                 </div>
                             </div>
@@ -231,7 +264,7 @@ export default function AccountDetailPage() {
                         </CardHeader>
                         <CardContent>
                             <div className="text-2xl font-bold">
-                                {account.subscriberCount.toLocaleString()}
+                                {subscriberCount.toLocaleString()}
                             </div>
                         </CardContent>
                     </Card>
@@ -243,7 +276,7 @@ export default function AccountDetailPage() {
                         </CardHeader>
                         <CardContent>
                             <div className="text-2xl font-bold">
-                                {account.videoCount.toLocaleString()}
+                                {videoCount.toLocaleString()}
                             </div>
                         </CardContent>
                     </Card>
@@ -298,7 +331,7 @@ export default function AccountDetailPage() {
                         <div className="flex items-center justify-between">
                             <span className="text-sm font-medium">Expires At</span>
                             <span className="text-sm text-muted-foreground">
-                                {new Date(account.tokenExpiresAt).toLocaleString()}
+                                {account.tokenExpiresAt ? new Date(account.tokenExpiresAt).toLocaleString() : "Unknown"}
                             </span>
                         </div>
                         {account.status === "expired" && (
@@ -348,7 +381,7 @@ export default function AccountDetailPage() {
                         <CardDescription>YouTube community guidelines strikes</CardDescription>
                     </CardHeader>
                     <CardContent>
-                        {account.strikeCount === 0 ? (
+                        {strikeCount === 0 ? (
                             <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/20 rounded-md">
                                 <CheckCircle className="h-4 w-4 text-green-500" />
                                 <p className="text-sm text-green-600 dark:text-green-400">
@@ -360,7 +393,7 @@ export default function AccountDetailPage() {
                                 <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-md">
                                     <AlertCircle className="h-4 w-4 text-red-500" />
                                     <p className="text-sm text-red-600 dark:text-red-400">
-                                        {account.strikeCount} active strike{account.strikeCount > 1 ? "s" : ""} on this account.
+                                        {strikeCount} active strike{strikeCount > 1 ? "s" : ""} on this account.
                                     </p>
                                 </div>
                                 <p className="text-sm text-muted-foreground">
@@ -381,7 +414,7 @@ export default function AccountDetailPage() {
                     <DialogHeader>
                         <DialogTitle>Disconnect Account</DialogTitle>
                         <DialogDescription>
-                            Are you sure you want to disconnect {account.channelTitle}? This will remove all
+                            Are you sure you want to disconnect {channelTitle}? This will remove all
                             associated data and you'll need to reconnect to use this account again.
                         </DialogDescription>
                     </DialogHeader>

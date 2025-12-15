@@ -10,7 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_async_session
+from app.core.database import get_db as get_async_session
 from app.modules.strike.service import (
     StrikeService,
     StrikeServiceError,

@@ -246,8 +246,7 @@ async def get_current_user(
     Raises:
         HTTPException: If token is invalid or user not found
     """
-    from sqlalchemy.ext.asyncio import AsyncSession
-    from app.core.database import get_db
+    from app.core.database import async_session_maker
     from app.modules.auth.repository import UserRepository
     
     token = credentials.credentials
@@ -264,8 +263,8 @@ async def get_current_user(
     # Get user from database
     user_id = uuid.UUID(payload.sub)
     
-    # Get database session
-    async for db in get_db():
+    # Get database session properly
+    async with async_session_maker() as db:
         user_repo = UserRepository(db)
         user = await user_repo.get_by_id(user_id)
         

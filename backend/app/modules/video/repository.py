@@ -452,6 +452,91 @@ class VideoRepository:
         result = await self.session.execute(query)
         return result.scalar_one() or 0
 
+    async def get_all_paginated(
+        self,
+        user_id: uuid.UUID,
+        account_id: Optional[uuid.UUID] = None,
+        status: Optional[VideoStatus] = None,
+        visibility: Optional[VideoVisibility] = None,
+        search: Optional[str] = None,
+        sort_by: str = "created_at",
+        sort_order: str = "desc",
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[Video], int]:
+        """Get all videos for a user with pagination and filters.
+
+        Args:
+            user_id: User UUID (to filter by user's accounts)
+            account_id: Optional account filter
+            status: Optional status filter
+            visibility: Optional visibility filter
+            search: Optional search query for title/description
+            sort_by: Field to sort by (created_at, view_count, status)
+            sort_order: Sort order (asc, desc)
+            page: Page number (1-indexed)
+            page_size: Number of items per page
+
+        Returns:
+            tuple: (list of videos, total count)
+        """
+        from app.modules.account.models import YouTubeAccount
+
+        # Base query - join with accounts to filter by user
+        base_query = (
+            select(Video)
+            .join(YouTubeAccount, Video.account_id == YouTubeAccount.id)
+            .where(YouTubeAccount.user_id == user_id)
+        )
+        count_query = (
+            select(sql_func.count(Video.id))
+            .join(YouTubeAccount, Video.account_id == YouTubeAccount.id)
+            .where(YouTubeAccount.user_id == user_id)
+        )
+
+        # Apply filters
+        if account_id:
+            base_query = base_query.where(Video.account_id == account_id)
+            count_query = count_query.where(Video.account_id == account_id)
+
+        if status:
+            base_query = base_query.where(Video.status == status.value)
+            count_query = count_query.where(Video.status == status.value)
+
+        if visibility:
+            base_query = base_query.where(Video.visibility == visibility.value)
+            count_query = count_query.where(Video.visibility == visibility.value)
+
+        if search:
+            search_filter = f"%{search}%"
+            base_query = base_query.where(
+                (Video.title.ilike(search_filter)) | (Video.description.ilike(search_filter))
+            )
+            count_query = count_query.where(
+                (Video.title.ilike(search_filter)) | (Video.description.ilike(search_filter))
+            )
+
+        # Get total count
+        count_result = await self.session.execute(count_query)
+        total = count_result.scalar_one() or 0
+
+        # Apply sorting
+        sort_column = getattr(Video, sort_by, Video.created_at)
+        if sort_order == "desc":
+            base_query = base_query.order_by(sort_column.desc())
+        else:
+            base_query = base_query.order_by(sort_column.asc())
+
+        # Apply pagination
+        offset = (page - 1) * page_size
+        base_query = base_query.offset(offset).limit(page_size)
+
+        # Execute query
+        result = await self.session.execute(base_query)
+        videos = list(result.scalars().all())
+
+        return videos, total
+
 
 class VideoTemplateRepository:
     """Repository for VideoTemplate CRUD operations."""

@@ -26,20 +26,10 @@ from app.modules.account.service import (
     AccountNotFoundError,
     YouTubeAccountService,
 )
+from app.modules.auth.jwt import get_current_user
+from app.modules.auth.models import User
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
-
-
-# Dependency for getting current user ID
-# In production, this would extract from JWT token
-async def get_current_user_id() -> uuid.UUID:
-    """Get current authenticated user ID.
-    
-    This is a placeholder. In production, extract from JWT token.
-    """
-    # TODO: Implement proper JWT extraction
-    # For now, return a placeholder UUID for testing
-    return uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 @router.post(
@@ -58,12 +48,12 @@ async def get_current_user_id() -> uuid.UUID:
     """,
 )
 async def initiate_oauth(
-    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OAuthInitiateResponse:
     """Initiate OAuth2 flow for YouTube account connection."""
     service = YouTubeAccountService(session)
-    return await service.initiate_oauth(user_id)
+    return await service.initiate_oauth(current_user.id)
 
 
 @router.get(
@@ -89,24 +79,36 @@ async def oauth_callback(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> RedirectResponse:
     """Handle OAuth2 callback from YouTube."""
+    from urllib.parse import quote
+    from app.core.config import settings
+    
+    # Get frontend URL from CORS origins (first one is typically frontend)
+    frontend_url = settings.cors_origins_list[0] if settings.cors_origins_list else "http://localhost:3000"
+    
     service = YouTubeAccountService(session)
     
     try:
         account = await service.handle_oauth_callback(code, state)
-        # Redirect to frontend success page
+        # Redirect to frontend success page with account ID
         return RedirectResponse(
-            url=f"/accounts/connect/success?channel={account.channel_title}",
+            url=f"{frontend_url}/dashboard/accounts/{account.id}?connected=true&channel={quote(account.channel_title)}",
             status_code=status.HTTP_302_FOUND,
         )
     except OAuthError as e:
         # Redirect to frontend error page
         return RedirectResponse(
-            url=f"/accounts/connect/error?message={str(e)}",
+            url=f"{frontend_url}/dashboard/accounts?error={quote(str(e))}",
             status_code=status.HTTP_302_FOUND,
         )
     except AccountExistsError as e:
         return RedirectResponse(
-            url=f"/accounts/connect/error?message={str(e)}",
+            url=f"{frontend_url}/dashboard/accounts?error={quote(str(e))}",
+            status_code=status.HTTP_302_FOUND,
+        )
+    except Exception as e:
+        # Handle any unexpected errors
+        return RedirectResponse(
+            url=f"{frontend_url}/dashboard/accounts?error={quote('Failed to connect account. Please try again.')}",
             status_code=status.HTTP_302_FOUND,
         )
 
@@ -123,12 +125,12 @@ async def oauth_callback(
     """,
 )
 async def list_accounts(
-    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AccountListResponse:
     """List all connected YouTube accounts for the current user."""
     service = YouTubeAccountService(session)
-    accounts = await service.get_user_accounts(user_id)
+    accounts = await service.get_user_accounts(current_user.id)
     
     return AccountListResponse(
         accounts=[

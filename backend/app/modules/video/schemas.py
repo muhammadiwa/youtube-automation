@@ -94,26 +94,27 @@ class VideoResponse(BaseModel):
     """Response schema for video."""
 
     id: uuid.UUID
-    account_id: uuid.UUID
-    youtube_id: Optional[str]
+    account_id: uuid.UUID = Field(alias="accountId", serialization_alias="accountId")
+    youtube_id: Optional[str] = Field(alias="youtubeId", serialization_alias="youtubeId", default=None)
     title: str
-    description: Optional[str]
-    tags: Optional[list[str]]
-    category_id: Optional[str]
-    thumbnail_url: Optional[str]
+    description: Optional[str] = None
+    tags: Optional[list[str]] = None
+    category_id: Optional[str] = Field(alias="categoryId", serialization_alias="categoryId", default=None)
+    thumbnail_url: Optional[str] = Field(alias="thumbnailUrl", serialization_alias="thumbnailUrl", default=None)
     visibility: str
-    scheduled_publish_at: Optional[datetime]
-    published_at: Optional[datetime]
-    view_count: int
-    like_count: int
-    comment_count: int
+    scheduled_publish_at: Optional[datetime] = Field(alias="scheduledPublishAt", serialization_alias="scheduledPublishAt", default=None)
+    published_at: Optional[datetime] = Field(alias="publishedAt", serialization_alias="publishedAt", default=None)
+    view_count: int = Field(alias="viewCount", serialization_alias="viewCount", default=0)
+    like_count: int = Field(alias="likeCount", serialization_alias="likeCount", default=0)
+    comment_count: int = Field(alias="commentCount", serialization_alias="commentCount", default=0)
     status: str
-    upload_progress: int
-    created_at: datetime
-    updated_at: datetime
+    upload_progress: int = Field(alias="uploadProgress", serialization_alias="uploadProgress", default=0)
+    created_at: datetime = Field(alias="createdAt", serialization_alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt", serialization_alias="updatedAt")
 
     class Config:
         from_attributes = True
+        populate_by_name = True
 
 
 class MetadataVersionResponse(BaseModel):
@@ -208,3 +209,17 @@ class ApplyTemplateRequest(BaseModel):
     """Request schema for applying template to video."""
 
     template_id: uuid.UUID
+
+
+class PaginatedVideoResponse(BaseModel):
+    """Response schema for paginated video list."""
+
+    items: list[VideoResponse]
+    total: int
+    page: int
+    page_size: int = Field(alias="pageSize")
+    total_pages: int = Field(alias="totalPages")
+
+    class Config:
+        from_attributes = True
+        populate_by_name = True
