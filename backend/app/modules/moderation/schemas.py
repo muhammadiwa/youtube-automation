@@ -50,6 +50,7 @@ class ModerationRuleUpdate(BaseModel):
 
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = None
+    rule_type: Optional[RuleType] = None
     pattern: Optional[str] = None
     keywords: Optional[list[str]] = None
     settings: Optional[dict] = None
@@ -57,9 +58,10 @@ class ModerationRuleUpdate(BaseModel):
     min_message_length: Optional[int] = Field(default=None, ge=1)
     action_type: Optional[ModerationActionType] = None
     severity: Optional[SeverityLevel] = None
-    timeout_duration_seconds: Optional[int] = Field(default=None, ge=1)
+    timeout_duration_seconds: Optional[int] = Field(default=None)
     is_enabled: Optional[bool] = None
     priority: Optional[int] = Field(default=None, ge=0)
+    account_id: Optional[uuid.UUID] = None  # Allow but ignore in update
 
 
 class ModerationRuleResponse(ModerationRuleBase):

@@ -751,6 +751,19 @@ class StreamService:
 
         await self.session.commit()
         
+        # Start live chat moderation
+        try:
+            if event.youtube_broadcast_id:
+                from app.modules.moderation.chat_worker import start_moderation_for_broadcast
+                await start_moderation_for_broadcast(
+                    account_id=event.account_id,
+                    broadcast_id=event.youtube_broadcast_id,
+                    session_id=session.id,
+                )
+                logger.info(f"Started live chat moderation for broadcast {event.youtube_broadcast_id}")
+        except Exception as e:
+            logger.error(f"Failed to start live chat moderation: {e}")
+        
         # Send notification
         try:
             from app.modules.notification.integration import NotificationIntegrationService
@@ -803,6 +816,18 @@ class StreamService:
         await self.event_repository.set_status(event, LiveEventStatus.ENDED)
 
         await self.session.commit()
+        
+        # Stop live chat moderation
+        try:
+            if event.youtube_broadcast_id:
+                from app.modules.moderation.chat_worker import stop_moderation_for_broadcast
+                await stop_moderation_for_broadcast(
+                    account_id=event.account_id,
+                    broadcast_id=event.youtube_broadcast_id,
+                )
+                logger.info(f"Stopped live chat moderation for broadcast {event.youtube_broadcast_id}")
+        except Exception as e:
+            logger.error(f"Failed to stop live chat moderation: {e}")
         
         # Send notification
         try:

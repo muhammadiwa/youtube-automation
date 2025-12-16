@@ -18,6 +18,8 @@ import {
     Ban,
     Clock,
     CheckCircle2,
+    ChevronLeft,
+    ChevronRight,
 } from "lucide-react"
 import { DashboardLayout } from "@/components/dashboard"
 import { Button } from "@/components/ui/button"
@@ -43,6 +45,7 @@ import {
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useToast } from "@/components/ui/toast"
 import { moderationApi, type ModerationRule, type CreateModerationRuleRequest, type RuleType, type ActionType, type SeverityLevel } from "@/lib/api/moderation"
 import { accountsApi } from "@/lib/api/accounts"
 import type { YouTubeAccount } from "@/types"
@@ -282,6 +285,7 @@ const RULE_TEMPLATES: RuleTemplate[] = [
 ]
 
 export default function ModerationSettingsPage() {
+    const { addToast } = useToast()
     const [rules, setRules] = useState<ModerationRule[]>([])
     const [accounts, setAccounts] = useState<YouTubeAccount[]>([])
     const [loading, setLoading] = useState(true)
@@ -294,6 +298,12 @@ export default function ModerationSettingsPage() {
     const [previewTemplate, setPreviewTemplate] = useState<RuleTemplate | null>(null)
     const [applyingTemplate, setApplyingTemplate] = useState(false)
     const [selectedTemplateAccount, setSelectedTemplateAccount] = useState<string>("")
+
+    // Pagination state
+    const [currentPage, setCurrentPage] = useState(1)
+    const [totalPages, setTotalPages] = useState(1)
+    const [totalItems, setTotalItems] = useState(0)
+    const pageSize = 10
 
     // Form state
     const [formData, setFormData] = useState<CreateModerationRuleRequest>({
@@ -329,11 +339,18 @@ export default function ModerationSettingsPage() {
     }, [])
 
     // Function to load rules
-    const loadRules = async () => {
+    const loadRules = async (page: number = currentPage) => {
         try {
             setLoading(true)
-            const data = await moderationApi.getRules(accountFilter !== "all" ? accountFilter : undefined)
-            setRules(data)
+            const data = await moderationApi.getRules({
+                accountId: accountFilter !== "all" ? accountFilter : undefined,
+                page,
+                pageSize,
+            })
+            setRules(data.items)
+            setTotalPages(data.total_pages)
+            setTotalItems(data.total)
+            setCurrentPage(data.page)
         } catch (error) {
             console.error("[ModerationSettings] Failed to load rules:", error)
         } finally {
@@ -343,9 +360,16 @@ export default function ModerationSettingsPage() {
 
     // Load rules when account filter changes
     useEffect(() => {
-        loadRules()
+        setCurrentPage(1)
+        loadRules(1)
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [accountFilter])
+
+    // Handle page change
+    const handlePageChange = (page: number) => {
+        setCurrentPage(page)
+        loadRules(page)
+    }
 
     const filteredRules = rules.filter((rule) => {
         if (!searchQuery) return true
@@ -398,17 +422,17 @@ export default function ModerationSettingsPage() {
 
     const handleSave = async () => {
         if (!formData.name || !formData.account_id) {
-            alert("Please fill in all required fields")
+            addToast({ type: "error", title: "Validation Error", description: "Please fill in all required fields" })
             return
         }
 
         // Validate pattern/keywords based on rule type
         if (formData.rule_type === "keyword" && (!formData.keywords || formData.keywords.length === 0)) {
-            alert("Please enter at least one keyword")
+            addToast({ type: "error", title: "Validation Error", description: "Please enter at least one keyword" })
             return
         }
         if (formData.rule_type === "regex" && !formData.pattern) {
-            alert("Please enter a regex pattern")
+            addToast({ type: "error", title: "Validation Error", description: "Please enter a regex pattern" })
             return
         }
 
@@ -416,14 +440,16 @@ export default function ModerationSettingsPage() {
             setSaving(true)
             if (editingRule) {
                 await moderationApi.updateRule(editingRule.id, formData)
+                addToast({ type: "success", title: "Rule Updated", description: `"${formData.name}" has been updated successfully.` })
             } else {
                 await moderationApi.createRule(formData)
+                addToast({ type: "success", title: "Rule Created", description: `"${formData.name}" has been created successfully.` })
             }
             setDialogOpen(false)
             loadRules()
         } catch (error) {
             console.error("Failed to save rule:", error)
-            alert("Failed to save rule")
+            addToast({ type: "error", title: "Error", description: "Failed to save rule. Please try again." })
         } finally {
             setSaving(false)
         }
@@ -434,8 +460,10 @@ export default function ModerationSettingsPage() {
         try {
             await moderationApi.deleteRule(ruleId)
             loadRules()
+            addToast({ type: "success", title: "Rule Deleted", description: "The rule has been deleted successfully." })
         } catch (error) {
             console.error("Failed to delete rule:", error)
+            addToast({ type: "error", title: "Error", description: "Failed to delete rule. Please try again." })
         }
     }
 
@@ -483,26 +511,61 @@ export default function ModerationSettingsPage() {
 
     const handleApplyTemplate = async (template: RuleTemplate) => {
         if (!selectedTemplateAccount) {
-            alert("Please select an account to apply the template")
+            addToast({ type: "warning", title: "Select Account", description: "Please select an account to apply the template" })
             return
         }
 
         try {
             setApplyingTemplate(true)
-            // Create all rules from template
+
+            let createdCount = 0
+            let skippedCount = 0
+
+            // Try to create each rule - backend will reject duplicates with 409
             for (const rule of template.rules) {
-                await moderationApi.createRule({
-                    ...rule,
-                    account_id: selectedTemplateAccount,
-                })
+                try {
+                    await moderationApi.createRule({
+                        ...rule,
+                        account_id: selectedTemplateAccount,
+                    })
+                    createdCount++
+                } catch (error: unknown) {
+                    // Check if it's a 409 Conflict (duplicate)
+                    const err = error as { status?: number }
+                    if (err.status === 409) {
+                        skippedCount++
+                    } else {
+                        throw error // Re-throw other errors
+                    }
+                }
             }
+
             setPreviewTemplate(null)
             setSelectedTemplateAccount("")
-            loadRules()
-            alert(`Successfully applied "${template.name}" template with ${template.rules.length} rules!`)
+            loadRules(1)
+
+            if (createdCount === 0) {
+                addToast({
+                    type: "warning",
+                    title: "Template Already Applied",
+                    description: `All ${template.rules.length} rules from "${template.name}" already exist for this account.`
+                })
+            } else if (skippedCount > 0) {
+                addToast({
+                    type: "success",
+                    title: "Template Applied",
+                    description: `Added ${createdCount} new rules. Skipped ${skippedCount} duplicate rules.`
+                })
+            } else {
+                addToast({
+                    type: "success",
+                    title: "Template Applied",
+                    description: `Successfully applied "${template.name}" template with ${createdCount} rules!`
+                })
+            }
         } catch (error) {
             console.error("Failed to apply template:", error)
-            alert("Failed to apply template. Some rules may have been created.")
+            addToast({ type: "error", title: "Error", description: "Failed to apply template. Some rules may have been created." })
         } finally {
             setApplyingTemplate(false)
         }
@@ -683,6 +746,60 @@ export default function ModerationSettingsPage() {
                                 </Card>
                             )
                         })}
+                    </div>
+                )}
+
+                {/* Pagination */}
+                {!loading && totalPages > 1 && (
+                    <div className="flex items-center justify-between mt-4">
+                        <p className="text-sm text-muted-foreground">
+                            Showing {((currentPage - 1) * pageSize) + 1} to {Math.min(currentPage * pageSize, totalItems)} of {totalItems} rules
+                        </p>
+                        <div className="flex items-center gap-2">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handlePageChange(currentPage - 1)}
+                                disabled={currentPage <= 1}
+                            >
+                                <ChevronLeft className="h-4 w-4" />
+                                Previous
+                            </Button>
+                            <div className="flex items-center gap-1">
+                                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                                    let pageNum: number
+                                    if (totalPages <= 5) {
+                                        pageNum = i + 1
+                                    } else if (currentPage <= 3) {
+                                        pageNum = i + 1
+                                    } else if (currentPage >= totalPages - 2) {
+                                        pageNum = totalPages - 4 + i
+                                    } else {
+                                        pageNum = currentPage - 2 + i
+                                    }
+                                    return (
+                                        <Button
+                                            key={pageNum}
+                                            variant={currentPage === pageNum ? "default" : "outline"}
+                                            size="sm"
+                                            className="w-8 h-8 p-0"
+                                            onClick={() => handlePageChange(pageNum)}
+                                        >
+                                            {pageNum}
+                                        </Button>
+                                    )
+                                })}
+                            </div>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handlePageChange(currentPage + 1)}
+                                disabled={currentPage >= totalPages}
+                            >
+                                Next
+                                <ChevronRight className="h-4 w-4" />
+                            </Button>
+                        </div>
                     </div>
                 )}
 

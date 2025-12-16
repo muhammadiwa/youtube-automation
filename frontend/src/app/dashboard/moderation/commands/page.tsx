@@ -15,11 +15,12 @@ import {
     Eye,
     Sparkles,
     CheckCircle2,
-    MessageCircle,
     HelpCircle,
     Heart,
     Gamepad2,
     Info,
+    ChevronLeft,
+    ChevronRight,
 } from "lucide-react"
 import { DashboardLayout } from "@/components/dashboard"
 import { Button } from "@/components/ui/button"
@@ -45,6 +46,7 @@ import {
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useToast } from "@/components/ui/toast"
 import { moderationApi, type CustomCommand, type CreateCustomCommandRequest } from "@/lib/api/moderation"
 import { accountsApi } from "@/lib/api/accounts"
 import type { YouTubeAccount } from "@/types"
@@ -281,6 +283,7 @@ const COMMAND_TEMPLATES: CommandTemplate[] = [
 ]
 
 export default function CustomCommandsPage() {
+    const { addToast } = useToast()
     const [commands, setCommands] = useState<CustomCommand[]>([])
     const [accounts, setAccounts] = useState<YouTubeAccount[]>([])
     const [loading, setLoading] = useState(true)
@@ -293,6 +296,12 @@ export default function CustomCommandsPage() {
     const [previewTemplate, setPreviewTemplate] = useState<CommandTemplate | null>(null)
     const [applyingTemplate, setApplyingTemplate] = useState(false)
     const [selectedTemplateAccount, setSelectedTemplateAccount] = useState<string>("")
+
+    // Pagination state
+    const [currentPage, setCurrentPage] = useState(1)
+    const [totalPages, setTotalPages] = useState(1)
+    const [totalItems, setTotalItems] = useState(0)
+    const pageSize = 10
 
     // Form state - using backend field names
     const [formData, setFormData] = useState<CreateCustomCommandRequest>({
@@ -329,13 +338,18 @@ export default function CustomCommandsPage() {
     }, [])
 
     // Function to load commands
-    const loadCommands = async () => {
+    const loadCommands = async (page: number = currentPage) => {
         try {
             setLoading(true)
-            const data = await moderationApi.getCustomCommands(
-                accountFilter !== "all" ? accountFilter : undefined
-            )
-            setCommands(data)
+            const data = await moderationApi.getCustomCommands({
+                accountId: accountFilter !== "all" ? accountFilter : undefined,
+                page,
+                pageSize,
+            })
+            setCommands(data.items)
+            setTotalPages(data.total_pages)
+            setTotalItems(data.total)
+            setCurrentPage(data.page)
         } catch (error) {
             console.error("[CustomCommands] Failed to load commands:", error)
         } finally {
@@ -343,9 +357,16 @@ export default function CustomCommandsPage() {
         }
     }
 
+    // Handle page change
+    const handlePageChange = (page: number) => {
+        setCurrentPage(page)
+        loadCommands(page)
+    }
+
     // Load commands when account filter changes
     useEffect(() => {
-        loadCommands()
+        setCurrentPage(1)
+        loadCommands(1)
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [accountFilter])
 
@@ -404,7 +425,7 @@ export default function CustomCommandsPage() {
 
     const handleSave = async () => {
         if (!formData.trigger || !formData.response_text || !formData.account_id) {
-            alert("Please fill in all required fields")
+            addToast({ type: "error", title: "Validation Error", description: "Please fill in all required fields" })
             return
         }
 
@@ -420,17 +441,19 @@ export default function CustomCommandsPage() {
                     ...formData,
                     trigger,
                 })
+                addToast({ type: "success", title: "Command Updated", description: `"${trigger}" has been updated successfully.` })
             } else {
                 await moderationApi.createCustomCommand({
                     ...formData,
                     trigger,
                 })
+                addToast({ type: "success", title: "Command Created", description: `"${trigger}" has been created successfully.` })
             }
             setDialogOpen(false)
             loadCommands()
         } catch (error) {
             console.error("Failed to save command:", error)
-            alert("Failed to save command")
+            addToast({ type: "error", title: "Error", description: "Failed to save command. Please try again." })
         } finally {
             setSaving(false)
         }
@@ -441,8 +464,10 @@ export default function CustomCommandsPage() {
         try {
             await moderationApi.deleteCustomCommand(commandId)
             loadCommands()
+            addToast({ type: "success", title: "Command Deleted", description: "The command has been deleted successfully." })
         } catch (error) {
             console.error("Failed to delete command:", error)
+            addToast({ type: "error", title: "Error", description: "Failed to delete command. Please try again." })
         }
     }
 
@@ -474,25 +499,61 @@ export default function CustomCommandsPage() {
 
     const handleApplyTemplate = async (template: CommandTemplate) => {
         if (!selectedTemplateAccount) {
-            alert("Please select an account to apply the template")
+            addToast({ type: "warning", title: "Select Account", description: "Please select an account to apply the template" })
             return
         }
 
         try {
             setApplyingTemplate(true)
+
+            let createdCount = 0
+            let skippedCount = 0
+
+            // Try to create each command - backend will reject duplicates with 409
             for (const cmd of template.commands) {
-                await moderationApi.createCustomCommand({
-                    ...cmd,
-                    account_id: selectedTemplateAccount,
-                })
+                try {
+                    await moderationApi.createCustomCommand({
+                        ...cmd,
+                        account_id: selectedTemplateAccount,
+                    })
+                    createdCount++
+                } catch (error: unknown) {
+                    // Check if it's a 409 Conflict (duplicate)
+                    const err = error as { status?: number }
+                    if (err.status === 409) {
+                        skippedCount++
+                    } else {
+                        throw error // Re-throw other errors
+                    }
+                }
             }
+
             setPreviewTemplate(null)
             setSelectedTemplateAccount("")
-            loadCommands()
-            alert(`Successfully applied "${template.name}" template with ${template.commands.length} commands!`)
+            loadCommands(1)
+
+            if (createdCount === 0) {
+                addToast({
+                    type: "warning",
+                    title: "Template Already Applied",
+                    description: `All ${template.commands.length} commands from "${template.name}" already exist for this account.`
+                })
+            } else if (skippedCount > 0) {
+                addToast({
+                    type: "success",
+                    title: "Template Applied",
+                    description: `Added ${createdCount} new commands. Skipped ${skippedCount} duplicate commands.`
+                })
+            } else {
+                addToast({
+                    type: "success",
+                    title: "Template Applied",
+                    description: `Successfully applied "${template.name}" template with ${createdCount} commands!`
+                })
+            }
         } catch (error) {
             console.error("Failed to apply template:", error)
-            alert("Failed to apply template. Some commands may have been created.")
+            addToast({ type: "error", title: "Error", description: "Failed to apply template. Some commands may have been created." })
         } finally {
             setApplyingTemplate(false)
         }
@@ -678,6 +739,60 @@ export default function CustomCommandsPage() {
                                 </CardContent>
                             </Card>
                         ))}
+                    </div>
+                )}
+
+                {/* Pagination */}
+                {!loading && totalPages > 1 && (
+                    <div className="flex items-center justify-between mt-4">
+                        <p className="text-sm text-muted-foreground">
+                            Showing {((currentPage - 1) * pageSize) + 1} to {Math.min(currentPage * pageSize, totalItems)} of {totalItems} commands
+                        </p>
+                        <div className="flex items-center gap-2">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handlePageChange(currentPage - 1)}
+                                disabled={currentPage <= 1}
+                            >
+                                <ChevronLeft className="h-4 w-4" />
+                                Previous
+                            </Button>
+                            <div className="flex items-center gap-1">
+                                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                                    let pageNum: number
+                                    if (totalPages <= 5) {
+                                        pageNum = i + 1
+                                    } else if (currentPage <= 3) {
+                                        pageNum = i + 1
+                                    } else if (currentPage >= totalPages - 2) {
+                                        pageNum = totalPages - 4 + i
+                                    } else {
+                                        pageNum = currentPage - 2 + i
+                                    }
+                                    return (
+                                        <Button
+                                            key={pageNum}
+                                            variant={currentPage === pageNum ? "default" : "outline"}
+                                            size="sm"
+                                            className="w-8 h-8 p-0"
+                                            onClick={() => handlePageChange(pageNum)}
+                                        >
+                                            {pageNum}
+                                        </Button>
+                                    )
+                                })}
+                            </div>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handlePageChange(currentPage + 1)}
+                                disabled={currentPage >= totalPages}
+                            >
+                                Next
+                                <ChevronRight className="h-4 w-4" />
+                            </Button>
+                        </div>
                     </div>
                 )}
 

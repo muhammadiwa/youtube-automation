@@ -35,6 +35,7 @@ import {
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useToast } from "@/components/ui/toast"
 import { moderationApi, type ChatbotConfig } from "@/lib/api/moderation"
 import { accountsApi } from "@/lib/api/accounts"
 import type { YouTubeAccount } from "@/types"
@@ -73,6 +74,7 @@ const RESPONSE_STYLES = [
 ] as const
 
 export default function ChatbotConfigPage() {
+    const { addToast } = useToast()
     const [accounts, setAccounts] = useState<YouTubeAccount[]>([])
     const [selectedAccount, setSelectedAccount] = useState<string>("")
     const [config, setConfig] = useState<ChatbotConfig | null>(null)
@@ -166,7 +168,7 @@ export default function ChatbotConfigPage() {
             await loadConfig()
         } catch (error) {
             console.error("Failed to save config:", error)
-            alert("Failed to save configuration")
+            addToast({ type: "error", title: "Save Failed", description: "Failed to save configuration. Please try again." })
         } finally {
             setSaving(false)
         }
@@ -352,8 +354,8 @@ export default function ChatbotConfigPage() {
                                                 setFormData({ ...formData, personality: p.value })
                                             }
                                             className={`p-3 rounded-lg border text-left transition-all ${formData.personality === p.value
-                                                    ? "border-primary bg-primary/5"
-                                                    : "border-border hover:border-primary/50"
+                                                ? "border-primary bg-primary/5"
+                                                : "border-border hover:border-primary/50"
                                                 }`}
                                         >
                                             <div className="flex items-center gap-2">

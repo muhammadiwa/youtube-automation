@@ -284,6 +284,14 @@ function mapLogFromBackend(log: ModerationLogBackend): ModerationLog {
     }
 }
 
+export interface PaginatedResponse<T> {
+    items: T[]
+    total: number
+    page: number
+    page_size: number
+    total_pages: number
+}
+
 export interface ModerationLogsResponse {
     items: ModerationLog[]
     total: number
@@ -300,15 +308,33 @@ export interface CommentsResponse {
 
 export const moderationApi = {
     // ============ Moderation Rules ============
-    async getRules(accountId?: string): Promise<ModerationRule[]> {
+    async getRules(params?: {
+        accountId?: string
+        page?: number
+        pageSize?: number
+    }): Promise<PaginatedResponse<ModerationRule>> {
         try {
-            const response = await apiClient.get<ModerationRuleBackend[]>("/moderation/rules", {
-                account_id: accountId,
+            const response = await apiClient.get<{
+                items: ModerationRuleBackend[]
+                total: number
+                page: number
+                page_size: number
+                total_pages: number
+            }>("/moderation/rules", {
+                account_id: params?.accountId,
                 enabled_only: false,
+                page: params?.page || 1,
+                page_size: params?.pageSize || 10,
             })
-            return response.map(mapRuleFromBackend)
+            return {
+                items: response.items.map(mapRuleFromBackend),
+                total: response.total,
+                page: response.page,
+                page_size: response.page_size,
+                total_pages: response.total_pages,
+            }
         } catch {
-            return []
+            return { items: [], total: 0, page: 1, page_size: 10, total_pages: 0 }
         }
     },
 
@@ -440,15 +466,33 @@ export const moderationApi = {
     },
 
     // ============ Custom Commands ============
-    async getCustomCommands(accountId?: string): Promise<CustomCommand[]> {
+    async getCustomCommands(params?: {
+        accountId?: string
+        page?: number
+        pageSize?: number
+    }): Promise<PaginatedResponse<CustomCommand>> {
         try {
-            const response = await apiClient.get<CustomCommandBackend[]>("/moderation/commands", {
-                account_id: accountId,
+            const response = await apiClient.get<{
+                items: CustomCommandBackend[]
+                total: number
+                page: number
+                page_size: number
+                total_pages: number
+            }>("/moderation/commands", {
+                account_id: params?.accountId,
                 enabled_only: false,
+                page: params?.page || 1,
+                page_size: params?.pageSize || 10,
             })
-            return response.map(mapCommandFromBackend)
+            return {
+                items: response.items.map(mapCommandFromBackend),
+                total: response.total,
+                page: response.page,
+                page_size: response.page_size,
+                total_pages: response.total_pages,
+            }
         } catch {
-            return []
+            return { items: [], total: 0, page: 1, page_size: 10, total_pages: 0 }
         }
     },
 
@@ -532,6 +576,40 @@ export const moderationApi = {
 
         const response = await fetch(`/api/v1/moderation/logs/export?${queryParams.toString()}`)
         return response.blob()
+    },
+
+    // ============ Live Chat Moderation Control ============
+    async startLiveModeration(data: {
+        account_id: string
+        broadcast_id: string
+        session_id?: string
+    }): Promise<{ is_active: boolean; broadcast_id: string; message: string }> {
+        return await apiClient.post("/moderation/live/start", data)
+    },
+
+    async stopLiveModeration(accountId: string, broadcastId: string): Promise<{ is_active: boolean; broadcast_id: string; message: string }> {
+        return await apiClient.post("/moderation/live/stop", undefined, {
+            params: { account_id: accountId, broadcast_id: broadcastId }
+        } as never)
+    },
+
+    async getLiveModerationStatus(accountId?: string): Promise<{
+        active_count: number
+        sessions: Array<{
+            account_id: string
+            broadcast_id: string
+            session_id: string | null
+            is_running: boolean
+            live_chat_id: string | null
+            polling_interval_ms: number
+            processed_messages: number
+        }>
+    }> {
+        try {
+            return await apiClient.get("/moderation/live/status", { account_id: accountId })
+        } catch {
+            return { active_count: 0, sessions: [] }
+        }
     },
 }
 

@@ -8,6 +8,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session
@@ -24,8 +25,120 @@ from app.modules.moderation.schemas import (
     SlowModeConfigUpdate,
     ModerationActionLogResponse,
 )
+from app.modules.moderation.chat_worker import (
+    start_moderation_for_broadcast,
+    stop_moderation_for_broadcast,
+    get_active_workers,
+)
 
 router = APIRouter(prefix="/moderation", tags=["moderation"])
+
+
+# ============================================
+# Live Chat Moderation Control Endpoints
+# ============================================
+
+
+class StartModerationRequest(BaseModel):
+    """Request to start live chat moderation."""
+    account_id: uuid.UUID
+    broadcast_id: str
+    session_id: Optional[uuid.UUID] = None
+
+
+class ModerationStatusResponse(BaseModel):
+    """Response for moderation status."""
+    is_active: bool
+    broadcast_id: Optional[str] = None
+    message: str
+
+
+@router.post("/live/start", response_model=ModerationStatusResponse)
+async def start_live_moderation(
+    request: StartModerationRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Start live chat moderation for a broadcast.
+    
+    This will start a background worker that:
+    1. Polls YouTube Live Chat API for new messages
+    2. Analyzes messages against moderation rules
+    3. Executes actions (delete, timeout, ban) via YouTube API
+    4. Responds to custom commands
+    
+    Requirements: 12.1, 12.2, 12.3, 12.4
+    """
+    try:
+        worker = await start_moderation_for_broadcast(
+            account_id=request.account_id,
+            broadcast_id=request.broadcast_id,
+            session_id=request.session_id,
+        )
+        return ModerationStatusResponse(
+            is_active=True,
+            broadcast_id=request.broadcast_id,
+            message=f"Live chat moderation started for broadcast {request.broadcast_id}",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start moderation: {str(e)}",
+        )
+
+
+@router.post("/live/stop", response_model=ModerationStatusResponse)
+async def stop_live_moderation(
+    account_id: uuid.UUID = Query(..., description="YouTube account ID"),
+    broadcast_id: str = Query(..., description="YouTube broadcast ID"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Stop live chat moderation for a broadcast.
+    
+    Requirements: 12.1
+    """
+    stopped = await stop_moderation_for_broadcast(account_id, broadcast_id)
+    if stopped:
+        return ModerationStatusResponse(
+            is_active=False,
+            broadcast_id=broadcast_id,
+            message=f"Live chat moderation stopped for broadcast {broadcast_id}",
+        )
+    else:
+        return ModerationStatusResponse(
+            is_active=False,
+            broadcast_id=broadcast_id,
+            message=f"No active moderation found for broadcast {broadcast_id}",
+        )
+
+
+@router.get("/live/status")
+async def get_moderation_status(
+    account_id: Optional[uuid.UUID] = Query(None, description="Filter by account ID"),
+):
+    """Get status of active moderation workers.
+    
+    Returns list of active moderation sessions.
+    """
+    workers = get_active_workers()
+    
+    active_sessions = []
+    for key, worker in workers.items():
+        if account_id and str(worker.account_id) != str(account_id):
+            continue
+        active_sessions.append({
+            "account_id": str(worker.account_id),
+            "broadcast_id": worker.broadcast_id,
+            "session_id": str(worker.session_id) if worker.session_id else None,
+            "is_running": worker.is_running,
+            "live_chat_id": worker.live_chat_id,
+            "polling_interval_ms": worker.polling_interval_ms,
+            "processed_messages": len(worker.processed_message_ids),
+        })
+    
+    return {
+        "active_count": len(active_sessions),
+        "sessions": active_sessions,
+    }
 
 
 # ============================================
@@ -33,19 +146,44 @@ router = APIRouter(prefix="/moderation", tags=["moderation"])
 # ============================================
 
 
-@router.get("/rules", response_model=list[ModerationRuleResponse])
+class PaginatedRulesResponse(BaseModel):
+    """Paginated response for moderation rules."""
+    items: list[ModerationRuleResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+@router.get("/rules", response_model=PaginatedRulesResponse)
 async def get_moderation_rules(
     account_id: Optional[uuid.UUID] = Query(None, description="Filter by account ID"),
     enabled_only: bool = Query(False, description="Only return enabled rules"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(10, ge=1, le=100, description="Items per page"),
     session: AsyncSession = Depends(get_session),
 ):
-    """Get moderation rules.
+    """Get moderation rules with pagination.
     
     Requirements: 12.1
     """
     service = ModerationService(session)
     rules = await service.get_rules(account_id, enabled_only)
-    return [ModerationRuleResponse.model_validate(r) for r in rules]
+    
+    # Apply pagination
+    total = len(rules)
+    total_pages = (total + page_size - 1) // page_size
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    paginated_rules = rules[start_idx:end_idx]
+    
+    return PaginatedRulesResponse(
+        items=[ModerationRuleResponse.model_validate(r) for r in paginated_rules],
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+    )
 
 
 @router.post("/rules", response_model=ModerationRuleResponse)
@@ -58,6 +196,16 @@ async def create_moderation_rule(
     Requirements: 12.1
     """
     service = ModerationService(session)
+    
+    # Check for duplicate rule (same name for same account)
+    existing_rules = await service.get_rules(data.account_id, enabled_only=False)
+    for existing in existing_rules:
+        if existing.name.lower() == data.name.lower():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Rule with name '{data.name}' already exists for this account",
+            )
+    
     rule = await service.create_rule(
         account_id=data.account_id,
         name=data.name,
@@ -239,19 +387,44 @@ async def create_auto_reply_rule(
 # ============================================
 
 
-@router.get("/commands", response_model=list[CustomCommandResponse])
+class PaginatedCommandsResponse(BaseModel):
+    """Paginated response for custom commands."""
+    items: list[CustomCommandResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+@router.get("/commands", response_model=PaginatedCommandsResponse)
 async def get_custom_commands(
     account_id: Optional[uuid.UUID] = Query(None),
     enabled_only: bool = Query(False),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(10, ge=1, le=100, description="Items per page"),
     session: AsyncSession = Depends(get_session),
 ):
-    """Get custom commands.
+    """Get custom commands with pagination.
     
     Requirements: 12.4
     """
     service = ModerationService(session)
     commands = await service.get_commands(account_id, enabled_only)
-    return [CustomCommandResponse.model_validate(c) for c in commands]
+    
+    # Apply pagination
+    total = len(commands)
+    total_pages = (total + page_size - 1) // page_size
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    paginated_commands = commands[start_idx:end_idx]
+    
+    return PaginatedCommandsResponse(
+        items=[CustomCommandResponse.model_validate(c) for c in paginated_commands],
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+    )
 
 
 @router.post("/commands", response_model=CustomCommandResponse)
@@ -264,6 +437,16 @@ async def create_custom_command(
     Requirements: 12.4
     """
     service = ModerationService(session)
+    
+    # Check for duplicate command (same trigger for same account)
+    existing_commands = await service.get_commands(data.account_id, enabled_only=False)
+    for existing in existing_commands:
+        if existing.trigger.lower() == data.trigger.lower():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Command with trigger '{data.trigger}' already exists for this account",
+            )
+    
     command = await service.create_command(
         account_id=data.account_id,
         trigger=data.trigger,
