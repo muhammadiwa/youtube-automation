@@ -102,24 +102,19 @@ async def _get_account_access_token(session, account_id: uuid.UUID) -> Optional[
     return token
 
 
-async def _upload_to_youtube(session, video, progress_callback=None) -> dict:
+async def _upload_to_youtube(video_data: dict, access_token: str, progress_callback=None) -> dict:
     """Upload video to YouTube using real API.
     
     Args:
-        session: Database session
-        video: Video model instance
-        progress_callback: Async callback function(progress: int) for progress updates
+        video_data: Dict containing video metadata (file_path, title, etc.)
+        access_token: YouTube access token
+        progress_callback: Sync callback function(progress: int) for progress updates (no DB access!)
     """
     from app.modules.video.youtube_upload_api import (
         YouTubeUploadClient,
         YouTubeUploadError,
     )
     from app.modules.video.models import VideoVisibility
-    import asyncio
-
-    access_token = await _get_account_access_token(session, video.account_id)
-    if not access_token:
-        raise YouTubeUploadError("Failed to get YouTube access token")
 
     client = YouTubeUploadClient(access_token)
 
@@ -128,23 +123,17 @@ async def _upload_to_youtube(session, video, progress_callback=None) -> dict:
         VideoVisibility.UNLISTED.value: "unlisted",
         VideoVisibility.PRIVATE.value: "private",
     }
-    privacy_status = privacy_map.get(video.visibility, "private")
-
-    # Wrap async progress callback for sync API
-    def sync_progress_callback(progress: int):
-        if progress_callback:
-            # Schedule the async callback
-            asyncio.create_task(progress_callback(progress))
+    privacy_status = privacy_map.get(video_data.get("visibility"), "private")
 
     result = await client.upload_video(
-        file_path=video.file_path,
-        title=video.title,
-        description=video.description or "",
-        tags=video.tags or [],
-        category_id=video.category_id or "22",
+        file_path=video_data["file_path"],
+        title=video_data["title"],
+        description=video_data.get("description") or "",
+        tags=video_data.get("tags") or [],
+        category_id=video_data.get("category_id") or "22",
         privacy_status=privacy_status,
-        scheduled_publish_at=video.scheduled_publish_at,
-        progress_callback=sync_progress_callback if progress_callback else None,
+        scheduled_publish_at=video_data.get("scheduled_publish_at"),
+        progress_callback=progress_callback,
     )
 
     return {"youtube_id": result.get("id"), "youtube_data": result}
@@ -195,17 +184,41 @@ def _run_async(coro):
     return asyncio.run(coro)
 
 
+def _update_progress_sync(video_id: str, progress: int):
+    """Update upload progress in database using a fresh sync connection.
+    
+    This uses a completely separate sync database connection to avoid
+    conflicts with the async session used for other operations.
+    """
+    from app.core.database import sync_engine
+    from app.modules.video.models import Video
+    from sqlalchemy.orm import Session
+    from sqlalchemy import update
+    
+    try:
+        with Session(sync_engine) as session:
+            session.execute(
+                update(Video)
+                .where(Video.id == uuid.UUID(video_id))
+                .values(upload_progress=progress)
+            )
+            session.commit()
+    except Exception as e:
+        logger.warning(f"Failed to update progress for video {video_id}: {e}")
+
+
 @celery_app.task(
     bind=True,
     base=VideoUploadTask,
-    autoretry_for=(Exception,),
-    retry_backoff=True,
-    retry_backoff_max=60,
-    retry_jitter=True,
     max_retries=3,
 )
 def upload_video_task(self: VideoUploadTask, video_id: str) -> dict:
-    """Upload video to YouTube."""
+    """Upload video to YouTube.
+    
+    IMPORTANT: This task separates DB operations from upload to avoid
+    SQLAlchemy async session conflicts. Progress updates use a separate
+    sync connection.
+    """
     from app.core.database import celery_session_maker
     from app.modules.video.models import Video, VideoStatus
     from app.modules.video.youtube_upload_api import (
@@ -213,19 +226,18 @@ def upload_video_task(self: VideoUploadTask, video_id: str) -> dict:
         QuotaExceededError,
     )
 
-    # Store progress updates to batch commit
-    progress_updates = {"last_progress": 0}
+    # Progress tracking with DB update via sync connection
+    progress_state = {"last_saved": 0}
 
-    async def update_progress(session, video, progress: int):
-        """Update upload progress in database."""
-        # Only update if progress changed significantly (every 5%)
-        if progress - progress_updates["last_progress"] >= 5 or progress == 100:
-            video.upload_progress = progress
-            await session.commit()
-            progress_updates["last_progress"] = progress
+    def update_progress(progress: int):
+        """Update progress in DB using separate sync connection."""
+        if progress - progress_state["last_saved"] >= 5 or progress == 100:
+            progress_state["last_saved"] = progress
             logger.info(f"Upload progress for video {video_id}: {progress}%")
+            _update_progress_sync(video_id, progress)
 
-    async def _upload():
+    async def _prepare_upload():
+        """Phase 1: Prepare upload - get video data and access token."""
         async with celery_session_maker() as session:
             from sqlalchemy import select
 
@@ -235,93 +247,176 @@ def upload_video_task(self: VideoUploadTask, video_id: str) -> dict:
             video = result.scalar_one_or_none()
 
             if not video:
-                return {"status": "error", "error": "Video not found"}
+                return None, None, "Video not found"
 
-            try:
-                video.status = VideoStatus.UPLOADING.value
-                video.upload_progress = 0  # Reset progress
-                video.upload_attempts += 1
-                await session.commit()
+            # Check if already uploaded successfully (prevent duplicate uploads on retry)
+            if video.youtube_id and video.status in (VideoStatus.PROCESSING.value, VideoStatus.PUBLISHED.value):
+                logger.info(f"Video {video_id} already uploaded with youtube_id {video.youtube_id}, skipping upload")
+                return None, None, f"already_uploaded:{video.youtube_id}"
 
-                # Check if file exists
-                if not video.file_path or not os.path.exists(video.file_path):
-                    raise YouTubeUploadError(f"Video file not found: {video.file_path}")
+            # Check if file exists
+            if not video.file_path or not os.path.exists(video.file_path):
+                return None, None, f"Video file not found: {video.file_path}"
 
-                # Progress callback to update database
-                async def progress_callback(progress: int):
-                    await update_progress(session, video, progress)
+            # Get access token
+            access_token = await _get_account_access_token(session, video.account_id)
+            if not access_token:
+                return None, None, "Failed to get YouTube access token"
 
-                # Upload to YouTube with progress tracking
-                upload_result = await _upload_to_youtube(session, video, progress_callback)
+            # Update status to uploading
+            video.status = VideoStatus.UPLOADING.value
+            video.upload_progress = 0
+            video.upload_attempts += 1
+            await session.commit()
 
-                video.status = VideoStatus.PROCESSING.value
-                video.youtube_id = upload_result["youtube_id"]
-                video.upload_progress = 100
-                video.last_upload_error = None
-                await session.commit()
+            # Extract video data for upload (avoid passing ORM object)
+            video_data = {
+                "id": str(video.id),
+                "file_path": video.file_path,
+                "title": video.title,
+                "description": video.description,
+                "tags": video.tags,
+                "category_id": video.category_id,
+                "visibility": video.visibility,
+                "scheduled_publish_at": video.scheduled_publish_at,
+                "account_id": str(video.account_id),
+                "local_thumbnail_path": video.local_thumbnail_path,
+            }
 
-                # Upload thumbnail if provided
-                if video.local_thumbnail_path and os.path.exists(video.local_thumbnail_path):
-                    logger.info(f"Queueing thumbnail upload for video {video_id}")
-                    upload_thumbnail_task.apply_async(
-                        args=[str(video.id), video.local_thumbnail_path],
-                        countdown=5  # Wait a bit for YouTube to process
-                    )
+            return video_data, access_token, None
 
-                # Queue processing status check
-                check_video_processing_status.apply_async(
-                    args=[str(video.id)], countdown=30
+    async def _do_upload(video_data: dict, access_token: str):
+        """Phase 2: Perform actual upload (progress via separate sync connection)."""
+        return await _upload_to_youtube(video_data, access_token, progress_callback=update_progress)
+
+    async def _finalize_upload(video_id: str, upload_result: dict, video_data: dict):
+        """Phase 3: Update DB with upload result."""
+        async with celery_session_maker() as session:
+            from sqlalchemy import select
+
+            result = await session.execute(
+                select(Video).where(Video.id == uuid.UUID(video_id))
+            )
+            video = result.scalar_one_or_none()
+
+            if not video:
+                return {"status": "error", "error": "Video not found after upload"}
+
+            video.status = VideoStatus.PROCESSING.value
+            video.youtube_id = upload_result["youtube_id"]
+            video.upload_progress = 100
+            video.last_upload_error = None
+            await session.commit()
+
+            # Queue thumbnail upload if provided - delay 30s to let YouTube process video
+            local_thumb = video_data.get("local_thumbnail_path")
+            if local_thumb and os.path.exists(local_thumb):
+                logger.info(f"Queueing thumbnail upload for video {video_id}")
+                upload_thumbnail_task.apply_async(
+                    args=[str(video.id), local_thumb],
+                    countdown=30  # Increased from 5s to 30s to let YouTube register video
                 )
 
-                await _send_upload_notification(session, video, success=True)
+            # Queue processing status check - delay 60s for YouTube to process
+            check_video_processing_status.apply_async(
+                args=[str(video.id)], countdown=60  # Increased from 30s to 60s
+            )
 
-                return {
-                    "status": "success",
-                    "video_id": str(video.id),
-                    "youtube_id": video.youtube_id,
-                }
+            await _send_upload_notification(session, video, success=True)
 
-            except QuotaExceededError as e:
+            return {
+                "status": "success",
+                "video_id": str(video.id),
+                "youtube_id": video.youtube_id,
+            }
+
+    async def _handle_error(video_id: str, error: str, is_quota_error: bool = False):
+        """Handle upload error - update DB."""
+        async with celery_session_maker() as session:
+            from sqlalchemy import select
+
+            result = await session.execute(
+                select(Video).where(Video.id == uuid.UUID(video_id))
+            )
+            video = result.scalar_one_or_none()
+
+            if video:
                 video.status = VideoStatus.FAILED.value
-                video.last_upload_error = "YouTube API quota exceeded"
+                video.last_upload_error = error
                 await session.commit()
-                await _send_upload_notification(session, video, success=False, error=str(e))
-                return {"status": "failed", "error": str(e)}
+                await _send_upload_notification(session, video, success=False, error=error)
 
-            except YouTubeUploadError as e:
-                video.last_upload_error = str(e)
-                await session.commit()
+    async def _upload():
+        # Phase 1: Prepare
+        video_data, access_token, error = await _prepare_upload()
+        
+        if error:
+            if error.startswith("already_uploaded:"):
+                youtube_id = error.split(":")[1]
+                return {"status": "success", "video_id": video_id, "youtube_id": youtube_id, "skipped": True}
+            return {"status": "error", "error": error}
 
-                if e.is_retryable:
-                    attempt = self.request.retries + 1
-                    if should_retry_upload(attempt):
-                        delay = calculate_upload_retry_delay(attempt)
-                        raise self.retry(exc=e, countdown=delay)
+        try:
+            # Phase 2: Upload (no DB access)
+            upload_result = await _do_upload(video_data, access_token)
 
-                video.status = VideoStatus.FAILED.value
-                await session.commit()
-                await _send_upload_notification(session, video, success=False, error=str(e))
-                return {"status": "failed", "error": str(e)}
+            # Phase 3: Finalize
+            return await _finalize_upload(video_id, upload_result, video_data)
 
-            except Exception as e:
-                logger.exception(f"Upload failed for video {video_id}: {e}")
-                video.status = VideoStatus.FAILED.value
-                video.last_upload_error = str(e)
-                await session.commit()
-                await _send_upload_notification(session, video, success=False, error=str(e))
+        except QuotaExceededError as e:
+            await _handle_error(video_id, "YouTube API quota exceeded", is_quota_error=True)
+            return {"status": "failed", "error": str(e)}
 
+        except YouTubeUploadError as e:
+            logger.error(f"Upload failed for video {video_id}: {e}")
+            
+            if e.is_retryable:
                 attempt = self.request.retries + 1
                 if should_retry_upload(attempt):
+                    # Don't mark as failed yet, will retry
+                    async with celery_session_maker() as session:
+                        from sqlalchemy import select
+                        result = await session.execute(
+                            select(Video).where(Video.id == uuid.UUID(video_id))
+                        )
+                        video = result.scalar_one_or_none()
+                        if video:
+                            video.last_upload_error = str(e)
+                            await session.commit()
+                    
                     delay = calculate_upload_retry_delay(attempt)
                     raise self.retry(exc=e, countdown=delay)
 
-                return {"status": "failed", "error": str(e)}
+            await _handle_error(video_id, str(e))
+            return {"status": "failed", "error": str(e)}
+
+        except Exception as e:
+            logger.exception(f"Upload failed for video {video_id}: {e}")
+            
+            attempt = self.request.retries + 1
+            if should_retry_upload(attempt):
+                # Don't mark as failed yet, will retry
+                async with celery_session_maker() as session:
+                    from sqlalchemy import select
+                    result = await session.execute(
+                        select(Video).where(Video.id == uuid.UUID(video_id))
+                    )
+                    video = result.scalar_one_or_none()
+                    if video:
+                        video.last_upload_error = str(e)
+                        await session.commit()
+                
+                delay = calculate_upload_retry_delay(attempt)
+                raise self.retry(exc=e, countdown=delay)
+
+            await _handle_error(video_id, str(e))
+            return {"status": "failed", "error": str(e)}
 
     return _run_async(_upload())
 
 
 
-@celery_app.task(bind=True, max_retries=10)
+@celery_app.task(bind=True, max_retries=15)  # Increased retries for YouTube processing time
 def check_video_processing_status(self, video_id: str) -> dict:
     """Check YouTube video processing status."""
     from app.core.database import celery_session_maker
@@ -349,7 +444,17 @@ def check_video_processing_status(self, video_id: str) -> dict:
                     raise YouTubeUploadError("Failed to get access token")
 
                 client = YouTubeUploadClient(access_token)
-                yt_video = await client.get_video_status(video.youtube_id)
+                
+                try:
+                    yt_video = await client.get_video_status(video.youtube_id)
+                except YouTubeUploadError as e:
+                    # Video not found - might still be processing on YouTube side
+                    if "not found" in str(e).lower():
+                        retry_count = self.request.retries
+                        if retry_count < 5:  # First 5 retries, video might not be visible yet
+                            logger.warning(f"Video {video.youtube_id} not found yet, retry {retry_count + 1}")
+                            raise self.retry(countdown=60)  # Wait 60s before retry
+                    raise
 
                 processing_details = yt_video.get("processingDetails", {})
                 processing_status = processing_details.get("processingStatus", "")
@@ -398,12 +503,15 @@ def check_video_processing_status(self, video_id: str) -> dict:
 
             except YouTubeUploadError as e:
                 logger.error(f"Failed to check processing status: {e}")
-                raise self.retry(countdown=60)
+                retry_count = self.request.retries
+                # Exponential backoff: 60s, 120s, 240s, max 600s
+                delay = min(60 * (2 ** min(retry_count, 3)), 600)
+                raise self.retry(countdown=delay)
 
     return _run_async(_check())
 
 
-@celery_app.task(bind=True)
+@celery_app.task(bind=True, max_retries=5)
 def upload_thumbnail_task(self, video_id: str, thumbnail_path: str) -> dict:
     """Upload custom thumbnail for a video."""
     from app.core.database import celery_session_maker
@@ -440,6 +548,13 @@ def upload_thumbnail_task(self, video_id: str, thumbnail_path: str) -> dict:
 
             except YouTubeUploadError as e:
                 logger.error(f"Failed to upload thumbnail: {e}")
+                # Retry if video not found (YouTube might still be processing)
+                if "not found" in str(e).lower() or e.status_code == 404:
+                    retry_count = self.request.retries
+                    if retry_count < 5:
+                        delay = 30 * (retry_count + 1)  # 30s, 60s, 90s, 120s, 150s
+                        logger.warning(f"Video not ready for thumbnail, retrying in {delay}s")
+                        raise self.retry(countdown=delay)
                 return {"status": "failed", "error": str(e)}
 
     return _run_async(_upload_thumbnail())

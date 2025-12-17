@@ -21,6 +21,8 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     task_acks_late=True,
     task_reject_on_worker_lost=True,
+    # Fix Celery 6.0 deprecation warning
+    broker_connection_retry_on_startup=True,
 )
 
 celery_app.autodiscover_tasks([

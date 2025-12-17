@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import NullPool
@@ -33,6 +34,15 @@ celery_session_maker = async_sessionmaker(
     celery_engine,
     class_=AsyncSession,
     expire_on_commit=False,
+)
+
+# Sync engine for simple operations that need to run outside async context
+# Used for progress updates in Celery tasks to avoid async session conflicts
+_sync_db_url = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+sync_engine = create_engine(
+    _sync_db_url,
+    echo=False,
+    poolclass=NullPool,  # No pooling for Celery compatibility
 )
 
 

@@ -48,7 +48,7 @@ class YouTubeUploadClient:
 
     BASE_URL = "https://www.googleapis.com/youtube/v3"
     UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
-    CHUNK_SIZE = 10 * 1024 * 1024  # 10MB chunks for resumable upload
+    CHUNK_SIZE = 50 * 1024 * 1024  # 50MB chunks for faster upload (reduced HTTP overhead)
 
     def __init__(self, access_token: str, refresh_token: Optional[str] = None):
         """Initialize client with access token.
