@@ -103,12 +103,19 @@ async def _get_account_access_token(session, account_id: uuid.UUID) -> Optional[
 
 
 async def _upload_to_youtube(session, video, progress_callback=None) -> dict:
-    """Upload video to YouTube using real API."""
+    """Upload video to YouTube using real API.
+    
+    Args:
+        session: Database session
+        video: Video model instance
+        progress_callback: Async callback function(progress: int) for progress updates
+    """
     from app.modules.video.youtube_upload_api import (
         YouTubeUploadClient,
         YouTubeUploadError,
     )
     from app.modules.video.models import VideoVisibility
+    import asyncio
 
     access_token = await _get_account_access_token(session, video.account_id)
     if not access_token:
@@ -123,6 +130,12 @@ async def _upload_to_youtube(session, video, progress_callback=None) -> dict:
     }
     privacy_status = privacy_map.get(video.visibility, "private")
 
+    # Wrap async progress callback for sync API
+    def sync_progress_callback(progress: int):
+        if progress_callback:
+            # Schedule the async callback
+            asyncio.create_task(progress_callback(progress))
+
     result = await client.upload_video(
         file_path=video.file_path,
         title=video.title,
@@ -131,7 +144,7 @@ async def _upload_to_youtube(session, video, progress_callback=None) -> dict:
         category_id=video.category_id or "22",
         privacy_status=privacy_status,
         scheduled_publish_at=video.scheduled_publish_at,
-        progress_callback=progress_callback,
+        progress_callback=sync_progress_callback if progress_callback else None,
     )
 
     return {"youtube_id": result.get("id"), "youtube_data": result}
@@ -172,14 +185,14 @@ async def _send_upload_notification(session, video, success: bool, error: str = 
 
 
 def _run_async(coro):
-    """Run async coroutine in Celery task context."""
+    """Run async coroutine in Celery task context.
+    
+    Uses asyncio.run() which creates a fresh event loop for each task.
+    Combined with NullPool in celery_session_maker, this avoids
+    connection pool conflicts across different event loops.
+    """
     import asyncio
-    try:
-        loop = asyncio.get_running_loop()
-        return asyncio.run_coroutine_threadsafe(coro, loop).result()
-    except RuntimeError:
-        # No running loop - create new one and run
-        return asyncio.run(coro)
+    return asyncio.run(coro)
 
 
 @celery_app.task(
@@ -193,16 +206,27 @@ def _run_async(coro):
 )
 def upload_video_task(self: VideoUploadTask, video_id: str) -> dict:
     """Upload video to YouTube."""
-    from app.core.database import async_session_maker
+    from app.core.database import celery_session_maker
     from app.modules.video.models import Video, VideoStatus
     from app.modules.video.youtube_upload_api import (
         YouTubeUploadError,
         QuotaExceededError,
     )
-    import asyncio
+
+    # Store progress updates to batch commit
+    progress_updates = {"last_progress": 0}
+
+    async def update_progress(session, video, progress: int):
+        """Update upload progress in database."""
+        # Only update if progress changed significantly (every 5%)
+        if progress - progress_updates["last_progress"] >= 5 or progress == 100:
+            video.upload_progress = progress
+            await session.commit()
+            progress_updates["last_progress"] = progress
+            logger.info(f"Upload progress for video {video_id}: {progress}%")
 
     async def _upload():
-        async with async_session_maker() as session:
+        async with celery_session_maker() as session:
             from sqlalchemy import select
 
             result = await session.execute(
@@ -215,6 +239,7 @@ def upload_video_task(self: VideoUploadTask, video_id: str) -> dict:
 
             try:
                 video.status = VideoStatus.UPLOADING.value
+                video.upload_progress = 0  # Reset progress
                 video.upload_attempts += 1
                 await session.commit()
 
@@ -222,8 +247,12 @@ def upload_video_task(self: VideoUploadTask, video_id: str) -> dict:
                 if not video.file_path or not os.path.exists(video.file_path):
                     raise YouTubeUploadError(f"Video file not found: {video.file_path}")
 
-                # Upload to YouTube (progress callback simplified)
-                upload_result = await _upload_to_youtube(session, video, None)
+                # Progress callback to update database
+                async def progress_callback(progress: int):
+                    await update_progress(session, video, progress)
+
+                # Upload to YouTube with progress tracking
+                upload_result = await _upload_to_youtube(session, video, progress_callback)
 
                 video.status = VideoStatus.PROCESSING.value
                 video.youtube_id = upload_result["youtube_id"]
@@ -295,12 +324,12 @@ def upload_video_task(self: VideoUploadTask, video_id: str) -> dict:
 @celery_app.task(bind=True, max_retries=10)
 def check_video_processing_status(self, video_id: str) -> dict:
     """Check YouTube video processing status."""
-    from app.core.database import async_session_maker
+    from app.core.database import celery_session_maker
     from app.modules.video.models import Video, VideoStatus
     from app.modules.video.youtube_upload_api import YouTubeUploadClient, YouTubeUploadError
 
     async def _check():
-        async with async_session_maker() as session:
+        async with celery_session_maker() as session:
             from sqlalchemy import select
 
             result = await session.execute(
@@ -377,12 +406,12 @@ def check_video_processing_status(self, video_id: str) -> dict:
 @celery_app.task(bind=True)
 def upload_thumbnail_task(self, video_id: str, thumbnail_path: str) -> dict:
     """Upload custom thumbnail for a video."""
-    from app.core.database import async_session_maker
+    from app.core.database import celery_session_maker
     from app.modules.video.models import Video
     from app.modules.video.youtube_upload_api import YouTubeUploadClient, YouTubeUploadError
 
     async def _upload_thumbnail():
-        async with async_session_maker() as session:
+        async with celery_session_maker() as session:
             from sqlalchemy import select
 
             result = await session.execute(
@@ -420,7 +449,7 @@ def upload_thumbnail_task(self, video_id: str, thumbnail_path: str) -> dict:
 @celery_app.task(bind=True)
 def process_bulk_upload_task(self, account_id: str, csv_content: str) -> dict:
     """Process bulk upload from CSV."""
-    from app.core.database import async_session_maker
+    from app.core.database import celery_session_maker
     from app.modules.video.service import (
         VideoService,
         parse_csv_for_bulk_upload,
@@ -438,7 +467,7 @@ def process_bulk_upload_task(self, account_id: str, csv_content: str) -> dict:
                 "errors": parse_errors,
             }
 
-        async with async_session_maker() as session:
+        async with celery_session_maker() as session:
             service = VideoService(session)
             result = await create_bulk_upload_jobs(
                 service, uuid.UUID(account_id), entries
@@ -459,11 +488,11 @@ def process_bulk_upload_task(self, account_id: str, csv_content: str) -> dict:
 @celery_app.task
 def check_scheduled_publishes() -> dict:
     """Check and publish scheduled videos."""
-    from app.core.database import async_session_maker
+    from app.core.database import celery_session_maker
     from app.modules.video.repository import VideoRepository
 
     async def _check():
-        async with async_session_maker() as session:
+        async with celery_session_maker() as session:
             repo = VideoRepository(session)
             videos = await repo.get_scheduled_for_publishing()
 

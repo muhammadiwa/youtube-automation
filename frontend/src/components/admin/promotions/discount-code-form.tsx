@@ -1,8 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { format } from "date-fns"
-import { Calendar as CalendarIcon, Percent, DollarSign } from "lucide-react"
+import { Percent, DollarSign } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -22,13 +21,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select"
-import {
-    Popover,
-    PopoverContent,
-    PopoverTrigger,
-} from "@/components/ui/popover"
-import { Calendar } from "@/components/ui/calendar"
-import { cn } from "@/lib/utils"
+import { DatePicker } from "@/components/ui/date-picker"
 import adminApi from "@/lib/api/admin"
 import type { DiscountCode, DiscountType } from "@/types/admin"
 
@@ -251,52 +244,21 @@ export function DiscountCodeForm({
                     <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <Label>Valid From</Label>
-                            <Popover>
-                                <PopoverTrigger asChild>
-                                    <Button
-                                        variant="outline"
-                                        className={cn(
-                                            "w-full justify-start text-left font-normal",
-                                            !validFrom && "text-muted-foreground"
-                                        )}
-                                    >
-                                        <CalendarIcon className="mr-2 h-4 w-4" />
-                                        {validFrom ? format(validFrom, "PPP") : "Pick a date"}
-                                    </Button>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-auto p-0" align="start">
-                                    <Calendar
-                                        mode="single"
-                                        selected={validFrom}
-                                        onSelect={setValidFrom}
-                                    />
-                                </PopoverContent>
-                            </Popover>
+                            <DatePicker
+                                value={validFrom}
+                                onChange={setValidFrom}
+                                placeholder="Pick start date"
+                                maxDate={validUntil}
+                            />
                         </div>
                         <div className="space-y-2">
                             <Label>Valid Until</Label>
-                            <Popover>
-                                <PopoverTrigger asChild>
-                                    <Button
-                                        variant="outline"
-                                        className={cn(
-                                            "w-full justify-start text-left font-normal",
-                                            !validUntil && "text-muted-foreground"
-                                        )}
-                                    >
-                                        <CalendarIcon className="mr-2 h-4 w-4" />
-                                        {validUntil ? format(validUntil, "PPP") : "Pick a date"}
-                                    </Button>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-auto p-0" align="start">
-                                    <Calendar
-                                        mode="single"
-                                        selected={validUntil}
-                                        onSelect={setValidUntil}
-                                        disabled={(date) => validFrom ? date < validFrom : false}
-                                    />
-                                </PopoverContent>
-                            </Popover>
+                            <DatePicker
+                                value={validUntil}
+                                onChange={setValidUntil}
+                                placeholder="Pick end date"
+                                minDate={validFrom}
+                            />
                         </div>
                     </div>
 

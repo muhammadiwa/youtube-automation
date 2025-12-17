@@ -13,7 +13,7 @@ from sqlalchemy import select
 
 from app.core.celery_app import celery_app
 from app.core.config import settings
-from app.core.database import async_session_maker
+from app.core.database import celery_session_maker
 from app.modules.job.tasks import BaseTaskWithRetry, RetryConfig, RETRY_CONFIGS
 from app.modules.stream.models import (
     LiveEvent,
@@ -200,7 +200,7 @@ async def _check_scheduled_streams_async() -> dict:
     started = []
     errors = []
     
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         repo = LiveEventRepository(session)
         
         # Get events ready to start
@@ -246,7 +246,7 @@ def start_stream_task(self: BaseTaskWithRetry, event_id: str) -> dict:
 
 async def _start_stream_async(event_id: str) -> dict:
     """Async implementation of stream start."""
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         event_repo = LiveEventRepository(session)
         session_repo = StreamSessionRepository(session)
         
@@ -312,7 +312,7 @@ def stop_stream_task(self: BaseTaskWithRetry, event_id: str, reason: str = "sche
 
 async def _stop_stream_async(event_id: str, reason: str) -> dict:
     """Async implementation of stream stop."""
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         event_repo = LiveEventRepository(session)
         session_repo = StreamSessionRepository(session)
         
@@ -368,7 +368,7 @@ async def _handle_disconnection_async(event_id: str, session_id: str, error: Opt
     """Async implementation of disconnection handling."""
     restart_manager = StreamAutoRestartManager()
     
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         event_repo = LiveEventRepository(session)
         session_repo = StreamSessionRepository(session)
         
@@ -461,7 +461,7 @@ def restart_stream_task(self: BaseTaskWithRetry, event_id: str, session_id: str)
 
 async def _restart_stream_async(event_id: str, session_id: str) -> dict:
     """Async implementation of stream restart."""
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         event_repo = LiveEventRepository(session)
         session_repo = StreamSessionRepository(session)
         
@@ -509,7 +509,7 @@ async def _check_stream_end_times_async() -> dict:
     stopped = []
     errors = []
     
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         event_repo = LiveEventRepository(session)
         
         # Get live events with scheduled end times
@@ -772,7 +772,7 @@ async def _collect_health_metrics_async(session_id: str) -> dict:
     """Async implementation of health metric collection."""
     monitor = StreamHealthMonitor()
     
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         session_repo = StreamSessionRepository(session)
         health_repo = StreamHealthLogRepository(session)
         
@@ -912,7 +912,7 @@ async def _check_active_streams_health_async() -> dict:
     checked = []
     errors = []
     
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         # Get all active stream sessions
         result = await session.execute(
             select(StreamSession)
@@ -966,7 +966,7 @@ async def _attempt_reconnection_async(event_id: str, session_id: str, attempt: i
     """Async implementation of stream reconnection attempt."""
     reconnection_manager = StreamReconnectionManager()
     
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         event_repo = LiveEventRepository(session)
         session_repo = StreamSessionRepository(session)
         
@@ -1051,7 +1051,7 @@ def trigger_stream_failover(
 
 async def _trigger_failover_async(event_id: str, session_id: str) -> dict:
     """Async implementation of stream failover."""
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         event_repo = LiveEventRepository(session)
         session_repo = StreamSessionRepository(session)
         
@@ -1116,7 +1116,7 @@ async def _cleanup_old_health_logs_async(retention_days: int) -> dict:
     cutoff_date = datetime.utcnow() - timedelta(days=retention_days)
     total_deleted = 0
     
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         health_repo = StreamHealthLogRepository(session)
         
         # Get all sessions with old logs

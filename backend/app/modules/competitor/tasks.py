@@ -14,7 +14,7 @@ from typing import Optional
 from celery import shared_task
 
 from app.core.celery_app import celery_app
-from app.core.database import async_session_maker
+from app.core.database import celery_session_maker
 
 
 @celery_app.task(
@@ -37,7 +37,7 @@ async def _sync_all_competitors():
     from app.modules.competitor.repository import CompetitorRepository
     from app.modules.competitor.service import CompetitorService
 
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         try:
             repo = CompetitorRepository(session)
             service = CompetitorService(session)
@@ -85,7 +85,7 @@ async def _sync_competitor(competitor_id: str):
     """Async implementation of sync competitor."""
     from app.modules.competitor.service import CompetitorService
 
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         try:
             service = CompetitorService(session)
             await service.sync_competitor_metrics(uuid.UUID(competitor_id))
@@ -117,7 +117,7 @@ async def _check_new_content():
     from app.modules.competitor.repository import CompetitorRepository
     from app.modules.competitor.service import CompetitorService
 
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         try:
             repo = CompetitorRepository(session)
             service = CompetitorService(session)
@@ -168,7 +168,7 @@ async def _send_content_notification(content_id: str):
     )
     from app.modules.competitor.service import CompetitorService
 
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         try:
             content_repo = CompetitorContentRepository(session)
             competitor_repo = CompetitorRepository(session)
@@ -229,10 +229,10 @@ async def _send_notification(user_id: uuid.UUID, data: dict):
     logger = logging.getLogger(__name__)
     
     try:
-        from app.core.database import async_session_maker
+        from app.core.database import celery_session_maker
         from app.modules.notification.integration import NotificationIntegrationService
         
-        async with async_session_maker() as session:
+        async with celery_session_maker() as session:
             notification_service = NotificationIntegrationService(session)
             await notification_service.notify_competitor_update(
                 user_id=user_id,
@@ -287,7 +287,7 @@ async def _export_analysis(
     from app.modules.competitor.repository import CompetitorAnalysisRepository
     from app.core.storage import storage_service
 
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         try:
             repo = CompetitorAnalysisRepository(session)
 
@@ -920,7 +920,7 @@ async def _generate_ai_analysis(
     """Async implementation of generate AI analysis."""
     from app.modules.competitor.service import CompetitorService
 
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         try:
             service = CompetitorService(session)
 

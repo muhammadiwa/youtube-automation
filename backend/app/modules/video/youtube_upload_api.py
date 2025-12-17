@@ -441,20 +441,34 @@ class YouTubeUploadClient:
         }
         content_type = content_types.get(ext, "image/jpeg")
 
+        # Read file content first
+        with open(thumbnail_path, "rb") as f:
+            file_content = f.read()
+
+        if not file_content:
+            raise YouTubeUploadError("Thumbnail file is empty")
+
+        logger.info(f"Uploading thumbnail: {thumbnail_path}, size: {len(file_content)} bytes, type: {content_type}")
+
         async with httpx.AsyncClient() as client:
-            with open(thumbnail_path, "rb") as f:
-                response = await client.post(
-                    f"{self.BASE_URL}/thumbnails/set",
-                    params={"videoId": video_id},
-                    headers={
-                        "Authorization": f"Bearer {self.access_token}",
-                        "Content-Type": content_type,
-                    },
-                    content=f.read(),
-                    timeout=60.0,
-                )
+            # Use media upload endpoint with proper content
+            response = await client.post(
+                "https://www.googleapis.com/upload/youtube/v3/thumbnails/set",
+                params={
+                    "videoId": video_id,
+                    "uploadType": "media",
+                },
+                headers={
+                    "Authorization": f"Bearer {self.access_token}",
+                    "Content-Type": content_type,
+                    "Content-Length": str(len(file_content)),
+                },
+                content=file_content,
+                timeout=60.0,
+            )
 
             if response.status_code != 200:
+                logger.error(f"Thumbnail upload failed: {response.status_code} - {response.text}")
                 self._handle_error_response(response)
 
             return response.json()

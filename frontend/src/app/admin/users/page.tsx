@@ -49,12 +49,7 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import {
-    Popover,
-    PopoverContent,
-    PopoverTrigger,
-} from "@/components/ui/popover"
-import { Calendar } from "@/components/ui/calendar"
+import { DatePicker } from "@/components/ui/date-picker"
 import { format, formatDistanceToNow } from "date-fns"
 import { cn } from "@/lib/utils"
 import adminApi from "@/lib/api/admin"
@@ -377,21 +372,13 @@ export default function AdminUsersPage() {
                                     <div className="flex items-center gap-3">
                                         <CalendarDays className="h-5 w-5 text-muted-foreground" />
                                         <span className="text-sm font-medium">Registered after:</span>
-                                        <Popover>
-                                            <PopoverTrigger asChild>
-                                                <Button variant="outline" className="h-10 rounded-xl">
-                                                    {registeredAfter ? format(registeredAfter, "PP") : "Select date"}
-                                                </Button>
-                                            </PopoverTrigger>
-                                            <PopoverContent className="w-auto p-0" align="start">
-                                                <Calendar
-                                                    mode="single"
-                                                    selected={registeredAfter}
-                                                    onSelect={(d: Date | undefined) => { setRegisteredAfter(d); setPage(1) }}
-                                                    initialFocus
-                                                />
-                                            </PopoverContent>
-                                        </Popover>
+                                        <DatePicker
+                                            value={registeredAfter}
+                                            onChange={(d) => { setRegisteredAfter(d); setPage(1) }}
+                                            placeholder="Select date"
+                                            maxDate={registeredBefore}
+                                            className="h-10 rounded-xl w-auto"
+                                        />
                                         {registeredAfter && (
                                             <Button variant="ghost" size="sm" onClick={() => setRegisteredAfter(undefined)} className="h-8 w-8 p-0">×</Button>
                                         )}
@@ -400,21 +387,13 @@ export default function AdminUsersPage() {
                                     <div className="flex items-center gap-3">
                                         <CalendarDays className="h-5 w-5 text-muted-foreground" />
                                         <span className="text-sm font-medium">Registered before:</span>
-                                        <Popover>
-                                            <PopoverTrigger asChild>
-                                                <Button variant="outline" className="h-10 rounded-xl">
-                                                    {registeredBefore ? format(registeredBefore, "PP") : "Select date"}
-                                                </Button>
-                                            </PopoverTrigger>
-                                            <PopoverContent className="w-auto p-0" align="start">
-                                                <Calendar
-                                                    mode="single"
-                                                    selected={registeredBefore}
-                                                    onSelect={(d: Date | undefined) => { setRegisteredBefore(d); setPage(1) }}
-                                                    initialFocus
-                                                />
-                                            </PopoverContent>
-                                        </Popover>
+                                        <DatePicker
+                                            value={registeredBefore}
+                                            onChange={(d) => { setRegisteredBefore(d); setPage(1) }}
+                                            placeholder="Select date"
+                                            minDate={registeredAfter}
+                                            className="h-10 rounded-xl w-auto"
+                                        />
                                         {registeredBefore && (
                                             <Button variant="ghost" size="sm" onClick={() => setRegisteredBefore(undefined)} className="h-8 w-8 p-0">×</Button>
                                         )}

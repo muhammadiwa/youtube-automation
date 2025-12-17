@@ -208,31 +208,49 @@ export default function VideoUploadPage() {
                     prev.map((f) => {
                         if (f.id !== fileId) return f
 
-                        if (progress.status === "published" || progress.status === "processing") {
+                        // Map backend status to UI status
+                        if (progress.status === "published") {
+                            return { ...f, status: "completed", progress: 100 }
+                        } else if (progress.status === "processing") {
+                            // Video uploaded to YouTube, now YouTube is processing
                             return { ...f, status: "processing", progress: 100 }
                         } else if (progress.status === "failed") {
                             return { ...f, status: "error", error: progress.error || "Upload failed" }
                         } else if (progress.status === "uploading") {
-                            return { ...f, progress: progress.progress }
+                            // Uploading to YouTube - show actual progress
+                            return { ...f, status: "uploading", progress: progress.progress }
+                        } else if (progress.status === "queued" || progress.status === "pending") {
+                            // Waiting in queue to be uploaded to YouTube
+                            return { ...f, status: "uploading", progress: 5 }
                         }
                         return f
                     })
                 )
 
-                if (progress.status === "uploading") {
-                    setTimeout(() => pollProgress(fileId, videoId), 2000)
-                } else if (progress.status === "processing") {
+                // Continue polling for non-final states
+                const shouldContinuePolling = ["uploading", "queued", "pending", "processing"].includes(progress.status)
+
+                if (shouldContinuePolling) {
+                    // Poll more frequently during upload, less during processing
+                    const pollInterval = progress.status === "processing" ? 5000 : 2000
+                    setTimeout(() => pollProgress(fileId, videoId), pollInterval)
+                } else if (progress.status === "published") {
                     addToast({
                         type: "success",
-                        title: "Upload Complete",
-                        description: "Video is now processing on YouTube",
+                        title: "Video Published",
+                        description: "Video is now live on YouTube",
                     })
-                    setUploadFiles((prev) =>
-                        prev.map((f) => (f.id === fileId ? { ...f, status: "completed" } : f))
-                    )
+                } else if (progress.status === "failed") {
+                    addToast({
+                        type: "error",
+                        title: "Upload Failed",
+                        description: progress.error || "Failed to upload video",
+                    })
                 }
             } catch (error) {
                 console.error("Failed to poll progress:", error)
+                // Retry polling on error
+                setTimeout(() => pollProgress(fileId, videoId), 5000)
             }
         },
         [addToast]
@@ -320,6 +338,24 @@ export default function VideoUploadPage() {
                 return <FileVideo className="h-5 w-5 text-blue-500 animate-pulse" />
             default:
                 return <FileVideo className="h-5 w-5 text-muted-foreground" />
+        }
+    }
+
+    const getStatusText = (file: UploadFile) => {
+        switch (file.status) {
+            case "completed":
+                return "Published on YouTube"
+            case "error":
+                return file.error || "Upload failed"
+            case "uploading":
+                if (file.progress < 10) {
+                    return "Queued for YouTube upload..."
+                }
+                return `Uploading to YouTube: ${file.progress}%`
+            case "processing":
+                return "Processing on YouTube..."
+            default:
+                return "Ready to upload"
         }
     }
 
@@ -523,10 +559,16 @@ export default function VideoUploadPage() {
                                                     {file.title}
                                                 </p>
                                                 <p className="text-xs text-muted-foreground">
-                                                    {formatFileSize(file.file.size)}
+                                                    {file.status === "pending"
+                                                        ? formatFileSize(file.file.size)
+                                                        : getStatusText(file)
+                                                    }
                                                 </p>
-                                                {file.status === "uploading" && (
-                                                    <Progress value={file.progress} className="h-1 mt-1" />
+                                                {(file.status === "uploading" || file.status === "processing") && (
+                                                    <Progress
+                                                        value={file.progress}
+                                                        className={`h-1 mt-1 ${file.status === "processing" ? "animate-pulse" : ""}`}
+                                                    />
                                                 )}
                                             </div>
                                             <div className="flex items-center gap-2">

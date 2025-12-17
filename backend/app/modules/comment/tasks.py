@@ -11,7 +11,7 @@ from typing import Optional
 from celery import shared_task
 
 from app.core.celery_app import celery_app
-from app.core.database import async_session_maker
+from app.core.database import celery_session_maker
 
 
 @celery_app.task(
@@ -44,7 +44,7 @@ def sync_comments_task(
     from app.modules.comment.service import CommentService
 
     async def _sync():
-        async with async_session_maker() as session:
+        async with celery_session_maker() as session:
             service = CommentService(session)
             result = await service.sync_comments_for_account(
                 account_id=uuid.UUID(account_id),
@@ -90,7 +90,7 @@ def analyze_sentiment_task(
     from app.modules.comment.service import CommentService
 
     async def _analyze():
-        async with async_session_maker() as session:
+        async with celery_session_maker() as session:
             service = CommentService(session)
             result = await service.analyze_sentiment(
                 comment_ids=[uuid.UUID(cid) for cid in comment_ids]
@@ -136,7 +136,7 @@ def process_auto_replies_task(
     from app.modules.comment.repository import CommentRepository
 
     async def _process():
-        async with async_session_maker() as session:
+        async with celery_session_maker() as session:
             service = CommentService(session)
             comment_repo = CommentRepository(session)
             
@@ -180,7 +180,7 @@ def sync_all_accounts_task() -> dict:
     from app.modules.account.encryption import decrypt_token
 
     async def _sync_all():
-        async with async_session_maker() as session:
+        async with celery_session_maker() as session:
             account_repo = YouTubeAccountRepository(session)
             
             # Get all active accounts
@@ -228,7 +228,7 @@ def reset_daily_auto_reply_counts_task() -> dict:
     from app.modules.account.repository import YouTubeAccountRepository
 
     async def _reset():
-        async with async_session_maker() as session:
+        async with celery_session_maker() as session:
             account_repo = YouTubeAccountRepository(session)
             rule_repo = AutoReplyRuleRepository(session)
             

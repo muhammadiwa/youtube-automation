@@ -12,7 +12,7 @@ from typing import Optional
 from celery import Task
 
 from app.core.celery_app import celery_app
-from app.core.database import async_session_maker
+from app.core.database import celery_session_maker
 from app.modules.job.tasks import BaseTaskWithRetry, RetryConfig, RETRY_CONFIGS
 from app.modules.transcoding.models import (
     TranscodeJob,
@@ -68,7 +68,7 @@ class TranscodeTask(Task):
 
     async def _mark_job_failed(self, job_id: str, error: str):
         """Mark job as failed in database."""
-        async with async_session_maker() as session:
+        async with celery_session_maker() as session:
             repo = TranscodeJobRepository(session)
             job = await repo.get_by_id(uuid.UUID(job_id))
             if job:
@@ -128,7 +128,7 @@ def transcode_video_task(
 
 async def _transcode_video_async(job_id: str) -> dict:
     """Async implementation of video transcoding."""
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         job_repo = TranscodeJobRepository(session)
         worker_repo = TranscodeWorkerRepository(session)
         
@@ -268,7 +268,7 @@ async def _transcode_abr_async(
     bitrates: Optional[list[int]],
 ) -> dict:
     """Async implementation of ABR transcoding."""
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         job_repo = TranscodeJobRepository(session)
         
         job = await job_repo.get_by_id(uuid.UUID(job_id))
@@ -355,7 +355,7 @@ def dispatch_transcode_job(
 
 async def _dispatch_job_async(job_id: str) -> dict:
     """Async implementation of job dispatch."""
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         job_repo = TranscodeJobRepository(session)
         worker_repo = TranscodeWorkerRepository(session)
         
@@ -406,7 +406,7 @@ async def _process_queued_jobs_async() -> dict:
     dispatched = []
     errors = []
     
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         job_repo = TranscodeJobRepository(session)
         worker_repo = TranscodeWorkerRepository(session)
         
@@ -464,7 +464,7 @@ async def _worker_heartbeat_async(
     current_load: float,
 ) -> dict:
     """Async implementation of worker heartbeat."""
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         repo = TranscodeWorkerRepository(session)
         worker = await repo.heartbeat(hostname, current_jobs, current_load)
         

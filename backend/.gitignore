@@ -86,3 +86,6 @@ logs/
 # Local configuration
 .env.local
 .env.*.local
+
+# Storage (uploaded files)
+storage/

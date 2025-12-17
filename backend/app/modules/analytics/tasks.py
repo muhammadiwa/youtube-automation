@@ -13,7 +13,7 @@ from datetime import datetime
 from celery import shared_task
 
 from app.core.celery_app import celery_app
-from app.core.database import async_session_maker
+from app.core.database import celery_session_maker
 from app.core.storage import storage_service
 
 
@@ -37,7 +37,7 @@ async def _generate_report_async(report_id: str, include_ai_insights: bool):
     )
     from app.modules.analytics.service import AnalyticsService
 
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         report_repo = AnalyticsReportRepository(session)
         report = await report_repo.get_by_id(uuid.UUID(report_id))
 

@@ -15,10 +15,9 @@ import { AdminLayout } from "@/components/admin"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Calendar as CalendarComponent } from "@/components/ui/calendar"
+import { DateRangePicker } from "@/components/ui/date-picker"
 import { cn } from "@/lib/utils"
-import { format, subDays } from "date-fns"
+import { subDays } from "date-fns"
 import adminApi from "@/lib/api/admin"
 import type { FunnelAnalysisResponse } from "@/types/admin"
 
@@ -92,26 +91,14 @@ export default function FunnelAnalysisPage() {
                         </p>
                     </div>
                     <div className="flex items-center gap-3">
-                        <Popover>
-                            <PopoverTrigger asChild>
-                                <Button variant="outline" className="w-[240px] justify-start text-left font-normal">
-                                    <Calendar className="mr-2 h-4 w-4" />
-                                    {format(dateRange.from, "MMM d")} - {format(dateRange.to, "MMM d, yyyy")}
-                                </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-auto p-0" align="end">
-                                <CalendarComponent
-                                    mode="range"
-                                    selected={{ from: dateRange.from, to: dateRange.to }}
-                                    onSelect={(range) => {
-                                        if (range?.from && range?.to) {
-                                            setDateRange({ from: range.from, to: range.to })
-                                        }
-                                    }}
-                                    numberOfMonths={2}
-                                />
-                            </PopoverContent>
-                        </Popover>
+                        <DateRangePicker
+                            startDate={dateRange.from}
+                            endDate={dateRange.to}
+                            onStartDateChange={(d) => d && setDateRange(prev => ({ ...prev, from: d }))}
+                            onEndDateChange={(d) => d && setDateRange(prev => ({ ...prev, to: d }))}
+                            startPlaceholder="Start date"
+                            endPlaceholder="End date"
+                        />
                         <Button variant="outline" size="icon" onClick={handleRefresh} disabled={refreshing}>
                             <RefreshCcw className={cn("h-4 w-4", refreshing && "animate-spin")} />
                         </Button>

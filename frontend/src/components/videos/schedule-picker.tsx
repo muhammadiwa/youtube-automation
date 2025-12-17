@@ -1,10 +1,11 @@
 "use client"
 
 import { useState } from "react"
-import { format } from "date-fns"
+import { format, startOfDay } from "date-fns"
 import { Calendar as CalendarIcon, Clock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
+import { Input } from "@/components/ui/input"
 import {
     Popover,
     PopoverContent,
@@ -31,16 +32,20 @@ interface SchedulePickerProps {
 export function SchedulePicker({
     value,
     onChange,
-    minDate = new Date(),
+    minDate,
     disabled = false,
 }: SchedulePickerProps) {
     const [isScheduled, setIsScheduled] = useState(!!value)
     const [selectedDate, setSelectedDate] = useState<Date | undefined>(value || undefined)
     const [selectedHour, setSelectedHour] = useState(value ? format(value, "HH") : "12")
     const [selectedMinute, setSelectedMinute] = useState(value ? format(value, "mm") : "00")
+    const [calendarOpen, setCalendarOpen] = useState(false)
 
+    // Generate hours 00-23
     const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, "0"))
-    const minutes = ["00", "15", "30", "45"]
+
+    // Use start of today as minimum date (allows selecting today)
+    const effectiveMinDate = minDate ? startOfDay(minDate) : startOfDay(new Date())
 
     const handleScheduleToggle = (checked: boolean) => {
         setIsScheduled(checked)
@@ -56,19 +61,53 @@ export function SchedulePicker({
         if (date && isScheduled) {
             updateDateTime(date, selectedHour, selectedMinute)
         }
+        setCalendarOpen(false)
     }
 
-    const handleTimeChange = (hour: string, minute: string) => {
+    const handleHourChange = (hour: string) => {
         setSelectedHour(hour)
-        setSelectedMinute(minute)
         if (selectedDate && isScheduled) {
-            updateDateTime(selectedDate, hour, minute)
+            updateDateTime(selectedDate, hour, selectedMinute)
+        }
+    }
+
+    const handleMinuteChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const value = e.target.value
+
+        // Allow empty or partial input while typing
+        if (value === "") {
+            setSelectedMinute("")
+            return
+        }
+
+        // Only allow numbers
+        if (!/^\d*$/.test(value)) return
+
+        // Limit to 2 digits
+        if (value.length > 2) return
+
+        setSelectedMinute(value)
+    }
+
+    const handleMinuteBlur = () => {
+        // On blur, validate and format the minute
+        let minute = parseInt(selectedMinute) || 0
+        if (minute > 59) minute = 59
+        if (minute < 0) minute = 0
+
+        const paddedMinute = minute.toString().padStart(2, "0")
+        setSelectedMinute(paddedMinute)
+
+        if (selectedDate && isScheduled) {
+            updateDateTime(selectedDate, selectedHour, paddedMinute)
         }
     }
 
     const updateDateTime = (date: Date, hour: string, minute: string) => {
         const newDate = new Date(date)
-        newDate.setHours(parseInt(hour), parseInt(minute), 0, 0)
+        const h = parseInt(hour) || 0
+        const m = parseInt(minute) || 0
+        newDate.setHours(h, m, 0, 0)
         onChange(newDate)
     }
 
@@ -93,12 +132,12 @@ export function SchedulePicker({
                     {/* Date Picker */}
                     <div className="space-y-2">
                         <Label>Date</Label>
-                        <Popover>
+                        <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
                             <PopoverTrigger asChild>
                                 <Button
                                     variant="outline"
                                     className={cn(
-                                        "w-full justify-start text-left font-normal",
+                                        "w-full justify-start text-left font-normal h-10",
                                         !selectedDate && "text-muted-foreground"
                                     )}
                                     disabled={disabled}
@@ -107,76 +146,79 @@ export function SchedulePicker({
                                     {selectedDate ? format(selectedDate, "PPP") : "Pick a date"}
                                 </Button>
                             </PopoverTrigger>
-                            <PopoverContent className="w-auto p-0" align="start">
+                            <PopoverContent className="w-auto p-0" align="start" sideOffset={4}>
                                 <Calendar
                                     mode="single"
                                     selected={selectedDate}
                                     onSelect={handleDateSelect}
-                                    disabled={(date) => date < minDate}
-                                    initialFocus
+                                    disabled={(date) => date < effectiveMinDate}
+                                    autoFocus
                                 />
                             </PopoverContent>
                         </Popover>
                     </div>
 
-                    {/* Time Picker */}
+                    {/* Time Picker - Hour dropdown + Minute input */}
                     <div className="space-y-2">
                         <Label>Time</Label>
-                        <div className="flex gap-2">
+                        <div className="flex items-center gap-1">
+                            <Clock className="h-4 w-4 text-muted-foreground mr-1" />
+                            {/* Hour Select */}
                             <Select
                                 value={selectedHour}
-                                onValueChange={(h) => handleTimeChange(h, selectedMinute)}
+                                onValueChange={handleHourChange}
                                 disabled={disabled}
                             >
-                                <SelectTrigger className="w-full">
-                                    <Clock className="mr-2 h-4 w-4" />
-                                    <SelectValue />
+                                <SelectTrigger className="w-[70px] h-10">
+                                    <SelectValue placeholder="HH" />
                                 </SelectTrigger>
-                                <SelectContent>
+                                <SelectContent className="max-h-[200px]">
                                     {hours.map((hour) => (
                                         <SelectItem key={hour} value={hour}>
-                                            {hour}:00
+                                            {hour}
                                         </SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>
-                            <Select
+
+                            <span className="text-lg font-medium px-1">:</span>
+
+                            {/* Minute Input */}
+                            <Input
+                                type="text"
+                                inputMode="numeric"
                                 value={selectedMinute}
-                                onValueChange={(m) => handleTimeChange(selectedHour, m)}
+                                onChange={handleMinuteChange}
+                                onBlur={handleMinuteBlur}
                                 disabled={disabled}
-                            >
-                                <SelectTrigger className="w-20">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {minutes.map((minute) => (
-                                        <SelectItem key={minute} value={minute}>
-                                            :{minute}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                                className="w-[70px] h-10 text-center"
+                                placeholder="00"
+                                maxLength={2}
+                            />
                         </div>
                     </div>
                 </div>
             )}
 
             {isScheduled && selectedDate && (
-                <p className="text-sm text-muted-foreground">
-                    Video will be published on{" "}
-                    <span className="font-medium text-foreground">
-                        {format(
-                            new Date(
-                                selectedDate.getFullYear(),
-                                selectedDate.getMonth(),
-                                selectedDate.getDate(),
-                                parseInt(selectedHour),
-                                parseInt(selectedMinute)
-                            ),
-                            "PPP 'at' p"
-                        )}
-                    </span>
-                </p>
+                <div className="flex items-center gap-2 p-3 rounded-lg bg-primary/5 border border-primary/20">
+                    <CalendarIcon className="h-4 w-4 text-primary shrink-0" />
+                    <p className="text-sm">
+                        Video will be published on{" "}
+                        <span className="font-semibold text-primary">
+                            {format(
+                                new Date(
+                                    selectedDate.getFullYear(),
+                                    selectedDate.getMonth(),
+                                    selectedDate.getDate(),
+                                    parseInt(selectedHour) || 0,
+                                    parseInt(selectedMinute) || 0
+                                ),
+                                "EEEE, MMMM d, yyyy 'at' h:mm a"
+                            )}
+                        </span>
+                    </p>
+                </div>
             )}
         </div>
     )

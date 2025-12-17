@@ -20,10 +20,9 @@ import { AdminLayout } from "@/components/admin"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Calendar as CalendarComponent } from "@/components/ui/calendar"
+import { DateRangePicker } from "@/components/ui/date-picker"
 import { Skeleton } from "@/components/ui/skeleton"
-import { format, subDays, subMonths } from "date-fns"
+import { subDays, subMonths } from "date-fns"
 import { cn } from "@/lib/utils"
 import adminApi from "@/lib/api/admin"
 import type { RevenueAnalytics } from "@/types/admin"
@@ -206,31 +205,14 @@ export default function AdminRevenuePage() {
                         </Select>
 
                         {dateRange === "custom" && (
-                            <div className="flex items-center gap-2">
-                                <Popover>
-                                    <PopoverTrigger asChild>
-                                        <Button variant="outline" size="sm">
-                                            <Calendar className="h-4 w-4 mr-2" />
-                                            {startDate ? format(startDate, "PP") : "Start"}
-                                        </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-auto p-0" align="start">
-                                        <CalendarComponent mode="single" selected={startDate} onSelect={setStartDate} initialFocus />
-                                    </PopoverContent>
-                                </Popover>
-                                <span className="text-muted-foreground">to</span>
-                                <Popover>
-                                    <PopoverTrigger asChild>
-                                        <Button variant="outline" size="sm">
-                                            <Calendar className="h-4 w-4 mr-2" />
-                                            {endDate ? format(endDate, "PP") : "End"}
-                                        </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-auto p-0" align="start">
-                                        <CalendarComponent mode="single" selected={endDate} onSelect={setEndDate} initialFocus />
-                                    </PopoverContent>
-                                </Popover>
-                            </div>
+                            <DateRangePicker
+                                startDate={startDate}
+                                endDate={endDate}
+                                onStartDateChange={setStartDate}
+                                onEndDateChange={setEndDate}
+                                startPlaceholder="Start date"
+                                endPlaceholder="End date"
+                            />
                         )}
 
                         <Button variant="outline" size="icon" onClick={fetchAnalytics} disabled={isLoading}>
