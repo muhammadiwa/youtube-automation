@@ -39,6 +39,7 @@ import analyticsApi, { AnalyticsReport } from "@/lib/api/analytics";
 import accountsApi from "@/lib/api/accounts";
 import { YouTubeAccount } from "@/types";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 
 type ReportType = "daily" | "weekly" | "monthly" | "custom";
 type ReportFormat = "pdf" | "csv" | "json";
@@ -55,6 +56,7 @@ const AVAILABLE_METRICS = [
 ];
 
 export default function ReportsPage() {
+    const { addToast } = useToast();
     const [accounts, setAccounts] = useState<YouTubeAccount[]>([]);
     const [reports, setReports] = useState<AnalyticsReport[]>([]);
     const [loading, setLoading] = useState(true);
@@ -115,7 +117,11 @@ export default function ReportsPage() {
 
     const handleGenerateReport = async () => {
         if (!reportName || selectedMetrics.length === 0) {
-            alert("Please provide a report name and select at least one metric");
+            addToast({
+                title: "Missing Information",
+                description: "Please provide a report name and select at least one metric.",
+                type: "error",
+            });
             return;
         }
 
@@ -137,24 +143,19 @@ export default function ReportsPage() {
             // Reset form
             setReportName("");
             setSelectedMetrics(["views", "subscribers", "watch_time", "revenue"]);
+
+            addToast({
+                title: "Report Generated",
+                description: "Your report has been generated successfully.",
+                type: "success",
+            });
         } catch (error) {
             console.error("Failed to generate report:", error);
-            // Add mock report for demo
-            const mockReport: AnalyticsReport = {
-                id: Date.now().toString(),
-                name: reportName,
-                type: reportType,
-                start_date: startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-                end_date: endDate || new Date().toISOString(),
-                metrics: selectedMetrics,
-                format: reportFormat,
-                status: "completed",
-                download_url: "#",
-                created_at: new Date().toISOString(),
-            };
-            setReports(prev => [mockReport, ...prev]);
-            setShowPreview(false);
-            setReportName("");
+            addToast({
+                title: "Failed to Generate Report",
+                description: "Please try again later.",
+                type: "error",
+            });
         } finally {
             setGenerating(false);
         }

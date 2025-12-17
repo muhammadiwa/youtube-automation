@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter, useParams } from "next/navigation"
-import { Save, Upload, X, Clock, ChevronRight, ChevronDown, History } from "lucide-react"
+import { Save, X, ChevronRight, ChevronDown, History } from "lucide-react"
 import { DashboardLayout } from "@/components/dashboard"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -11,20 +11,14 @@ import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { videosApi } from "@/lib/api/videos"
+import { useToast } from "@/components/ui/toast"
 import type { Video } from "@/types"
-import { AITitleSuggestionsModal } from "@/components/dashboard/ai-title-suggestions-modal"
-import { AIDescriptionGenerator } from "@/components/dashboard/ai-description-generator"
-import { AITagSuggestions } from "@/components/dashboard/ai-tag-suggestions"
-import { AIThumbnailGenerator } from "@/components/dashboard/ai-thumbnail-generator"
+import { AIGenerateButton } from "@/components/ai/ai-generate-button"
+import { CategorySelect } from "@/components/videos/category-select"
+import { SchedulePicker } from "@/components/videos/schedule-picker"
+import { ThumbnailUploader } from "@/components/videos/thumbnail-uploader"
 
 interface MetadataVersion {
     id: string
@@ -33,30 +27,16 @@ interface MetadataVersion {
     description: string
     tags: string[]
     visibility: string
+    categoryId?: string
     createdAt: string
-    createdBy: string
+    changedBy?: string
+    changeReason?: string
 }
-
-const YOUTUBE_CATEGORIES = [
-    { id: "1", name: "Film & Animation" },
-    { id: "2", name: "Autos & Vehicles" },
-    { id: "10", name: "Music" },
-    { id: "15", name: "Pets & Animals" },
-    { id: "17", name: "Sports" },
-    { id: "19", name: "Travel & Events" },
-    { id: "20", name: "Gaming" },
-    { id: "22", name: "People & Blogs" },
-    { id: "23", name: "Comedy" },
-    { id: "24", name: "Entertainment" },
-    { id: "25", name: "News & Politics" },
-    { id: "26", name: "Howto & Style" },
-    { id: "27", name: "Education" },
-    { id: "28", name: "Science & Technology" },
-]
 
 export default function VideoEditPage() {
     const router = useRouter()
     const params = useParams()
+    const { addToast } = useToast()
     const videoId = params.id as string
 
     const [video, setVideo] = useState<Video | null>(null)
@@ -72,8 +52,9 @@ export default function VideoEditPage() {
     const [tagInput, setTagInput] = useState("")
     const [categoryId, setCategoryId] = useState("22")
     const [visibility, setVisibility] = useState<"public" | "unlisted" | "private">("private")
-    const [scheduledPublishAt, setScheduledPublishAt] = useState("")
-    const [thumbnailPreview, setThumbnailPreview] = useState<string>("")
+    const [scheduledPublishAt, setScheduledPublishAt] = useState<Date | null>(null)
+    const [thumbnailUrl, setThumbnailUrl] = useState<string>("")
+    const [loadingVersions, setLoadingVersions] = useState(false)
 
     useEffect(() => {
         loadVideo()
@@ -86,15 +67,15 @@ export default function VideoEditPage() {
             const data = await videosApi.getVideo(videoId)
             setVideo(data)
             setTitle(data.title)
-            setDescription(data.description)
-            setTags(data.tags)
-            setCategoryId(data.categoryId)
-            setVisibility(data.visibility)
-            setScheduledPublishAt(data.scheduledPublishAt || "")
-            setThumbnailPreview(data.thumbnailUrl)
+            setDescription(data.description || "")
+            setTags(data.tags || [])
+            setCategoryId(data.categoryId || "22")
+            setVisibility(data.visibility || "private")
+            setScheduledPublishAt(data.scheduledPublishAt ? new Date(data.scheduledPublishAt) : null)
+            setThumbnailUrl(data.thumbnailUrl || "")
         } catch (error) {
             console.error("Failed to load video:", error)
-            alert("Failed to load video")
+            addToast({ type: "error", title: "Error", description: "Failed to load video" })
             router.push("/dashboard/videos")
         } finally {
             setLoading(false)
@@ -102,37 +83,38 @@ export default function VideoEditPage() {
     }
 
     const loadVersionHistory = async () => {
-        // Mock version history - in real implementation, fetch from API
-        setVersions([
-            {
-                id: "v1",
-                version: 1,
-                title: "Original Title",
-                description: "Original description",
-                tags: ["original", "tags"],
-                visibility: "private",
-                createdAt: new Date(Date.now() - 86400000).toISOString(),
-                createdBy: "user@example.com",
-            },
-        ])
-    }
-
-    const handleThumbnailUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0]
-        if (file) {
-            if (!file.type.startsWith("image/")) {
-                alert("Please upload an image file")
-                return
+        try {
+            setLoadingVersions(true)
+            const response = await fetch(
+                `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"}/videos/${videoId}/versions`,
+                {
+                    headers: {
+                        Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+                    },
+                }
+            )
+            if (response.ok) {
+                const data = await response.json()
+                // Backend returns array directly, map snake_case to camelCase
+                const rawVersions = Array.isArray(data) ? data : data.versions || []
+                const mappedVersions = rawVersions.map((v: any) => ({
+                    id: v.id,
+                    version: v.version_number,
+                    title: v.title,
+                    description: v.description,
+                    tags: v.tags || [],
+                    categoryId: v.category_id,
+                    visibility: v.visibility,
+                    createdAt: v.created_at,
+                    changedBy: v.changed_by,
+                    changeReason: v.change_reason,
+                }))
+                setVersions(mappedVersions)
             }
-            if (file.size > 2 * 1024 * 1024) {
-                alert("Image size must be less than 2MB")
-                return
-            }
-            const reader = new FileReader()
-            reader.onload = (ev) => {
-                setThumbnailPreview(ev.target?.result as string)
-            }
-            reader.readAsDataURL(file)
+        } catch (error) {
+            console.error("Failed to load version history:", error)
+        } finally {
+            setLoadingVersions(false)
         }
     }
 
@@ -149,7 +131,7 @@ export default function VideoEditPage() {
 
     const handleSave = async () => {
         if (!title.trim()) {
-            alert("Title is required")
+            addToast({ type: "error", title: "Validation Error", description: "Title is required" })
             return
         }
 
@@ -161,25 +143,44 @@ export default function VideoEditPage() {
                 tags,
                 categoryId,
                 visibility,
-                scheduledPublishAt: scheduledPublishAt || undefined,
+                scheduledPublishAt: scheduledPublishAt?.toISOString(),
             })
-            alert("Video updated successfully!")
+            addToast({ type: "success", title: "Success", description: "Video updated successfully!" })
             router.push("/dashboard/videos")
         } catch (error) {
             console.error("Failed to update video:", error)
-            alert("Failed to update video")
+            addToast({ type: "error", title: "Error", description: "Failed to update video" })
         } finally {
             setSaving(false)
         }
     }
 
-    const restoreVersion = (version: MetadataVersion) => {
-        if (confirm(`Restore version ${version.version}?`)) {
-            setTitle(version.title)
-            setDescription(version.description)
-            setTags(version.tags)
-            setVisibility(version.visibility as any)
+    const handleRollback = async (version: MetadataVersion) => {
+        try {
+            const response = await fetch(
+                `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"}/videos/${videoId}/rollback/${version.version}`,
+                {
+                    method: "POST",
+                    headers: {
+                        Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+                        "Content-Type": "application/json",
+                    },
+                }
+            )
+            if (response.ok) {
+                addToast({ type: "success", title: "Success", description: `Restored to version ${version.version}` })
+                loadVideo()
+                loadVersionHistory()
+            } else {
+                throw new Error("Failed to rollback")
+            }
+        } catch (error) {
+            addToast({ type: "error", title: "Error", description: "Failed to restore version" })
         }
+    }
+
+    const handleThumbnailUploadComplete = (url: string) => {
+        setThumbnailUrl(url)
     }
 
     if (loading) {
@@ -237,10 +238,10 @@ export default function VideoEditPage() {
                                         <Label htmlFor="title">
                                             Title <span className="text-destructive">*</span>
                                         </Label>
-                                        <AITitleSuggestionsModal
-                                            currentTitle={title}
-                                            description={description}
-                                            onApply={setTitle}
+                                        <AIGenerateButton
+                                            type="title"
+                                            context={{ videoContent: title, videoTitle: title }}
+                                            onSelect={(value) => setTitle(value as string)}
                                         />
                                     </div>
                                     <Input
@@ -258,10 +259,10 @@ export default function VideoEditPage() {
                                 <div>
                                     <div className="flex items-center justify-between mb-2">
                                         <Label htmlFor="description">Description</Label>
-                                        <AIDescriptionGenerator
-                                            title={title}
-                                            currentDescription={description}
-                                            onApply={setDescription}
+                                        <AIGenerateButton
+                                            type="description"
+                                            context={{ videoTitle: title, videoContent: description }}
+                                            onSelect={(value) => setDescription(value as string)}
                                         />
                                     </div>
                                     <Textarea
@@ -280,11 +281,18 @@ export default function VideoEditPage() {
                                 <div>
                                     <div className="flex items-center justify-between mb-2">
                                         <Label htmlFor="tags">Tags</Label>
-                                        <AITagSuggestions
-                                            title={title}
-                                            description={description}
-                                            currentTags={tags}
-                                            onAddTag={(tag) => setTags([...tags, tag])}
+                                        <AIGenerateButton
+                                            type="tags"
+                                            context={{
+                                                videoTitle: title,
+                                                videoDescription: description,
+                                                existingTags: tags,
+                                            }}
+                                            onSelect={(value) =>
+                                                setTags([...tags, ...(value as string[])].filter(
+                                                    (v, i, a) => a.indexOf(v) === i
+                                                ))
+                                            }
                                         />
                                     </div>
                                     <div className="flex gap-2">
@@ -292,7 +300,7 @@ export default function VideoEditPage() {
                                             id="tags"
                                             value={tagInput}
                                             onChange={(e) => setTagInput(e.target.value)}
-                                            onKeyPress={(e) => {
+                                            onKeyDown={(e) => {
                                                 if (e.key === "Enter") {
                                                     e.preventDefault()
                                                     addTag()
@@ -322,19 +330,11 @@ export default function VideoEditPage() {
                                 </div>
 
                                 <div>
-                                    <Label htmlFor="category">Category</Label>
-                                    <Select value={categoryId} onValueChange={setCategoryId}>
-                                        <SelectTrigger id="category">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {YOUTUBE_CATEGORIES.map((cat) => (
-                                                <SelectItem key={cat.id} value={cat.id}>
-                                                    {cat.name}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
+                                    <Label>Category</Label>
+                                    <CategorySelect
+                                        value={categoryId}
+                                        onValueChange={setCategoryId}
+                                    />
                                 </div>
                             </CardContent>
                         </Card>
@@ -347,7 +347,7 @@ export default function VideoEditPage() {
                             <CardContent className="space-y-4">
                                 <div>
                                     <Label>Visibility</Label>
-                                    <RadioGroup value={visibility} onValueChange={(v: any) => setVisibility(v)}>
+                                    <RadioGroup value={visibility} onValueChange={(v: "public" | "unlisted" | "private") => setVisibility(v)}>
                                         <div className="flex items-center space-x-2">
                                             <RadioGroupItem value="public" id="public" />
                                             <Label htmlFor="public" className="font-normal cursor-pointer">
@@ -369,21 +369,10 @@ export default function VideoEditPage() {
                                     </RadioGroup>
                                 </div>
 
-                                <div>
-                                    <Label htmlFor="schedule">Schedule Publish (Optional)</Label>
-                                    <div className="flex gap-2">
-                                        <Clock className="h-4 w-4 text-muted-foreground mt-3" />
-                                        <Input
-                                            id="schedule"
-                                            type="datetime-local"
-                                            value={scheduledPublishAt}
-                                            onChange={(e) => setScheduledPublishAt(e.target.value)}
-                                        />
-                                    </div>
-                                    <p className="text-xs text-muted-foreground mt-1">
-                                        Leave empty to publish immediately
-                                    </p>
-                                </div>
+                                <SchedulePicker
+                                    value={scheduledPublishAt}
+                                    onChange={setScheduledPublishAt}
+                                />
                             </CardContent>
                         </Card>
 
@@ -392,39 +381,12 @@ export default function VideoEditPage() {
                             <CardHeader>
                                 <CardTitle>Thumbnail</CardTitle>
                             </CardHeader>
-                            <CardContent className="space-y-4">
-                                <div className="flex gap-4">
-                                    {thumbnailPreview && (
-                                        <img
-                                            src={thumbnailPreview}
-                                            alt="Thumbnail"
-                                            className="w-48 aspect-video object-cover rounded border"
-                                        />
-                                    )}
-                                    <div className="flex-1 space-y-2">
-                                        <input
-                                            type="file"
-                                            id="thumbnail-upload"
-                                            className="hidden"
-                                            accept="image/*"
-                                            onChange={handleThumbnailUpload}
-                                        />
-                                        <Button asChild variant="outline" className="w-full">
-                                            <label htmlFor="thumbnail-upload" className="cursor-pointer">
-                                                <Upload className="mr-2 h-4 w-4" />
-                                                Upload New Thumbnail
-                                            </label>
-                                        </Button>
-                                        <AIThumbnailGenerator
-                                            videoTitle={title}
-                                            videoContent={description}
-                                            onApply={setThumbnailPreview}
-                                        />
-                                        <p className="text-xs text-muted-foreground">
-                                            Recommended: 1280x720px, max 2MB
-                                        </p>
-                                    </div>
-                                </div>
+                            <CardContent>
+                                <ThumbnailUploader
+                                    videoId={videoId}
+                                    currentThumbnail={thumbnailUrl}
+                                    onUploadComplete={handleThumbnailUploadComplete}
+                                />
                             </CardContent>
                         </Card>
                     </div>
@@ -476,7 +438,12 @@ export default function VideoEditPage() {
                             </CardHeader>
                             {showVersionHistory && (
                                 <CardContent className="space-y-3">
-                                    {versions.length === 0 ? (
+                                    {loadingVersions ? (
+                                        <div className="space-y-2">
+                                            <Skeleton className="h-16 w-full" />
+                                            <Skeleton className="h-16 w-full" />
+                                        </div>
+                                    ) : versions.length === 0 ? (
                                         <p className="text-sm text-muted-foreground">No version history</p>
                                     ) : (
                                         versions.map((version) => (
@@ -488,14 +455,19 @@ export default function VideoEditPage() {
                                                     <Button
                                                         size="sm"
                                                         variant="ghost"
-                                                        onClick={() => restoreVersion(version)}
+                                                        onClick={() => handleRollback(version)}
                                                     >
                                                         Restore
                                                     </Button>
                                                 </div>
-                                                <p className="text-xs text-muted-foreground line-clamp-2">
+                                                <p className="text-xs font-medium line-clamp-1">
                                                     {version.title}
                                                 </p>
+                                                {version.changeReason && (
+                                                    <p className="text-xs text-muted-foreground">
+                                                        {version.changeReason}
+                                                    </p>
+                                                )}
                                                 <p className="text-xs text-muted-foreground">
                                                     {new Date(version.createdAt).toLocaleString()}
                                                 </p>

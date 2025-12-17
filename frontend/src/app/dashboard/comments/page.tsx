@@ -41,6 +41,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { moderationApi, type Comment, type CommentsResponse } from "@/lib/api/moderation"
 import { accountsApi } from "@/lib/api/accounts"
 import { SentimentBadge, AttentionIndicator } from "@/components/dashboard/sentiment-indicator"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { useToast } from "@/components/ui/toast"
 import type { YouTubeAccount } from "@/types"
 
 // Status badge component
@@ -80,6 +82,12 @@ export default function CommentsPage() {
 
     // Bulk action state
     const [bulkActionLoading, setBulkActionLoading] = useState(false)
+
+    // Confirmation dialogs
+    const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; commentId: string }>({ open: false, commentId: "" })
+    const [bulkConfirm, setBulkConfirm] = useState<{ open: boolean; action: "delete" | "spam" | "approve" }>({ open: false, action: "delete" })
+
+    const { addToast } = useToast()
 
     useEffect(() => {
         loadAccounts()
@@ -154,22 +162,28 @@ export default function CommentsPage() {
             await moderationApi.replyToComment(commentId, replyText)
             setReplyingTo(null)
             setReplyText("")
+            addToast({ type: "success", title: "Reply Sent", description: "Your reply has been posted" })
             loadComments()
         } catch (error) {
             console.error("Failed to send reply:", error)
-            alert("Failed to send reply")
+            addToast({ type: "error", title: "Error", description: "Failed to send reply" })
         } finally {
             setSendingReply(false)
         }
     }
 
-    const handleDelete = async (commentId: string) => {
-        if (!confirm("Are you sure you want to delete this comment?")) return
+    const handleDelete = (commentId: string) => {
+        setDeleteConfirm({ open: true, commentId })
+    }
+
+    const confirmDelete = async () => {
         try {
-            await moderationApi.deleteComment(commentId)
+            await moderationApi.deleteComment(deleteConfirm.commentId)
+            addToast({ type: "success", title: "Deleted", description: "Comment deleted successfully" })
             loadComments()
         } catch (error) {
             console.error("Failed to delete comment:", error)
+            addToast({ type: "error", title: "Error", description: "Failed to delete comment" })
         }
     }
 
@@ -191,18 +205,21 @@ export default function CommentsPage() {
         }
     }
 
-    const handleBulkAction = async (action: "delete" | "spam" | "approve") => {
+    const handleBulkAction = (action: "delete" | "spam" | "approve") => {
         if (selectedComments.size === 0) return
-        if (!confirm(`Are you sure you want to ${action} ${selectedComments.size} comments?`)) return
+        setBulkConfirm({ open: true, action })
+    }
 
+    const confirmBulkAction = async () => {
         try {
             setBulkActionLoading(true)
-            await moderationApi.bulkModerateComments(Array.from(selectedComments), action)
+            await moderationApi.bulkModerateComments(Array.from(selectedComments), bulkConfirm.action)
+            addToast({ type: "success", title: "Success", description: `${selectedComments.size} comments ${bulkConfirm.action}ed` })
             setSelectedComments(new Set())
             loadComments()
         } catch (error) {
             console.error("Failed to perform bulk action:", error)
-            alert("Failed to perform bulk action")
+            addToast({ type: "error", title: "Error", description: "Failed to perform bulk action" })
         } finally {
             setBulkActionLoading(false)
         }
@@ -567,6 +584,29 @@ export default function CommentsPage() {
                     </div>
                 )}
             </div>
+
+            {/* Delete Confirmation Dialog */}
+            <ConfirmDialog
+                open={deleteConfirm.open}
+                onOpenChange={(open) => setDeleteConfirm((prev) => ({ ...prev, open }))}
+                title="Delete Comment"
+                description="Are you sure you want to delete this comment? This action cannot be undone."
+                confirmText="Delete"
+                variant="destructive"
+                onConfirm={confirmDelete}
+            />
+
+            {/* Bulk Action Confirmation Dialog */}
+            <ConfirmDialog
+                open={bulkConfirm.open}
+                onOpenChange={(open) => setBulkConfirm((prev) => ({ ...prev, open }))}
+                title={`${bulkConfirm.action.charAt(0).toUpperCase() + bulkConfirm.action.slice(1)} Comments`}
+                description={`Are you sure you want to ${bulkConfirm.action} ${selectedComments.size} selected comments?`}
+                confirmText={`${bulkConfirm.action.charAt(0).toUpperCase() + bulkConfirm.action.slice(1)} ${selectedComments.size} Comments`}
+                variant={bulkConfirm.action === "approve" ? "default" : "destructive"}
+                onConfirm={confirmBulkAction}
+                loading={bulkActionLoading}
+            />
         </DashboardLayout>
     )
 }

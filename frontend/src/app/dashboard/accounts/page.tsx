@@ -20,6 +20,8 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { accountsApi } from "@/lib/api"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { useToast } from "@/components/ui/toast"
 import { YouTubeAccount } from "@/types"
 import {
     Plus,
@@ -56,6 +58,9 @@ export default function AccountsPage() {
     const [currentPage, setCurrentPage] = useState(1)
     const [itemsPerPage, setItemsPerPage] = useState(12)
     const [refreshing, setRefreshing] = useState(false)
+    const [disconnectConfirm, setDisconnectConfirm] = useState<{ open: boolean; accountId: string; channelTitle: string }>({ open: false, accountId: "", channelTitle: "" })
+
+    const { addToast } = useToast()
 
     useEffect(() => {
         const error = searchParams.get("error")
@@ -428,15 +433,9 @@ export default function AccountsPage() {
                                             console.error("Failed to refresh token:", e)
                                         }
                                     }}
-                                    onDisconnect={async (id) => {
-                                        if (confirm("Are you sure you want to disconnect this account?")) {
-                                            try {
-                                                await accountsApi.disconnectAccount(id)
-                                                await loadAccounts()
-                                            } catch (e) {
-                                                console.error("Failed to disconnect:", e)
-                                            }
-                                        }
+                                    onDisconnect={(id) => {
+                                        const acc = accounts.find(a => a.id === id)
+                                        setDisconnectConfirm({ open: true, accountId: id, channelTitle: acc?.channelTitle || "this account" })
                                     }}
                                 />
                             ))}
@@ -521,6 +520,26 @@ export default function AccountsPage() {
                 )}
 
                 <ConnectAccountModal open={connectModalOpen} onOpenChange={setConnectModalOpen} />
+
+                {/* Disconnect Confirmation Dialog */}
+                <ConfirmDialog
+                    open={disconnectConfirm.open}
+                    onOpenChange={(open) => setDisconnectConfirm((prev) => ({ ...prev, open }))}
+                    title="Disconnect Account"
+                    description={`Are you sure you want to disconnect "${disconnectConfirm.channelTitle}"? You will need to reconnect to manage this channel again.`}
+                    confirmText="Disconnect"
+                    variant="destructive"
+                    onConfirm={async () => {
+                        try {
+                            await accountsApi.disconnectAccount(disconnectConfirm.accountId)
+                            addToast({ type: "success", title: "Disconnected", description: "Account disconnected successfully" })
+                            await loadAccounts()
+                        } catch (e) {
+                            console.error("Failed to disconnect:", e)
+                            addToast({ type: "error", title: "Error", description: "Failed to disconnect account" })
+                        }
+                    }}
+                />
             </div>
         </DashboardLayout>
     )

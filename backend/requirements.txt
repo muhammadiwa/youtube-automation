@@ -37,6 +37,7 @@ reportlab==4.0.8
 
 # File Upload
 python-multipart==0.0.6
+aiofiles==25.1.0
 
 # System Monitoring
 psutil==5.9.8

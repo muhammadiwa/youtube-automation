@@ -9,6 +9,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -101,14 +102,31 @@ async def upload_video(
     category_id: Optional[str] = Form(None),
     visibility: str = Form("private"),
     scheduled_publish_at: Optional[str] = Form(None),
+    thumbnail: Optional[UploadFile] = File(None),  # Optional thumbnail
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Upload a video file.
+    """Upload a video file with streaming support.
+
+    The file is streamed directly to disk without loading into memory,
+    making it efficient for large video files. After saving, a background
+    task handles the YouTube upload.
 
     Requirements: 3.1, 3.2
     """
+    from app.modules.video.upload_handler import (
+        stream_upload_to_disk,
+        cleanup_upload,
+        FileTooLargeError,
+        InvalidFileTypeError,
+        UploadError,
+    )
+    from app.modules.video.models import VideoVisibility
+    from datetime import datetime
+
     service = VideoService(db)
+    file_path = None
+    thumbnail_path = None
 
     try:
         # Parse tags
@@ -119,13 +137,30 @@ async def upload_video(
         # Parse scheduled time
         scheduled_at = None
         if scheduled_publish_at:
-            from datetime import datetime
-
             scheduled_at = datetime.fromisoformat(scheduled_publish_at)
 
-        # Create upload request
-        from app.modules.video.models import VideoVisibility
+        # Stream video file to disk (non-blocking for large files)
+        upload_result = await stream_upload_to_disk(file)
+        file_path = upload_result.file_path
+        file_size = upload_result.file_size
 
+        # Handle optional thumbnail upload
+        if thumbnail and thumbnail.filename:
+            import os
+            import aiofiles
+            from app.core.config import settings
+            
+            thumb_dir = getattr(settings, 'LOCAL_STORAGE_PATH', './storage') + "/thumbnails"
+            os.makedirs(thumb_dir, exist_ok=True)
+            
+            thumb_ext = os.path.splitext(thumbnail.filename)[1] or ".jpg"
+            thumbnail_path = os.path.join(thumb_dir, f"{uuid.uuid4()}{thumb_ext}")
+            
+            async with aiofiles.open(thumbnail_path, 'wb') as f:
+                content = await thumbnail.read()
+                await f.write(content)
+
+        # Create upload request
         request = VideoUploadRequest(
             title=title,
             description=description,
@@ -135,23 +170,40 @@ async def upload_video(
             scheduled_publish_at=scheduled_at,
         )
 
-        # Save file (in production, this would go to S3/storage)
-        file_path = f"/tmp/uploads/{file.filename}"
-        file_size = file.size or 0
-
-        # Create video and upload job
+        # Create video record and queue upload job
         video = await service.create_video(
             account_id=account_id,
             request=request,
             file_path=file_path,
             file_size=file_size,
+            thumbnail_path=thumbnail_path,
         )
 
+        await db.commit()
         job = await service.create_upload_job(video)
+        await db.commit()
         return job
 
-    except InvalidFileError as e:
+    except FileTooLargeError as e:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(e))
+    except InvalidFileTypeError as e:
+        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(e))
+    except UploadError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except InvalidFileError as e:
+        # Cleanup uploaded file on error
+        if file_path:
+            await cleanup_upload(file_path)
+        if thumbnail_path:
+            await cleanup_upload(thumbnail_path)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        # Cleanup uploaded file on error
+        if file_path:
+            await cleanup_upload(file_path)
+        if thumbnail_path:
+            await cleanup_upload(thumbnail_path)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.post("/bulk", response_model=BulkUploadResponse)
@@ -184,6 +236,320 @@ async def bulk_upload(
     return result
 
 
+class BulkDeleteRequest(BaseModel):
+    """Request schema for bulk delete."""
+    videoIds: list[uuid.UUID]
+
+
+class BulkDeleteResponse(BaseModel):
+    """Response schema for bulk delete."""
+    success: int
+    failed: int
+    results: list[dict]
+
+
+@router.post("/bulk-delete", response_model=BulkDeleteResponse)
+async def bulk_delete_videos(
+    request: BulkDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk delete multiple videos and their associated files."""
+    service = VideoService(db)
+    
+    success_count = 0
+    failed_count = 0
+    results = []
+    
+    for video_id in request.videoIds:
+        try:
+            await service.delete_video(video_id)
+            success_count += 1
+            results.append({"videoId": str(video_id), "success": True})
+        except VideoNotFoundError:
+            failed_count += 1
+            results.append({"videoId": str(video_id), "success": False, "error": "Video not found"})
+        except Exception as e:
+            failed_count += 1
+            results.append({"videoId": str(video_id), "success": False, "error": str(e)})
+    
+    await db.commit()
+    return BulkDeleteResponse(success=success_count, failed=failed_count, results=results)
+
+
+# Template endpoints - MUST be before /{video_id} routes
+@router.get("/templates", response_model=list[VideoTemplateResponse])
+async def get_templates(
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all templates for current user."""
+    service = VideoService(db)
+    templates = await service.get_templates(current_user.id)
+    return templates
+
+
+@router.post("/templates", response_model=VideoTemplateResponse, status_code=status.HTTP_201_CREATED)
+async def create_template(
+    request: VideoTemplateRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a video template."""
+    service = VideoService(db)
+    template = await service.create_template(
+        user_id=current_user.id,
+        name=request.name,
+        title_template=request.title_template,
+        description_template=request.description_template,
+        tags=request.tags,
+        category_id=request.category_id,
+        visibility=request.visibility.value if request.visibility else "private",
+        is_default=request.is_default,
+    )
+    await db.commit()
+    return template
+
+
+@router.get("/templates/{template_id}", response_model=VideoTemplateResponse)
+async def get_template(
+    template_id: uuid.UUID,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a specific template."""
+    service = VideoService(db)
+    template = await service.template_repo.get_by_id(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if str(template.user_id) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+    return template
+
+
+@router.put("/templates/{template_id}", response_model=VideoTemplateResponse)
+async def update_template(
+    template_id: uuid.UUID,
+    request: VideoTemplateRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update a template."""
+    service = VideoService(db)
+    template = await service.template_repo.get_by_id(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if str(template.user_id) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    if request.is_default and not template.is_default:
+        await service.template_repo.unset_defaults(current_user.id)
+
+    if request.name:
+        template.name = request.name
+    if request.title_template is not None:
+        template.title_template = request.title_template
+    if request.description_template is not None:
+        template.description_template = request.description_template
+    if request.tags is not None:
+        template.tags = request.tags
+    if request.category_id is not None:
+        template.category_id = request.category_id
+    if request.visibility:
+        template.visibility = request.visibility.value
+    template.is_default = request.is_default
+
+    await db.commit()
+    await db.refresh(template)
+    return template
+
+
+@router.delete("/templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_template(
+    template_id: uuid.UUID,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a template."""
+    service = VideoService(db)
+    template = await service.template_repo.get_by_id(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if str(template.user_id) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    await db.delete(template)
+    await db.commit()
+
+
+# YouTube Sync endpoints - MUST be before /{video_id} routes
+class YouTubeVideoItem(BaseModel):
+    """YouTube video item from channel."""
+    youtubeId: str
+    title: str
+    description: str
+    thumbnailUrl: str
+    publishedAt: str
+    viewCount: int
+    likeCount: int
+    commentCount: int
+    duration: str
+    visibility: str
+    isImported: bool
+
+
+class YouTubeVideoListResponse(BaseModel):
+    """Response for YouTube video list."""
+    videos: list[YouTubeVideoItem]
+    nextPageToken: Optional[str] = None
+
+
+class YouTubeImportRequest(BaseModel):
+    """Request to import a YouTube video."""
+    account_id: uuid.UUID
+    youtube_video_id: str
+
+
+class YouTubeImportResponse(BaseModel):
+    """Response for YouTube video import."""
+    success: bool
+    videoId: Optional[str] = None
+    message: str
+
+
+@router.get("/youtube/list", response_model=YouTubeVideoListResponse)
+async def list_youtube_videos(
+    account_id: uuid.UUID = Query(..., alias="account_id"),
+    page_token: Optional[str] = Query(None, alias="pageToken"),
+    max_results: int = Query(50, ge=1, le=50, alias="maxResults"),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List videos from YouTube channel."""
+    from app.modules.account.repository import AccountRepository
+    from app.modules.video.youtube_upload_api import YouTubeUploadAPI
+
+    account_repo = AccountRepository(db)
+    account = await account_repo.get_by_id(account_id)
+
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if str(account.user_id) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    try:
+        youtube_api = YouTubeUploadAPI(
+            access_token=account.access_token,
+            refresh_token=account.refresh_token,
+        )
+        videos_data = await youtube_api.list_channel_videos(
+            max_results=max_results,
+            page_token=page_token,
+        )
+
+        service = VideoService(db)
+        imported_ids = await service.get_imported_youtube_ids(account_id)
+
+        videos = []
+        for item in videos_data.get("items", []):
+            snippet = item.get("snippet", {})
+            statistics = item.get("statistics", {})
+            content_details = item.get("contentDetails", {})
+            status_info = item.get("status", {})
+
+            youtube_id = item.get("id")
+            if isinstance(youtube_id, dict):
+                youtube_id = youtube_id.get("videoId", "")
+
+            videos.append(YouTubeVideoItem(
+                youtubeId=youtube_id,
+                title=snippet.get("title", ""),
+                description=snippet.get("description", ""),
+                thumbnailUrl=snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
+                publishedAt=snippet.get("publishedAt", ""),
+                viewCount=int(statistics.get("viewCount", 0)),
+                likeCount=int(statistics.get("likeCount", 0)),
+                commentCount=int(statistics.get("commentCount", 0)),
+                duration=content_details.get("duration", ""),
+                visibility=status_info.get("privacyStatus", "private"),
+                isImported=youtube_id in imported_ids,
+            ))
+
+        return YouTubeVideoListResponse(
+            videos=videos,
+            nextPageToken=videos_data.get("nextPageToken"),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch YouTube videos: {str(e)}")
+
+
+@router.post("/youtube/import", response_model=YouTubeImportResponse)
+async def import_youtube_video(
+    request: YouTubeImportRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Import an existing YouTube video into the platform."""
+    from app.modules.account.repository import AccountRepository
+    from app.modules.video.youtube_upload_api import YouTubeUploadAPI
+    from app.modules.video.models import VideoVisibility
+
+    account_repo = AccountRepository(db)
+    account = await account_repo.get_by_id(request.account_id)
+
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if str(account.user_id) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    try:
+        youtube_api = YouTubeUploadAPI(
+            access_token=account.access_token,
+            refresh_token=account.refresh_token,
+        )
+        video_data = await youtube_api.get_video_details(request.youtube_video_id)
+
+        if not video_data:
+            raise HTTPException(status_code=404, detail="Video not found on YouTube")
+
+        snippet = video_data.get("snippet", {})
+        statistics = video_data.get("statistics", {})
+        status_info = video_data.get("status", {})
+
+        service = VideoService(db)
+        visibility_map = {
+            "public": VideoVisibility.PUBLIC,
+            "unlisted": VideoVisibility.UNLISTED,
+            "private": VideoVisibility.PRIVATE,
+        }
+
+        video = await service.import_youtube_video(
+            account_id=request.account_id,
+            youtube_id=request.youtube_video_id,
+            title=snippet.get("title", ""),
+            description=snippet.get("description", ""),
+            tags=snippet.get("tags", []),
+            category_id=snippet.get("categoryId", "22"),
+            visibility=visibility_map.get(status_info.get("privacyStatus", "private"), VideoVisibility.PRIVATE),
+            thumbnail_url=snippet.get("thumbnails", {}).get("high", {}).get("url", ""),
+            view_count=int(statistics.get("viewCount", 0)),
+            like_count=int(statistics.get("likeCount", 0)),
+            comment_count=int(statistics.get("commentCount", 0)),
+            published_at=snippet.get("publishedAt"),
+        )
+
+        await db.commit()
+        return YouTubeImportResponse(
+            success=True,
+            videoId=str(video.id),
+            message="Video imported successfully",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to import video: {str(e)}")
+
+
+# Video by ID routes - MUST be after /templates and /youtube routes
 @router.get("/{video_id}", response_model=VideoResponse)
 async def get_video(
     video_id: uuid.UUID,
@@ -213,6 +579,67 @@ async def get_upload_progress(
     try:
         progress = await service.get_upload_progress(video_id)
         return progress
+    except VideoNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.post("/{video_id}/thumbnail")
+async def upload_thumbnail(
+    video_id: uuid.UUID,
+    thumbnail: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload custom thumbnail for a video.
+
+    Thumbnail will be uploaded to YouTube after video processing is complete.
+    Supported formats: JPEG, PNG, GIF, BMP (max 2MB)
+    """
+    import os
+    import tempfile
+    from app.modules.video.tasks import upload_thumbnail_task
+
+    service = VideoService(db)
+
+    try:
+        video = await service.get_video(video_id)
+
+        if not video.youtube_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Video must be uploaded to YouTube first",
+            )
+
+        # Validate thumbnail
+        allowed_types = ["image/jpeg", "image/png", "image/gif", "image/bmp"]
+        if thumbnail.content_type not in allowed_types:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid file type. Allowed: {', '.join(allowed_types)}",
+            )
+
+        max_size = 2 * 1024 * 1024  # 2MB
+        content = await thumbnail.read()
+        if len(content) > max_size:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Thumbnail size exceeds 2MB limit",
+            )
+
+        # Save thumbnail temporarily
+        ext = os.path.splitext(thumbnail.filename)[1] or ".jpg"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        # Queue thumbnail upload task
+        task = upload_thumbnail_task.delay(str(video_id), tmp_path)
+
+        return {
+            "status": "queued",
+            "task_id": task.id,
+            "message": "Thumbnail upload queued",
+        }
+
     except VideoNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
@@ -379,51 +806,14 @@ async def delete_video(
     video_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a video."""
+    """Delete a video and its associated files."""
     service = VideoService(db)
 
     try:
         await service.delete_video(video_id)
+        await db.commit()
     except VideoNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
-# Template endpoints
-template_router = APIRouter(prefix="/templates", tags=["video-templates"])
 
-
-@template_router.post("", response_model=VideoTemplateResponse, status_code=status.HTTP_201_CREATED)
-async def create_template(
-    user_id: uuid.UUID,  # In production, get from auth
-    request: VideoTemplateRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    """Create a video template.
-
-    Requirements: 4.2
-    """
-    service = VideoService(db)
-
-    template = await service.create_template(
-        user_id=user_id,
-        name=request.name,
-        description_template=request.description_template,
-        tags=request.tags,
-        category_id=request.category_id,
-        visibility=request.visibility.value,
-    )
-    return template
-
-
-@template_router.get("", response_model=list[VideoTemplateResponse])
-async def get_templates(
-    user_id: uuid.UUID,  # In production, get from auth
-    db: AsyncSession = Depends(get_db),
-):
-    """Get all templates for a user.
-
-    Requirements: 4.2
-    """
-    service = VideoService(db)
-    templates = await service.get_templates(user_id)
-    return templates

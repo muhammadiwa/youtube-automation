@@ -27,6 +27,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { streamsApi, type LiveEvent, type StreamHealth } from "@/lib/api/streams"
 import { LiveChatPanel } from "@/components/dashboard/live-chat-panel"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { useToast } from "@/hooks/use-toast"
 
 function formatDuration(seconds: number): string {
     const hrs = Math.floor(seconds / 3600)
@@ -68,6 +70,8 @@ export default function StreamControlPage() {
     const [actionLoading, setActionLoading] = useState(false)
     const [duration, setDuration] = useState(0)
     const [copied, setCopied] = useState<string | null>(null)
+    const [stopConfirmOpen, setStopConfirmOpen] = useState(false)
+    const { addToast } = useToast()
 
     const loadEvent = useCallback(async () => {
         try {
@@ -115,23 +119,40 @@ export default function StreamControlPage() {
             setActionLoading(true)
             await streamsApi.startEvent(eventId)
             await loadEvent()
+            addToast({
+                title: "Stream Started",
+                description: "Your stream is now live!",
+                type: "success",
+            })
         } catch (error) {
             console.error("Failed to start stream:", error)
-            alert("Failed to start stream")
+            addToast({
+                title: "Failed to Start Stream",
+                description: "Please check your settings and try again.",
+                type: "error",
+            })
         } finally {
             setActionLoading(false)
         }
     }
 
     const handleStopStream = async () => {
-        if (!confirm("Are you sure you want to stop the stream?")) return
         try {
             setActionLoading(true)
             await streamsApi.stopEvent(eventId)
             await loadEvent()
+            addToast({
+                title: "Stream Ended",
+                description: "Your stream has been stopped successfully.",
+                type: "success",
+            })
         } catch (error) {
             console.error("Failed to stop stream:", error)
-            alert("Failed to stop stream")
+            addToast({
+                title: "Failed to Stop Stream",
+                description: "Please try again.",
+                type: "error",
+            })
         } finally {
             setActionLoading(false)
         }
@@ -229,7 +250,7 @@ export default function StreamControlPage() {
                         {isLive && (
                             <Button
                                 variant="destructive"
-                                onClick={handleStopStream}
+                                onClick={() => setStopConfirmOpen(true)}
                                 disabled={actionLoading}
                             >
                                 <Square className="mr-2 h-4 w-4" />
@@ -453,6 +474,19 @@ export default function StreamControlPage() {
                     </div>
                 </div>
             </div>
+
+            {/* Stop Stream Confirmation Dialog */}
+            <ConfirmDialog
+                open={stopConfirmOpen}
+                onOpenChange={setStopConfirmOpen}
+                title="End Live Stream"
+                description="Are you sure you want to end this stream? This action cannot be undone and your viewers will be disconnected."
+                confirmText="End Stream"
+                cancelText="Cancel"
+                variant="destructive"
+                onConfirm={handleStopStream}
+                loading={actionLoading}
+            />
         </DashboardLayout>
     )
 }

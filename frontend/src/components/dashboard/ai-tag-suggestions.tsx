@@ -14,6 +14,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { aiApi, type TagSuggestion } from "@/lib/api/ai"
+import { useToast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 
 interface AITagSuggestionsProps {
@@ -36,13 +37,14 @@ export function AITagSuggestions({
     currentTags,
     onAddTag,
 }: AITagSuggestionsProps) {
+    const { addToast } = useToast()
     const [open, setOpen] = useState(false)
     const [loading, setLoading] = useState(false)
     const [suggestions, setSuggestions] = useState<TagSuggestion[]>([])
 
     const generateTags = async () => {
         if (!title.trim()) {
-            alert("Please enter a video title first")
+            addToast({ type: "warning", title: "Missing Title", description: "Please enter a video title first" })
             return
         }
 
@@ -55,7 +57,7 @@ export function AITagSuggestions({
             setSuggestions(response.suggestions)
         } catch (error) {
             console.error("Failed to generate tags:", error)
-            alert("Failed to generate tag suggestions")
+            addToast({ type: "error", title: "Error", description: "Failed to generate tag suggestions" })
         } finally {
             setLoading(false)
         }

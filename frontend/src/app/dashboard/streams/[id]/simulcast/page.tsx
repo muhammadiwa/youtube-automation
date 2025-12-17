@@ -43,6 +43,8 @@ import {
     SelectValue,
 } from "@/components/ui/select"
 import { streamsApi, type LiveEvent, type SimulcastTarget } from "@/lib/api/streams"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { useToast } from "@/components/ui/toast"
 
 const PLATFORMS = [
     { id: "youtube", name: "YouTube", icon: Youtube, color: "text-red-500", rtmpUrl: "rtmp://a.rtmp.youtube.com/live2" },
@@ -88,10 +90,12 @@ function AddTargetDialog({
     open,
     onOpenChange,
     onAdd,
+    onValidationError,
 }: {
     open: boolean
     onOpenChange: (open: boolean) => void
     onAdd: (platform: string, rtmpUrl: string, streamKey: string) => void
+    onValidationError?: () => void
 }) {
     const [platform, setPlatform] = useState("youtube")
     const [rtmpUrl, setRtmpUrl] = useState("")
@@ -107,7 +111,7 @@ function AddTargetDialog({
 
     const handleSubmit = () => {
         if (!rtmpUrl.trim() || !streamKey.trim()) {
-            alert("Please fill in all fields")
+            onValidationError?.()
             return
         }
         onAdd(platform, rtmpUrl, streamKey)
@@ -193,6 +197,9 @@ export default function SimulcastPage() {
     const [addDialogOpen, setAddDialogOpen] = useState(false)
     const [testingTarget, setTestingTarget] = useState<string | null>(null)
     const [copied, setCopied] = useState<string | null>(null)
+    const [removeConfirm, setRemoveConfirm] = useState<{ open: boolean; targetId: string; platform: string }>({ open: false, targetId: "", platform: "" })
+
+    const { addToast } = useToast()
 
     const loadData = useCallback(async () => {
         try {
@@ -222,20 +229,25 @@ export default function SimulcastPage() {
                 stream_key: streamKey,
             })
             setTargets((prev) => [...prev, newTarget])
+            addToast({ type: "success", title: "Added", description: "Simulcast target added successfully" })
         } catch (error) {
             console.error("Failed to add target:", error)
-            alert("Failed to add simulcast target")
+            addToast({ type: "error", title: "Error", description: "Failed to add simulcast target" })
         }
     }
 
-    const handleRemoveTarget = async (targetId: string) => {
-        if (!confirm("Remove this simulcast target?")) return
+    const handleRemoveTarget = (targetId: string, platform: string) => {
+        setRemoveConfirm({ open: true, targetId, platform })
+    }
+
+    const confirmRemoveTarget = async () => {
         try {
-            await streamsApi.removeSimulcastTarget(eventId, targetId)
-            setTargets((prev) => prev.filter((t) => t.id !== targetId))
+            await streamsApi.removeSimulcastTarget(eventId, removeConfirm.targetId)
+            setTargets((prev) => prev.filter((t) => t.id !== removeConfirm.targetId))
+            addToast({ type: "success", title: "Removed", description: "Simulcast target removed" })
         } catch (error) {
             console.error("Failed to remove target:", error)
-            alert("Failed to remove simulcast target")
+            addToast({ type: "error", title: "Error", description: "Failed to remove simulcast target" })
         }
     }
 
@@ -244,7 +256,7 @@ export default function SimulcastPage() {
         // Simulate connection test
         await new Promise((resolve) => setTimeout(resolve, 2000))
         setTestingTarget(null)
-        alert("Connection test completed successfully!")
+        addToast({ type: "success", title: "Test Complete", description: "Connection test completed successfully!" })
     }
 
     const copyToClipboard = (text: string, field: string) => {
@@ -427,7 +439,7 @@ export default function SimulcastPage() {
                                             <Button
                                                 variant="ghost"
                                                 size="icon"
-                                                onClick={() => handleRemoveTarget(target.id)}
+                                                onClick={() => handleRemoveTarget(target.id, target.platform)}
                                             >
                                                 <Trash2 className="h-4 w-4 text-destructive" />
                                             </Button>
@@ -455,8 +467,8 @@ export default function SimulcastPage() {
                                     <div
                                         key={platform.id}
                                         className={`flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-colors ${isAdded
-                                                ? "border-primary bg-primary/5"
-                                                : "border-border hover:border-primary/50 cursor-pointer"
+                                            ? "border-primary bg-primary/5"
+                                            : "border-border hover:border-primary/50 cursor-pointer"
                                             }`}
                                         onClick={() => {
                                             if (!isAdded) {
@@ -496,6 +508,18 @@ export default function SimulcastPage() {
                 open={addDialogOpen}
                 onOpenChange={setAddDialogOpen}
                 onAdd={handleAddTarget}
+                onValidationError={() => addToast({ type: "warning", title: "Missing Fields", description: "Please fill in all fields" })}
+            />
+
+            {/* Remove Target Confirmation Dialog */}
+            <ConfirmDialog
+                open={removeConfirm.open}
+                onOpenChange={(open) => setRemoveConfirm((prev) => ({ ...prev, open }))}
+                title="Remove Simulcast Target"
+                description={`Are you sure you want to remove this ${removeConfirm.platform} simulcast target?`}
+                confirmText="Remove"
+                variant="destructive"
+                onConfirm={confirmRemoveTarget}
             />
         </DashboardLayout>
     )

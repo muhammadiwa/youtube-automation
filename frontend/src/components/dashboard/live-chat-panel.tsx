@@ -43,6 +43,8 @@ import {
     SelectValue,
 } from "@/components/ui/select"
 import { moderationApi, type ChatMessage } from "@/lib/api/moderation"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { useToast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 
 interface LiveChatPanelProps {
@@ -56,6 +58,7 @@ interface SlowModeState {
 }
 
 export function LiveChatPanel({ eventId, isLive = false }: LiveChatPanelProps) {
+    const { addToast } = useToast()
     const [messages, setMessages] = useState<ChatMessage[]>([])
     const [newMessage, setNewMessage] = useState("")
     const [loading, setLoading] = useState(true)
@@ -64,6 +67,7 @@ export function LiveChatPanel({ eventId, isLive = false }: LiveChatPanelProps) {
     const [timeoutDialogOpen, setTimeoutDialogOpen] = useState(false)
     const [selectedUser, setSelectedUser] = useState<{ id: string; name: string } | null>(null)
     const [timeoutDuration, setTimeoutDuration] = useState("60")
+    const [banConfirm, setBanConfirm] = useState<{ open: boolean; userId: string; userName: string }>({ open: false, userId: "", userName: "" })
     const scrollRef = useRef<HTMLDivElement>(null)
     const wsRef = useRef<WebSocket | null>(null)
 
@@ -194,12 +198,17 @@ export function LiveChatPanel({ eventId, isLive = false }: LiveChatPanelProps) {
         }
     }
 
-    const handleBanUser = async (userId: string) => {
-        if (!confirm("Are you sure you want to ban this user?")) return
+    const handleBanUser = (userId: string, userName: string) => {
+        setBanConfirm({ open: true, userId, userName })
+    }
+
+    const confirmBanUser = async () => {
         try {
-            await moderationApi.banUser(eventId, userId)
+            await moderationApi.banUser(eventId, banConfirm.userId)
+            addToast({ type: "success", title: "User Banned", description: `${banConfirm.userName} has been banned` })
         } catch (error) {
             console.error("Failed to ban user:", error)
+            addToast({ type: "error", title: "Error", description: "Failed to ban user" })
         }
     }
 
@@ -369,7 +378,7 @@ export function LiveChatPanel({ eventId, isLive = false }: LiveChatPanelProps) {
                                                         </DropdownMenuItem>
                                                         <DropdownMenuItem
                                                             className="text-destructive"
-                                                            onClick={() => handleBanUser(msg.author_id)}
+                                                            onClick={() => handleBanUser(msg.author_id, msg.author_name)}
                                                         >
                                                             <Ban className="mr-2 h-4 w-4" />
                                                             Ban User
@@ -446,6 +455,17 @@ export function LiveChatPanel({ eventId, isLive = false }: LiveChatPanelProps) {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Ban User Confirmation Dialog */}
+            <ConfirmDialog
+                open={banConfirm.open}
+                onOpenChange={(open) => setBanConfirm((prev) => ({ ...prev, open }))}
+                title="Ban User"
+                description={`Are you sure you want to ban "${banConfirm.userName}"? They will no longer be able to participate in chat.`}
+                confirmText="Ban User"
+                variant="destructive"
+                onConfirm={confirmBanUser}
+            />
         </>
     )
 }

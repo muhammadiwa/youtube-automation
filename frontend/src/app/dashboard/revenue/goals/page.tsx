@@ -35,9 +35,11 @@ import {
 } from "lucide-react";
 import analyticsApi, { RevenueGoal } from "@/lib/api/analytics";
 import { useAuth } from "@/components/providers/auth-provider";
+import { useToast } from "@/hooks/use-toast";
 
 export default function RevenueGoalsPage() {
     const { user } = useAuth();
+    const { addToast } = useToast();
     const [goals, setGoals] = useState<RevenueGoal[]>([]);
     const [loading, setLoading] = useState(true);
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -134,8 +136,11 @@ export default function RevenueGoalsPage() {
             resetForm();
         } catch (error) {
             console.error("Failed to create goal:", error);
-            // Show error to user instead of creating mock data
-            alert("Failed to create goal. Please try again.");
+            addToast({
+                title: "Failed to Create Goal",
+                description: "Please check your input and try again.",
+                type: "error",
+            });
         } finally {
             setSaving(false);
         }
@@ -157,9 +162,18 @@ export default function RevenueGoalsPage() {
             setIsEditModalOpen(false);
             setSelectedGoal(null);
             resetForm();
+            addToast({
+                title: "Goal Updated",
+                description: "Your revenue goal has been updated successfully.",
+                type: "success",
+            });
         } catch (error) {
             console.error("Failed to update goal:", error);
-            alert("Failed to update goal. Please try again.");
+            addToast({
+                title: "Failed to Update Goal",
+                description: "Please try again.",
+                type: "error",
+            });
         } finally {
             setSaving(false);
         }
@@ -174,9 +188,18 @@ export default function RevenueGoalsPage() {
             setGoals(goals.filter(g => g.id !== selectedGoal.id));
             setIsDeleteModalOpen(false);
             setSelectedGoal(null);
+            addToast({
+                title: "Goal Deleted",
+                description: "Your revenue goal has been deleted.",
+                type: "success",
+            });
         } catch (error) {
             console.error("Failed to delete goal:", error);
-            alert("Failed to delete goal. Please try again.");
+            addToast({
+                title: "Failed to Delete Goal",
+                description: "Please try again.",
+                type: "error",
+            });
         } finally {
             setSaving(false);
         }

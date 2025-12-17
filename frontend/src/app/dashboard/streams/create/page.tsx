@@ -29,6 +29,7 @@ import {
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { streamsApi, type CreateLiveEventRequest } from "@/lib/api/streams"
 import { accountsApi } from "@/lib/api/accounts"
+import { useToast } from "@/hooks/use-toast"
 import type { YouTubeAccount } from "@/types"
 
 const STEPS = [
@@ -111,6 +112,7 @@ function StepIndicator({ currentStep }: { currentStep: number }) {
 
 export default function CreateStreamPage() {
     const router = useRouter()
+    const { addToast } = useToast()
     const [currentStep, setCurrentStep] = useState(1)
     const [accounts, setAccounts] = useState<YouTubeAccount[]>([])
     const [loading, setLoading] = useState(false)
@@ -208,10 +210,19 @@ export default function CreateStreamPage() {
             }
 
             const event = await streamsApi.createEvent(request)
+            addToast({
+                title: "Stream Created",
+                description: "Your live stream has been created successfully.",
+                type: "success",
+            })
             router.push(`/dashboard/streams/${event.id}/control`)
         } catch (error) {
             console.error("Failed to create stream:", error)
-            alert("Failed to create stream. Please try again.")
+            addToast({
+                title: "Failed to Create Stream",
+                description: "Please check your settings and try again.",
+                type: "error",
+            })
         } finally {
             setSubmitting(false)
         }

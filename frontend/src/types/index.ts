@@ -27,20 +27,23 @@ export interface YouTubeAccount {
 
 export interface Video {
     id: string
-    youtubeId: string
+    youtubeId?: string
     accountId: string
     title: string
-    description: string
-    tags: string[]
-    categoryId: string
-    thumbnailUrl: string
+    description?: string
+    tags?: string[]
+    categoryId?: string
+    thumbnailUrl?: string
     visibility: "public" | "unlisted" | "private"
     scheduledPublishAt?: string
     publishedAt?: string
     viewCount: number
     likeCount: number
     commentCount: number
-    status: "draft" | "uploading" | "processing" | "published" | "scheduled"
+    status: "draft" | "uploading" | "processing" | "published" | "scheduled" | "failed"
+    uploadProgress?: number
+    createdAt?: string
+    updatedAt?: string
 }
 
 export interface LiveEvent {

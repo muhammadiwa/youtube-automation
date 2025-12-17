@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import analyticsApi, { TaxReportResponse } from "@/lib/api/analytics";
 import { useAuth } from "@/components/providers/auth-provider";
+import { useToast } from "@/hooks/use-toast";
 
 // Local interface for display purposes (aggregated from backend response)
 interface TaxReportDisplay {
@@ -41,6 +42,7 @@ interface TaxReportDisplay {
 
 export default function TaxReportsPage() {
     const { user } = useAuth();
+    const { addToast } = useToast();
     const currentYear = new Date().getFullYear();
     const [selectedYear, setSelectedYear] = useState<string>(currentYear.toString());
     const [taxReport, setTaxReport] = useState<TaxReportDisplay | null>(null);
@@ -134,7 +136,11 @@ export default function TaxReportsPage() {
             document.body.removeChild(a);
         } catch (error) {
             console.error("Failed to export tax report:", error);
-            alert("Failed to export tax report. Please try again.");
+            addToast({
+                title: "Export Failed",
+                description: "Failed to export tax report. Please try again.",
+                type: "error",
+            });
         } finally {
             setExporting(false);
         }

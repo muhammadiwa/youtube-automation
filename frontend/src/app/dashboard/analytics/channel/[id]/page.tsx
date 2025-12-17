@@ -52,6 +52,7 @@ import Link from "next/link";
 import analyticsApi, { ChannelMetrics, TimeSeriesData, VideoMetrics } from "@/lib/api/analytics";
 import accountsApi from "@/lib/api/accounts";
 import { YouTubeAccount } from "@/types";
+import { useToast } from "@/hooks/use-toast";
 
 type Period = "7d" | "30d" | "90d" | "1y";
 
@@ -86,6 +87,7 @@ export default function ChannelAnalyticsPage() {
     const accountId = params.id as string;
     const { theme } = useTheme();
     const isDark = theme === "dark";
+    const { addToast } = useToast();
 
     const [period, setPeriod] = useState<Period>("30d");
     const [account, setAccount] = useState<YouTubeAccount | null>(null);
@@ -148,10 +150,18 @@ export default function ChannelAnalyticsPage() {
                 format,
                 account_ids: [accountId],
             });
-            // In a real app, this would trigger a download
-            alert(`Report generation started. You'll be notified when it's ready.`);
+            addToast({
+                title: "Report Generation Started",
+                description: "You'll be notified when your report is ready.",
+                type: "success",
+            });
         } catch (error) {
             console.error("Failed to generate report:", error);
+            addToast({
+                title: "Failed to Generate Report",
+                description: "Please try again later.",
+                type: "error",
+            });
         }
     };
 

@@ -362,6 +362,20 @@ class YouTubeAccountService:
             threshold_percent, daily_limit
         )
 
+    async def refresh_token_if_needed(self, account: YouTubeAccount) -> YouTubeAccount:
+        """Refresh access token if expired or expiring soon.
+
+        Args:
+            account: Account instance
+
+        Returns:
+            YouTubeAccount: Account with valid tokens
+        """
+        if account.is_token_expired() or account.is_token_expiring_soon(hours=1):
+            account = await self._refresh_account_token(account)
+            await self.session.commit()
+        return account
+
     async def _refresh_account_token(self, account: YouTubeAccount) -> YouTubeAccount:
         """Refresh access token for an account.
 

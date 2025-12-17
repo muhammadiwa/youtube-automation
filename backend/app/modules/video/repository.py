@@ -39,6 +39,7 @@ class VideoRepository:
         file_path: Optional[str] = None,
         file_size: Optional[int] = None,
         scheduled_publish_at: Optional[datetime] = None,
+        thumbnail_path: Optional[str] = None,
     ) -> Video:
         """Create a new video.
 
@@ -52,6 +53,7 @@ class VideoRepository:
             file_path: Path to video file
             file_size: Size of video file in bytes
             scheduled_publish_at: Scheduled publish datetime
+            thumbnail_path: Path to thumbnail file
 
         Returns:
             Video: Created video instance
@@ -71,6 +73,7 @@ class VideoRepository:
             file_size=file_size,
             scheduled_publish_at=scheduled_publish_at,
             status=status,
+            local_thumbnail_path=thumbnail_path,
         )
 
         self.session.add(video)
@@ -549,20 +552,24 @@ class VideoTemplateRepository:
         self,
         user_id: uuid.UUID,
         name: str,
+        title_template: Optional[str] = None,
         description_template: Optional[str] = None,
         tags: Optional[list[str]] = None,
         category_id: Optional[str] = None,
         visibility: str = VideoVisibility.PRIVATE.value,
+        is_default: bool = False,
     ) -> VideoTemplate:
         """Create a new video template.
 
         Args:
             user_id: Owner user UUID
             name: Template name
+            title_template: Title template
             description_template: Description template
             tags: Default tags
             category_id: Default category ID
             visibility: Default visibility
+            is_default: Whether this is the default template
 
         Returns:
             VideoTemplate: Created template instance
@@ -570,14 +577,30 @@ class VideoTemplateRepository:
         template = VideoTemplate(
             user_id=user_id,
             name=name,
+            title_template=title_template,
             description_template=description_template,
             tags=tags,
             category_id=category_id,
             visibility=visibility,
+            is_default=is_default,
         )
         self.session.add(template)
         await self.session.flush()
         return template
+
+    async def unset_defaults(self, user_id: uuid.UUID) -> None:
+        """Unset default flag for all templates of a user.
+
+        Args:
+            user_id: User UUID
+        """
+        from sqlalchemy import update
+        await self.session.execute(
+            update(VideoTemplate)
+            .where(VideoTemplate.user_id == user_id)
+            .values(is_default=False)
+        )
+        await self.session.flush()
 
     async def get_by_id(self, template_id: uuid.UUID) -> Optional[VideoTemplate]:
         """Get template by ID.

@@ -90,6 +90,7 @@ class Video(Base):
     file_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     file_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     duration: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # in seconds
+    local_thumbnail_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
 
     # Upload job tracking
     upload_job_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -210,12 +211,14 @@ class VideoTemplate(Base):
 
     # Template metadata
     name: Mapped[str] = mapped_column(String(100), nullable=False)
+    title_template: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     description_template: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     tags: Mapped[Optional[list[str]]] = mapped_column(ARRAY(String), nullable=True)
     category_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     visibility: Mapped[str] = mapped_column(
         String(50), default=VideoVisibility.PRIVATE.value
     )
+    is_default: Mapped[bool] = mapped_column(default=False)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(

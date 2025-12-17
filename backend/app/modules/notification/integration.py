@@ -218,10 +218,12 @@ class NotificationIntegrationService:
         video_title: str,
         channel_name: str,
         video_id: str,
+        youtube_video_id: Optional[str] = None,
         youtube_url: Optional[str] = None,
     ) -> None:
         """Notify when a video is published."""
         try:
+            yt_url = youtube_url or (f"https://youtube.com/watch?v={youtube_video_id}" if youtube_video_id else None)
             await self.notification_service.send_notification(
                 NotificationSendRequest(
                     user_id=user_id,
@@ -233,7 +235,8 @@ class NotificationIntegrationService:
                         "video_id": video_id,
                         "video_title": video_title,
                         "channel_name": channel_name,
-                        "youtube_url": youtube_url,
+                        "youtube_video_id": youtube_video_id,
+                        "youtube_url": yt_url,
                         "action_url": f"/dashboard/videos/{video_id}",
                     },
                 )

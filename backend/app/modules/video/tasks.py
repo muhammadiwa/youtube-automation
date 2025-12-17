@@ -5,19 +5,20 @@ Requirements: 3.1, 3.2, 3.3
 """
 
 import uuid
+import os
+import logging
 from typing import Any, Optional
 
 from celery import Task
 
 from app.core.celery_app import celery_app
-from app.modules.job.tasks import RETRY_CONFIGS, RetryConfig
+from app.modules.job.tasks import RetryConfig
+
+logger = logging.getLogger(__name__)
 
 
 class UploadRetryConfig(RetryConfig):
-    """Retry configuration specifically for video uploads.
-
-    Requirements 3.3: Retry up to 3 times with exponential backoff.
-    """
+    """Retry configuration for video uploads."""
 
     def __init__(self):
         super().__init__(
@@ -28,71 +29,157 @@ class UploadRetryConfig(RetryConfig):
         )
 
 
-# Upload-specific retry config
 UPLOAD_RETRY_CONFIG = UploadRetryConfig()
 
 
 class VideoUploadTask(Task):
-    """Base task for video upload with retry logic.
-
-    Implements exponential backoff retry for failed uploads.
-    Requirements: 3.3
-    """
+    """Base task for video upload with retry logic."""
 
     abstract = True
-    max_retries = 3  # Max 3 attempts as per Requirements 3.3
+    max_retries = 3
 
-    def on_failure(
-        self, exc: Exception, task_id: str, args: tuple, kwargs: dict, einfo: Any
-    ) -> None:
-        """Handle task failure - update video status to failed."""
+    def on_failure(self, exc, task_id, args, kwargs, einfo):
         video_id = args[0] if args else kwargs.get("video_id")
-        if video_id:
-            # Update video status asynchronously
-            self._update_video_status_sync(video_id, "failed", error=str(exc))
+        logger.error(f"Upload task failed for video {video_id}: {exc}")
 
-    def on_retry(
-        self, exc: Exception, task_id: str, args: tuple, kwargs: dict, einfo: Any
-    ) -> None:
-        """Handle task retry - log retry attempt."""
+    def on_retry(self, exc, task_id, args, kwargs, einfo):
         video_id = args[0] if args else kwargs.get("video_id")
         attempt = self.request.retries + 1
-        if video_id:
-            self._update_video_status_sync(
-                video_id, "uploading", error=f"Retry attempt {attempt}: {str(exc)}"
-            )
-
-    def _update_video_status_sync(
-        self, video_id: str, status: str, error: Optional[str] = None
-    ) -> None:
-        """Update video status synchronously (for use in callbacks)."""
-        # This would be implemented with sync database access
-        # For now, we'll handle this in the main task
-        pass
+        logger.warning(f"Retrying upload for video {video_id}, attempt {attempt}")
 
 
 def calculate_upload_retry_delay(attempt: int) -> float:
-    """Calculate retry delay for upload using exponential backoff.
-
-    Args:
-        attempt: Current attempt number (1-indexed)
-
-    Returns:
-        float: Delay in seconds
-    """
     return UPLOAD_RETRY_CONFIG.calculate_delay(attempt)
 
 
 def should_retry_upload(attempt: int) -> bool:
-    """Check if upload should be retried.
-
-    Args:
-        attempt: Current attempt number (1-indexed)
-
-    Returns:
-        bool: True if should retry, False if max attempts reached
-    """
     return attempt < UPLOAD_RETRY_CONFIG.max_attempts
+
+
+async def _get_account_access_token(session, account_id: uuid.UUID) -> Optional[str]:
+    """Get decrypted access token for YouTube account."""
+    from app.modules.account.repository import YouTubeAccountRepository
+    from app.modules.account.service import YouTubeAccountService
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+
+    # Get account directly
+    result = await session.execute(
+        select(YouTubeAccount).where(YouTubeAccount.id == account_id)
+    )
+    account = result.scalar_one_or_none()
+
+    if not account:
+        logger.error(f"Account not found for ID: {account_id}")
+        return None
+
+    logger.info(f"Found account: {account.channel_title} (ID: {account.id})")
+    logger.info(f"Token expires at: {account.token_expires_at}, is_expired: {account.is_token_expired()}")
+
+    try:
+        service = YouTubeAccountService(session)
+        if account.is_token_expired() or account.is_token_expiring_soon(hours=1):
+            logger.info(f"Refreshing token for account {account_id}")
+            account = await service._refresh_account_token(account)
+            await session.commit()
+            logger.info(f"Token refreshed successfully")
+    except Exception as e:
+        logger.error(f"Failed to refresh token: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        # Continue with existing token
+
+    # access_token property already decrypts the token
+    token = account.access_token
+    if not token:
+        logger.error(f"Account {account_id} has no access token or decryption failed")
+        # Log raw token for debugging
+        raw_token = account._access_token
+        logger.error(f"Raw _access_token exists: {raw_token is not None}, length: {len(raw_token) if raw_token else 0}")
+        return None
+
+    logger.info(f"Successfully got access token for account {account_id}, token length: {len(token)}")
+    return token
+
+
+async def _upload_to_youtube(session, video, progress_callback=None) -> dict:
+    """Upload video to YouTube using real API."""
+    from app.modules.video.youtube_upload_api import (
+        YouTubeUploadClient,
+        YouTubeUploadError,
+    )
+    from app.modules.video.models import VideoVisibility
+
+    access_token = await _get_account_access_token(session, video.account_id)
+    if not access_token:
+        raise YouTubeUploadError("Failed to get YouTube access token")
+
+    client = YouTubeUploadClient(access_token)
+
+    privacy_map = {
+        VideoVisibility.PUBLIC.value: "public",
+        VideoVisibility.UNLISTED.value: "unlisted",
+        VideoVisibility.PRIVATE.value: "private",
+    }
+    privacy_status = privacy_map.get(video.visibility, "private")
+
+    result = await client.upload_video(
+        file_path=video.file_path,
+        title=video.title,
+        description=video.description or "",
+        tags=video.tags or [],
+        category_id=video.category_id or "22",
+        privacy_status=privacy_status,
+        scheduled_publish_at=video.scheduled_publish_at,
+        progress_callback=progress_callback,
+    )
+
+    return {"youtube_id": result.get("id"), "youtube_data": result}
+
+
+async def _send_upload_notification(session, video, success: bool, error: str = None):
+    """Send notification about upload status."""
+    try:
+        from app.modules.notification.integration import NotificationIntegrationService
+        from app.modules.account.repository import YouTubeAccountRepository
+
+        account_repo = YouTubeAccountRepository(session)
+        account = await account_repo.get_by_id(video.account_id)
+
+        if not account:
+            return
+
+        notification_service = NotificationIntegrationService(session)
+
+        if success:
+            await notification_service.notify_video_uploaded(
+                user_id=account.user_id,
+                video_title=video.title,
+                channel_name=account.channel_title,
+                video_id=str(video.id),
+                youtube_video_id=video.youtube_id,
+            )
+        else:
+            await notification_service.notify_video_processing_failed(
+                user_id=account.user_id,
+                video_title=video.title,
+                video_id=str(video.id),
+                error_message=error or "Upload failed",
+            )
+    except Exception as e:
+        logger.error(f"Failed to send upload notification: {e}")
+
+
+
+def _run_async(coro):
+    """Run async coroutine in Celery task context."""
+    import asyncio
+    try:
+        loop = asyncio.get_running_loop()
+        return asyncio.run_coroutine_threadsafe(coro, loop).result()
+    except RuntimeError:
+        # No running loop - create new one and run
+        return asyncio.run(coro)
 
 
 @celery_app.task(
@@ -105,26 +192,19 @@ def should_retry_upload(attempt: int) -> bool:
     max_retries=3,
 )
 def upload_video_task(self: VideoUploadTask, video_id: str) -> dict:
-    """Upload video to YouTube.
-
-    This task handles the actual upload process with retry logic.
-    Requirements: 3.1, 3.2, 3.3
-
-    Args:
-        video_id: UUID of the video to upload
-
-    Returns:
-        dict: Upload result with status and youtube_id
-    """
+    """Upload video to YouTube."""
     from app.core.database import async_session_maker
     from app.modules.video.models import Video, VideoStatus
+    from app.modules.video.youtube_upload_api import (
+        YouTubeUploadError,
+        QuotaExceededError,
+    )
     import asyncio
 
     async def _upload():
         async with async_session_maker() as session:
             from sqlalchemy import select
 
-            # Get video
             result = await session.execute(
                 select(Video).where(Video.id == uuid.UUID(video_id))
             )
@@ -134,42 +214,37 @@ def upload_video_task(self: VideoUploadTask, video_id: str) -> dict:
                 return {"status": "error", "error": "Video not found"}
 
             try:
-                # Update status to uploading
                 video.status = VideoStatus.UPLOADING.value
                 video.upload_attempts += 1
                 await session.commit()
 
-                # Simulate upload progress updates
-                for progress in [25, 50, 75, 100]:
-                    video.upload_progress = progress
-                    await session.commit()
+                # Check if file exists
+                if not video.file_path or not os.path.exists(video.file_path):
+                    raise YouTubeUploadError(f"Video file not found: {video.file_path}")
 
-                # In real implementation, this would call YouTube API
-                # For now, simulate successful upload
+                # Upload to YouTube (progress callback simplified)
+                upload_result = await _upload_to_youtube(session, video, None)
+
                 video.status = VideoStatus.PROCESSING.value
-                video.youtube_id = f"yt_{video_id[:8]}"  # Simulated YouTube ID
+                video.youtube_id = upload_result["youtube_id"]
+                video.upload_progress = 100
                 video.last_upload_error = None
                 await session.commit()
-                
-                # Send upload success notification
-                try:
-                    from app.modules.notification.integration import NotificationIntegrationService
-                    from app.modules.account.repository import YouTubeAccountRepository
-                    
-                    account_repo = YouTubeAccountRepository(session)
-                    account = await account_repo.get_by_id(video.account_id)
-                    if account:
-                        notification_service = NotificationIntegrationService(session)
-                        await notification_service.notify_video_uploaded(
-                            user_id=account.user_id,
-                            video_title=video.title,
-                            channel_name=account.channel_title,
-                            video_id=str(video.id),
-                            youtube_video_id=video.youtube_id,
-                        )
-                except Exception as notif_error:
-                    import logging
-                    logging.getLogger(__name__).error(f"Failed to send upload notification: {notif_error}")
+
+                # Upload thumbnail if provided
+                if video.local_thumbnail_path and os.path.exists(video.local_thumbnail_path):
+                    logger.info(f"Queueing thumbnail upload for video {video_id}")
+                    upload_thumbnail_task.apply_async(
+                        args=[str(video.id), video.local_thumbnail_path],
+                        countdown=5  # Wait a bit for YouTube to process
+                    )
+
+                # Queue processing status check
+                check_video_processing_status.apply_async(
+                    args=[str(video.id)], countdown=30
+                )
+
+                await _send_upload_notification(session, video, success=True)
 
                 return {
                     "status": "success",
@@ -177,31 +252,35 @@ def upload_video_task(self: VideoUploadTask, video_id: str) -> dict:
                     "youtube_id": video.youtube_id,
                 }
 
+            except QuotaExceededError as e:
+                video.status = VideoStatus.FAILED.value
+                video.last_upload_error = "YouTube API quota exceeded"
+                await session.commit()
+                await _send_upload_notification(session, video, success=False, error=str(e))
+                return {"status": "failed", "error": str(e)}
+
+            except YouTubeUploadError as e:
+                video.last_upload_error = str(e)
+                await session.commit()
+
+                if e.is_retryable:
+                    attempt = self.request.retries + 1
+                    if should_retry_upload(attempt):
+                        delay = calculate_upload_retry_delay(attempt)
+                        raise self.retry(exc=e, countdown=delay)
+
+                video.status = VideoStatus.FAILED.value
+                await session.commit()
+                await _send_upload_notification(session, video, success=False, error=str(e))
+                return {"status": "failed", "error": str(e)}
+
             except Exception as e:
+                logger.exception(f"Upload failed for video {video_id}: {e}")
                 video.status = VideoStatus.FAILED.value
                 video.last_upload_error = str(e)
                 await session.commit()
-                
-                # Send upload failed notification
-                try:
-                    from app.modules.notification.integration import NotificationIntegrationService
-                    from app.modules.account.repository import YouTubeAccountRepository
-                    
-                    account_repo = YouTubeAccountRepository(session)
-                    account = await account_repo.get_by_id(video.account_id)
-                    if account:
-                        notification_service = NotificationIntegrationService(session)
-                        await notification_service.notify_video_processing_failed(
-                            user_id=account.user_id,
-                            video_title=video.title,
-                            video_id=str(video.id),
-                            error_message=str(e),
-                        )
-                except Exception as notif_error:
-                    import logging
-                    logging.getLogger(__name__).error(f"Failed to send upload failed notification: {notif_error}")
+                await _send_upload_notification(session, video, success=False, error=str(e))
 
-                # Check if we should retry
                 attempt = self.request.retries + 1
                 if should_retry_upload(attempt):
                     delay = calculate_upload_retry_delay(attempt)
@@ -209,34 +288,146 @@ def upload_video_task(self: VideoUploadTask, video_id: str) -> dict:
 
                 return {"status": "failed", "error": str(e)}
 
-    return asyncio.get_event_loop().run_until_complete(_upload())
+    return _run_async(_upload())
+
+
+
+@celery_app.task(bind=True, max_retries=10)
+def check_video_processing_status(self, video_id: str) -> dict:
+    """Check YouTube video processing status."""
+    from app.core.database import async_session_maker
+    from app.modules.video.models import Video, VideoStatus
+    from app.modules.video.youtube_upload_api import YouTubeUploadClient, YouTubeUploadError
+
+    async def _check():
+        async with async_session_maker() as session:
+            from sqlalchemy import select
+
+            result = await session.execute(
+                select(Video).where(Video.id == uuid.UUID(video_id))
+            )
+            video = result.scalar_one_or_none()
+
+            if not video or not video.youtube_id:
+                return {"status": "error", "error": "Video not found or not uploaded"}
+
+            if video.status not in (VideoStatus.PROCESSING.value, VideoStatus.UPLOADING.value):
+                return {"status": "skipped", "message": "Video not in processing state"}
+
+            try:
+                access_token = await _get_account_access_token(session, video.account_id)
+                if not access_token:
+                    raise YouTubeUploadError("Failed to get access token")
+
+                client = YouTubeUploadClient(access_token)
+                yt_video = await client.get_video_status(video.youtube_id)
+
+                processing_details = yt_video.get("processingDetails", {})
+                processing_status = processing_details.get("processingStatus", "")
+                status_info = yt_video.get("status", {})
+                upload_status = status_info.get("uploadStatus", "")
+
+                if upload_status == "processed" or processing_status == "succeeded":
+                    video.status = VideoStatus.PUBLISHED.value
+                    await session.commit()
+
+                    # Send publish notification
+                    try:
+                        from app.modules.notification.integration import NotificationIntegrationService
+                        from app.modules.account.repository import YouTubeAccountRepository
+
+                        account_repo = YouTubeAccountRepository(session)
+                        account = await account_repo.get_by_id(video.account_id)
+
+                        if account:
+                            notification_service = NotificationIntegrationService(session)
+                            await notification_service.notify_video_published(
+                                user_id=account.user_id,
+                                video_title=video.title,
+                                channel_name=account.channel_title,
+                                video_id=str(video.id),
+                                youtube_video_id=video.youtube_id,
+                            )
+                    except Exception as e:
+                        logger.error(f"Failed to send publish notification: {e}")
+
+                    return {"status": "success", "youtube_status": "processed"}
+
+                elif upload_status == "failed" or processing_status == "failed":
+                    failure_reason = processing_details.get("processingFailureReason", "Unknown error")
+                    video.status = VideoStatus.FAILED.value
+                    video.last_upload_error = f"YouTube processing failed: {failure_reason}"
+                    await session.commit()
+                    await _send_upload_notification(session, video, success=False, error=failure_reason)
+                    return {"status": "failed", "error": failure_reason}
+
+                else:
+                    # Still processing - retry later
+                    retry_count = self.request.retries
+                    delay = min(30 * (2 ** retry_count), 600)
+                    raise self.retry(countdown=delay)
+
+            except YouTubeUploadError as e:
+                logger.error(f"Failed to check processing status: {e}")
+                raise self.retry(countdown=60)
+
+    return _run_async(_check())
 
 
 @celery_app.task(bind=True)
-def process_bulk_upload_task(
-    self, account_id: str, csv_content: str
-) -> dict:
-    """Process bulk upload from CSV.
+def upload_thumbnail_task(self, video_id: str, thumbnail_path: str) -> dict:
+    """Upload custom thumbnail for a video."""
+    from app.core.database import async_session_maker
+    from app.modules.video.models import Video
+    from app.modules.video.youtube_upload_api import YouTubeUploadClient, YouTubeUploadError
 
-    Requirements: 3.5
+    async def _upload_thumbnail():
+        async with async_session_maker() as session:
+            from sqlalchemy import select
 
-    Args:
-        account_id: YouTube account UUID
-        csv_content: CSV file content
+            result = await session.execute(
+                select(Video).where(Video.id == uuid.UUID(video_id))
+            )
+            video = result.scalar_one_or_none()
 
-    Returns:
-        dict: Bulk upload result
-    """
+            if not video or not video.youtube_id:
+                return {"status": "error", "error": "Video not found or not uploaded"}
+
+            try:
+                access_token = await _get_account_access_token(session, video.account_id)
+                if not access_token:
+                    raise YouTubeUploadError("Failed to get access token")
+
+                client = YouTubeUploadClient(access_token)
+                thumb_result = await client.set_thumbnail(video.youtube_id, thumbnail_path)
+
+                items = thumb_result.get("items", [])
+                if items:
+                    default_thumb = items[0].get("default", {})
+                    video.thumbnail_url = default_thumb.get("url")
+                    await session.commit()
+
+                return {"status": "success", "thumbnail": thumb_result}
+
+            except YouTubeUploadError as e:
+                logger.error(f"Failed to upload thumbnail: {e}")
+                return {"status": "failed", "error": str(e)}
+
+    return _run_async(_upload_thumbnail())
+
+
+
+@celery_app.task(bind=True)
+def process_bulk_upload_task(self, account_id: str, csv_content: str) -> dict:
+    """Process bulk upload from CSV."""
     from app.core.database import async_session_maker
     from app.modules.video.service import (
         VideoService,
         parse_csv_for_bulk_upload,
         create_bulk_upload_jobs,
     )
-    import asyncio
 
     async def _process():
-        # Parse CSV
         entries, parse_errors = parse_csv_for_bulk_upload(csv_content)
 
         if not entries:
@@ -262,21 +453,14 @@ def process_bulk_upload_task(
                 "errors": parse_errors + result.errors,
             }
 
-    return asyncio.get_event_loop().run_until_complete(_process())
+    return _run_async(_process())
 
 
 @celery_app.task
 def check_scheduled_publishes() -> dict:
-    """Check and publish scheduled videos.
-
-    Requirements: 4.3
-
-    Returns:
-        dict: Result with published video count
-    """
+    """Check and publish scheduled videos."""
     from app.core.database import async_session_maker
     from app.modules.video.repository import VideoRepository
-    import asyncio
 
     async def _check():
         async with async_session_maker() as session:
@@ -290,9 +474,6 @@ def check_scheduled_publishes() -> dict:
 
             await session.commit()
 
-            return {
-                "status": "success",
-                "published_count": published_count,
-            }
+            return {"status": "success", "published_count": published_count}
 
-    return asyncio.get_event_loop().run_until_complete(_check())
+    return _run_async(_check())

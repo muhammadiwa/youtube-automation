@@ -46,6 +46,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useToast } from "@/components/ui/toast"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { moderationApi, type ModerationRule, type CreateModerationRuleRequest, type RuleType, type ActionType, type SeverityLevel } from "@/lib/api/moderation"
 import { accountsApi } from "@/lib/api/accounts"
 import type { YouTubeAccount } from "@/types"
@@ -297,6 +298,7 @@ export default function ModerationSettingsPage() {
     const [saving, setSaving] = useState(false)
     const [previewTemplate, setPreviewTemplate] = useState<RuleTemplate | null>(null)
     const [applyingTemplate, setApplyingTemplate] = useState(false)
+    const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; ruleId: string; ruleName: string }>({ open: false, ruleId: "", ruleName: "" })
     const [selectedTemplateAccount, setSelectedTemplateAccount] = useState<string>("")
 
     // Pagination state
@@ -455,10 +457,13 @@ export default function ModerationSettingsPage() {
         }
     }
 
-    const handleDelete = async (ruleId: string) => {
-        if (!confirm("Are you sure you want to delete this rule?")) return
+    const handleDelete = (ruleId: string, ruleName: string) => {
+        setDeleteConfirm({ open: true, ruleId, ruleName })
+    }
+
+    const confirmDelete = async () => {
         try {
-            await moderationApi.deleteRule(ruleId)
+            await moderationApi.deleteRule(deleteConfirm.ruleId)
             loadRules()
             addToast({ type: "success", title: "Rule Deleted", description: "The rule has been deleted successfully." })
         } catch (error) {
@@ -736,7 +741,7 @@ export default function ModerationSettingsPage() {
                                                 <Button
                                                     variant="ghost"
                                                     size="icon"
-                                                    onClick={() => handleDelete(rule.id)}
+                                                    onClick={() => handleDelete(rule.id, rule.name)}
                                                 >
                                                     <Trash2 className="h-4 w-4 text-destructive" />
                                                 </Button>
@@ -1195,6 +1200,17 @@ export default function ModerationSettingsPage() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Delete Confirmation Dialog */}
+            <ConfirmDialog
+                open={deleteConfirm.open}
+                onOpenChange={(open) => setDeleteConfirm((prev) => ({ ...prev, open }))}
+                title="Delete Rule"
+                description={`Are you sure you want to delete "${deleteConfirm.ruleName}"? This action cannot be undone.`}
+                confirmText="Delete Rule"
+                variant="destructive"
+                onConfirm={confirmDelete}
+            />
         </DashboardLayout>
     )
 }

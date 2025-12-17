@@ -41,6 +41,8 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { streamsApi, type LiveEvent } from "@/lib/api/streams"
 import { accountsApi } from "@/lib/api/accounts"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { useToast } from "@/components/ui/toast"
 import type { YouTubeAccount } from "@/types"
 
 // Calendar view component
@@ -160,10 +162,15 @@ function CalendarView({ events, onEventClick }: { events: LiveEvent[]; onEventCl
 
 export default function StreamsPage() {
     const router = useRouter()
+    const { addToast } = useToast()
     const [events, setEvents] = useState<LiveEvent[]>([])
     const [accounts, setAccounts] = useState<YouTubeAccount[]>([])
     const [loading, setLoading] = useState(true)
     const [viewMode, setViewMode] = useState<"grid" | "calendar">("grid")
+
+    // Confirmation dialogs
+    const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; eventId: string; title: string }>({ open: false, eventId: "", title: "" })
+    const [stopConfirm, setStopConfirm] = useState<{ open: boolean; eventId: string; title: string }>({ open: false, eventId: "", title: "" })
 
     // Filters
     const [searchQuery, setSearchQuery] = useState("")
@@ -223,32 +230,44 @@ export default function StreamsPage() {
         )
     }, [events, searchQuery])
 
-    const handleDeleteEvent = async (eventId: string) => {
-        if (!confirm("Are you sure you want to delete this stream?")) return
+    const handleDeleteEvent = (eventId: string, title: string) => {
+        setDeleteConfirm({ open: true, eventId, title })
+    }
+
+    const confirmDeleteEvent = async () => {
         try {
-            await streamsApi.deleteEvent(eventId)
+            await streamsApi.deleteEvent(deleteConfirm.eventId)
+            addToast({ type: "success", title: "Deleted", description: "Stream deleted successfully" })
             loadEvents()
         } catch (error) {
             console.error("Failed to delete event:", error)
+            addToast({ type: "error", title: "Error", description: "Failed to delete stream" })
         }
     }
 
     const handleStartStream = async (eventId: string) => {
         try {
             await streamsApi.startEvent(eventId)
+            addToast({ type: "success", title: "Started", description: "Stream started successfully" })
             loadEvents()
         } catch (error) {
             console.error("Failed to start stream:", error)
+            addToast({ type: "error", title: "Error", description: "Failed to start stream" })
         }
     }
 
-    const handleStopStream = async (eventId: string) => {
-        if (!confirm("Are you sure you want to stop this stream?")) return
+    const handleStopStream = (eventId: string, title: string) => {
+        setStopConfirm({ open: true, eventId, title })
+    }
+
+    const confirmStopStream = async () => {
         try {
-            await streamsApi.stopEvent(eventId)
+            await streamsApi.stopEvent(stopConfirm.eventId)
+            addToast({ type: "success", title: "Stopped", description: "Stream stopped successfully" })
             loadEvents()
         } catch (error) {
             console.error("Failed to stop stream:", error)
+            addToast({ type: "error", title: "Error", description: "Failed to stop stream" })
         }
     }
 
@@ -506,7 +525,7 @@ export default function StreamsPage() {
                                                     </DropdownMenuItem>
                                                 )}
                                                 {event.status === "live" && (
-                                                    <DropdownMenuItem onClick={() => handleStopStream(event.id)}>
+                                                    <DropdownMenuItem onClick={() => handleStopStream(event.id, event.title)}>
                                                         <Square className="mr-2 h-4 w-4" />
                                                         Stop Stream
                                                     </DropdownMenuItem>
@@ -538,7 +557,7 @@ export default function StreamsPage() {
                                                 </DropdownMenuItem>
                                                 <DropdownMenuItem
                                                     className="text-destructive"
-                                                    onClick={() => handleDeleteEvent(event.id)}
+                                                    onClick={() => handleDeleteEvent(event.id, event.title)}
                                                 >
                                                     <Trash2 className="mr-2 h-4 w-4" />
                                                     Delete
@@ -551,6 +570,28 @@ export default function StreamsPage() {
                         ))}
                     </div>
                 )}
+
+                {/* Delete Confirmation Dialog */}
+                <ConfirmDialog
+                    open={deleteConfirm.open}
+                    onOpenChange={(open) => setDeleteConfirm((prev) => ({ ...prev, open }))}
+                    title="Delete Stream"
+                    description={`Are you sure you want to delete "${deleteConfirm.title}"? This action cannot be undone.`}
+                    confirmText="Delete Stream"
+                    variant="destructive"
+                    onConfirm={confirmDeleteEvent}
+                />
+
+                {/* Stop Stream Confirmation Dialog */}
+                <ConfirmDialog
+                    open={stopConfirm.open}
+                    onOpenChange={(open) => setStopConfirm((prev) => ({ ...prev, open }))}
+                    title="Stop Stream"
+                    description={`Are you sure you want to stop "${stopConfirm.title}"? This will end the live broadcast.`}
+                    confirmText="Stop Stream"
+                    variant="destructive"
+                    onConfirm={confirmStopStream}
+                />
 
                 {/* Pagination */}
                 {pagination.total > pagination.pageSize && (

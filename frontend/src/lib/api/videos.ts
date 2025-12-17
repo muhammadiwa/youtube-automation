@@ -100,14 +100,21 @@ export const videosApi = {
     },
 
     /**
-     * Upload a new video
+     * Upload a new video with optional thumbnail
      */
-    async uploadVideo(data: UploadVideoData, file: File): Promise<{ jobId: string }> {
+    async uploadVideo(data: UploadVideoData, file: File, thumbnail?: File): Promise<{ jobId: string; videoId: string }> {
         const formData = new FormData()
         formData.append("file", file)
-        formData.append("data", JSON.stringify(data))
+        formData.append("account_id", data.accountId)
+        formData.append("title", data.title)
+        if (data.description) formData.append("description", data.description)
+        if (data.tags && data.tags.length > 0) formData.append("tags", data.tags.join(","))
+        if (data.categoryId) formData.append("category_id", data.categoryId)
+        formData.append("visibility", data.visibility || "private")
+        if (data.scheduledPublishAt) formData.append("scheduled_publish_at", data.scheduledPublishAt)
+        if (thumbnail) formData.append("thumbnail", thumbnail)
 
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"}/videos/upload`, {
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"}/videos`, {
             method: "POST",
             headers: {
                 Authorization: `Bearer ${apiClient.getAccessToken()}`,
@@ -120,14 +127,23 @@ export const videosApi = {
             throw error
         }
 
-        return response.json()
+        const result = await response.json()
+        return { jobId: result.job_id, videoId: result.video_id }
     },
 
     /**
      * Update video metadata
      */
     async updateVideo(videoId: string, data: Partial<UploadVideoData>): Promise<Video> {
-        return apiClient.put(`/videos/${videoId}`, data)
+        // Map frontend field names to backend field names
+        const backendData: Record<string, unknown> = {}
+        if (data.title !== undefined) backendData.title = data.title
+        if (data.description !== undefined) backendData.description = data.description
+        if (data.tags !== undefined) backendData.tags = data.tags
+        if (data.categoryId !== undefined) backendData.category_id = data.categoryId
+        if (data.visibility !== undefined) backendData.visibility = data.visibility
+
+        return apiClient.patch(`/videos/${videoId}/metadata`, backendData)
     },
 
     /**
@@ -141,7 +157,17 @@ export const videosApi = {
      * Bulk update videos
      */
     async bulkUpdate(data: BulkUpdateData): Promise<BulkResult> {
-        return apiClient.post("/videos/bulk-update", data)
+        // Map frontend format to backend format
+        const backendData: Record<string, unknown> = {
+            video_ids: data.videoIds,
+        }
+        if (data.updates.title) backendData.title = data.updates.title
+        if (data.updates.description) backendData.description = data.updates.description
+        if (data.updates.tags) backendData.tags = data.updates.tags
+        if (data.updates.categoryId) backendData.category_id = data.updates.categoryId
+        if (data.updates.visibility) backendData.visibility = data.updates.visibility
+
+        return apiClient.post("/videos/bulk-update", backendData)
     },
 
     /**
@@ -149,6 +175,42 @@ export const videosApi = {
      */
     async bulkDelete(videoIds: string[]): Promise<BulkResult> {
         return apiClient.post("/videos/bulk-delete", { videoIds })
+    },
+
+    /**
+     * Get upload progress for a video
+     */
+    async getUploadProgress(videoId: string): Promise<{
+        videoId: string
+        jobId: string | null
+        status: string
+        progress: number
+        error: string | null
+    }> {
+        return apiClient.get(`/videos/${videoId}/progress`)
+    },
+
+    /**
+     * Upload custom thumbnail for a video
+     */
+    async uploadThumbnail(videoId: string, file: File): Promise<{ status: string; taskId: string }> {
+        const formData = new FormData()
+        formData.append("thumbnail", file)
+
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"}/videos/${videoId}/thumbnail`, {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${apiClient.getAccessToken()}`,
+            },
+            body: formData,
+        })
+
+        if (!response.ok) {
+            const error = await response.json()
+            throw error
+        }
+
+        return response.json()
     },
 }
 

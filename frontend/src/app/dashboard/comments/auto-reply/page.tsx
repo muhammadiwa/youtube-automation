@@ -48,6 +48,8 @@ import {
 } from "@/components/ui/table"
 import { moderationApi, type AutoReplyRule } from "@/lib/api/moderation"
 import { accountsApi } from "@/lib/api/accounts"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { useToast } from "@/components/ui/toast"
 import type { YouTubeAccount } from "@/types"
 
 interface CreateAutoReplyRuleData {
@@ -67,6 +69,9 @@ export default function AutoReplyRulesPage() {
     const [dialogOpen, setDialogOpen] = useState(false)
     const [editingRule, setEditingRule] = useState<AutoReplyRule | null>(null)
     const [saving, setSaving] = useState(false)
+    const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; ruleId: string; ruleName: string }>({ open: false, ruleId: "", ruleName: "" })
+
+    const { addToast } = useToast()
 
     // Test dialog state
     const [testDialogOpen, setTestDialogOpen] = useState(false)
@@ -148,7 +153,7 @@ export default function AutoReplyRulesPage() {
 
     const handleSave = async () => {
         if (!formData.name || !formData.trigger_pattern || !formData.reply_template || !formData.account_id) {
-            alert("Please fill in all required fields")
+            addToast({ type: "warning", title: "Missing Fields", description: "Please fill in all required fields" })
             return
         }
 
@@ -161,26 +166,33 @@ export default function AutoReplyRulesPage() {
                     reply_template: formData.reply_template,
                     enabled: formData.enabled,
                 })
+                addToast({ type: "success", title: "Saved", description: "Rule updated successfully" })
             } else {
                 await moderationApi.createAutoReplyRule(formData)
+                addToast({ type: "success", title: "Created", description: "Rule created successfully" })
             }
             setDialogOpen(false)
             loadRules()
         } catch (error) {
             console.error("Failed to save rule:", error)
-            alert("Failed to save rule")
+            addToast({ type: "error", title: "Error", description: "Failed to save rule" })
         } finally {
             setSaving(false)
         }
     }
 
-    const handleDelete = async (ruleId: string) => {
-        if (!confirm("Are you sure you want to delete this auto-reply rule?")) return
+    const handleDelete = (ruleId: string, ruleName: string) => {
+        setDeleteConfirm({ open: true, ruleId, ruleName })
+    }
+
+    const confirmDelete = async () => {
         try {
-            await moderationApi.deleteAutoReplyRule(ruleId)
+            await moderationApi.deleteAutoReplyRule(deleteConfirm.ruleId)
+            addToast({ type: "success", title: "Deleted", description: "Rule deleted successfully" })
             loadRules()
         } catch (error) {
             console.error("Failed to delete rule:", error)
+            addToast({ type: "error", title: "Error", description: "Failed to delete rule" })
         }
     }
 
@@ -399,7 +411,7 @@ export default function AutoReplyRulesPage() {
                                                     <Button
                                                         variant="ghost"
                                                         size="icon"
-                                                        onClick={() => handleDelete(rule.id)}
+                                                        onClick={() => handleDelete(rule.id, rule.name)}
                                                         title="Delete Rule"
                                                     >
                                                         <Trash2 className="h-4 w-4 text-destructive" />
@@ -573,6 +585,17 @@ export default function AutoReplyRulesPage() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Delete Confirmation Dialog */}
+            <ConfirmDialog
+                open={deleteConfirm.open}
+                onOpenChange={(open) => setDeleteConfirm((prev) => ({ ...prev, open }))}
+                title="Delete Auto-Reply Rule"
+                description={`Are you sure you want to delete "${deleteConfirm.ruleName}"? This action cannot be undone.`}
+                confirmText="Delete Rule"
+                variant="destructive"
+                onConfirm={confirmDelete}
+            />
         </DashboardLayout>
     )
 }

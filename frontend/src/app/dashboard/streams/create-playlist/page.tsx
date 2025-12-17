@@ -40,6 +40,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { streamsApi, type CreateLiveEventRequest } from "@/lib/api/streams"
 import { videosApi } from "@/lib/api/videos"
 import { accountsApi } from "@/lib/api/accounts"
+import { useToast } from "@/hooks/use-toast"
 import type { YouTubeAccount, Video as VideoType } from "@/types"
 
 interface PlaylistItem {
@@ -134,6 +135,7 @@ function VideoSelector({
 
 export default function CreatePlaylistStreamPage() {
     const router = useRouter()
+    const { addToast } = useToast()
     const [accounts, setAccounts] = useState<YouTubeAccount[]>([])
     const [videos, setVideos] = useState<VideoType[]>([])
     const [loading, setLoading] = useState(true)
@@ -194,7 +196,7 @@ export default function CreatePlaylistStreamPage() {
                 id: `${Date.now()}-${video.id}`,
                 videoId: video.id,
                 title: video.title,
-                thumbnailUrl: video.thumbnailUrl,
+                thumbnailUrl: video.thumbnailUrl || "",
                 duration: 0, // Would come from video metadata
                 transition: defaultTransition,
             }
@@ -222,7 +224,11 @@ export default function CreatePlaylistStreamPage() {
 
     const handleSubmit = async () => {
         if (!accountId || !title.trim() || playlist.length === 0) {
-            alert("Please fill in all required fields and add at least one video")
+            addToast({
+                title: "Missing Information",
+                description: "Please fill in all required fields and add at least one video.",
+                type: "error",
+            })
             return
         }
 
@@ -248,10 +254,19 @@ export default function CreatePlaylistStreamPage() {
                 })
             }
 
+            addToast({
+                title: "Playlist Stream Created",
+                description: "Your playlist stream has been created successfully.",
+                type: "success",
+            })
             router.push(`/dashboard/streams/${event.id}/control`)
         } catch (error) {
             console.error("Failed to create playlist stream:", error)
-            alert("Failed to create playlist stream. Please try again.")
+            addToast({
+                title: "Failed to Create Stream",
+                description: "Please check your settings and try again.",
+                type: "error",
+            })
         } finally {
             setSubmitting(false)
         }

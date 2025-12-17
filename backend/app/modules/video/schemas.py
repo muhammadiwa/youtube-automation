@@ -182,10 +182,12 @@ class VideoTemplateRequest(BaseModel):
     """Request schema for creating/updating video template."""
 
     name: str = Field(..., min_length=1, max_length=100)
+    title_template: Optional[str] = Field(None, max_length=200)
     description_template: Optional[str] = Field(None, max_length=MAX_DESCRIPTION_LENGTH)
     tags: Optional[list[str]] = Field(None, max_length=MAX_TAGS)
     category_id: Optional[str] = None
     visibility: VideoVisibility = VideoVisibility.PRIVATE
+    is_default: bool = False
 
 
 class VideoTemplateResponse(BaseModel):
@@ -194,10 +196,12 @@ class VideoTemplateResponse(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID
     name: str
-    description_template: Optional[str]
-    tags: Optional[list[str]]
-    category_id: Optional[str]
+    title_template: Optional[str] = None
+    description_template: Optional[str] = None
+    tags: Optional[list[str]] = None
+    category_id: Optional[str] = None
     visibility: str
+    is_default: bool = False
     created_at: datetime
     updated_at: datetime
 

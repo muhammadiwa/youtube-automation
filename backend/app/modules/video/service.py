@@ -93,6 +93,7 @@ class VideoService:
         request: VideoUploadRequest,
         file_path: str,
         file_size: int,
+        thumbnail_path: Optional[str] = None,
     ) -> Video:
         """Create a new video record.
 
@@ -101,6 +102,7 @@ class VideoService:
             request: Upload request data
             file_path: Path to uploaded file
             file_size: Size of file in bytes
+            thumbnail_path: Optional path to thumbnail file
 
         Returns:
             Video: Created video instance
@@ -118,6 +120,7 @@ class VideoService:
             file_path=file_path,
             file_size=file_size,
             scheduled_publish_at=request.scheduled_publish_at,
+            thumbnail_path=thumbnail_path,
         )
 
         return video
@@ -434,12 +437,32 @@ class VideoService:
         return await self.video_repo.set_published(video)
 
     async def delete_video(self, video_id: uuid.UUID) -> None:
-        """Delete a video.
+        """Delete a video and its associated files.
 
         Args:
             video_id: Video UUID
         """
         video = await self.get_video(video_id)
+        
+        # Delete video file from storage
+        if video.file_path:
+            try:
+                if os.path.exists(video.file_path):
+                    os.remove(video.file_path)
+            except Exception as e:
+                # Log but don't fail if file deletion fails
+                import logging
+                logging.warning(f"Failed to delete video file {video.file_path}: {e}")
+        
+        # Delete thumbnail file from storage
+        if video.local_thumbnail_path:
+            try:
+                if os.path.exists(video.local_thumbnail_path):
+                    os.remove(video.local_thumbnail_path)
+            except Exception as e:
+                import logging
+                logging.warning(f"Failed to delete thumbnail file {video.local_thumbnail_path}: {e}")
+        
         await self.video_repo.delete(video)
 
     # Template methods
@@ -447,31 +470,41 @@ class VideoService:
         self,
         user_id: uuid.UUID,
         name: str,
+        title_template: Optional[str] = None,
         description_template: Optional[str] = None,
         tags: Optional[list[str]] = None,
         category_id: Optional[str] = None,
         visibility: str = VideoVisibility.PRIVATE.value,
+        is_default: bool = False,
     ) -> VideoTemplate:
         """Create a video template.
 
         Args:
             user_id: Owner user UUID
             name: Template name
+            title_template: Title template
             description_template: Description template
             tags: Default tags
             category_id: Default category
             visibility: Default visibility
+            is_default: Whether this is the default template
 
         Returns:
             VideoTemplate: Created template
         """
+        # If setting as default, unset other defaults
+        if is_default:
+            await self.template_repo.unset_defaults(user_id)
+        
         return await self.template_repo.create(
             user_id=user_id,
             name=name,
+            title_template=title_template,
             description_template=description_template,
             tags=tags,
             category_id=category_id,
             visibility=visibility,
+            is_default=is_default,
         )
 
     async def get_templates(self, user_id: uuid.UUID) -> list[VideoTemplate]:
@@ -484,6 +517,100 @@ class VideoService:
             list[VideoTemplate]: List of templates
         """
         return await self.template_repo.get_by_user_id(user_id)
+
+    async def get_imported_youtube_ids(self, account_id: uuid.UUID) -> set[str]:
+        """Get set of YouTube video IDs that have been imported for an account.
+
+        Args:
+            account_id: YouTube account UUID
+
+        Returns:
+            set[str]: Set of YouTube video IDs
+        """
+        from sqlalchemy import select
+        
+        result = await self.session.execute(
+            select(Video.youtube_id)
+            .where(Video.account_id == account_id)
+            .where(Video.youtube_id.isnot(None))
+        )
+        return {row[0] for row in result.fetchall() if row[0]}
+
+    async def import_youtube_video(
+        self,
+        account_id: uuid.UUID,
+        youtube_id: str,
+        title: str,
+        description: str,
+        tags: list[str],
+        category_id: str,
+        visibility: VideoVisibility,
+        thumbnail_url: str,
+        view_count: int,
+        like_count: int,
+        comment_count: int,
+        published_at: Optional[str] = None,
+    ) -> Video:
+        """Import an existing YouTube video into the platform.
+
+        Args:
+            account_id: YouTube account UUID
+            youtube_id: YouTube video ID
+            title: Video title
+            description: Video description
+            tags: Video tags
+            category_id: YouTube category ID
+            visibility: Video visibility
+            thumbnail_url: Thumbnail URL
+            view_count: View count
+            like_count: Like count
+            comment_count: Comment count
+            published_at: Published date string
+
+        Returns:
+            Video: Created video instance
+        """
+        from datetime import datetime
+        
+        # Check if already imported
+        existing = await self.session.execute(
+            select(Video).where(
+                Video.account_id == account_id,
+                Video.youtube_id == youtube_id
+            )
+        )
+        if existing.scalar_one_or_none():
+            raise VideoServiceError(f"Video {youtube_id} already imported")
+        
+        # Parse published date
+        published_datetime = None
+        if published_at:
+            try:
+                published_datetime = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                pass
+        
+        # Create video record
+        video = Video(
+            account_id=account_id,
+            youtube_id=youtube_id,
+            title=title,
+            description=description,
+            tags=tags,
+            category_id=category_id,
+            visibility=visibility.value,
+            thumbnail_url=thumbnail_url,
+            view_count=view_count,
+            like_count=like_count,
+            comment_count=comment_count,
+            status=VideoStatus.PUBLISHED.value,
+            published_at=published_datetime,
+        )
+        
+        self.session.add(video)
+        await self.session.flush()
+        
+        return video
 
 
 def parse_csv_for_bulk_upload(csv_content: str) -> tuple[list[BulkUploadEntry], list[str]]:
