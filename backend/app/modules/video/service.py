@@ -368,41 +368,63 @@ class VideoService:
 
         return video
 
-    async def get_metadata_versions(self, video_id: uuid.UUID) -> list:
-        """Get metadata version history for a video.
+    async def sync_video_stats(self, video_id: uuid.UUID) -> Video:
+        """Sync video statistics from YouTube.
+
+        Fetches current view count, like count, and comment count from YouTube API.
 
         Args:
             video_id: Video UUID
 
         Returns:
-            list: List of metadata versions
+            Video: Updated video instance with synced stats
         """
-        # Verify video exists
-        await self.get_video(video_id)
-        return await self.video_repo.get_metadata_versions(video_id)
+        from app.modules.video.youtube_upload_api import YouTubeUploadClient
+        from app.modules.account.repository import YouTubeAccountRepository
+        from sqlalchemy import select
 
-    async def rollback_metadata(
-        self, video_id: uuid.UUID, version_number: int
-    ) -> Video:
-        """Rollback video metadata to a specific version.
+        # Get video with explicit query to ensure it's bound to session
+        result = await self.session.execute(
+            select(Video).where(Video.id == video_id)
+        )
+        video = result.scalar_one_or_none()
 
-        Args:
-            video_id: Video UUID
-            version_number: Version to rollback to
+        if not video:
+            raise VideoNotFoundError(f"Video {video_id} not found")
 
-        Returns:
-            Video: Updated video instance
+        if not video.youtube_id:
+            raise VideoServiceError("Video not uploaded to YouTube yet")
 
-        Raises:
-            VideoServiceError: If version not found
-        """
-        video = await self.get_video(video_id)
-        result = await self.video_repo.rollback_to_version(video, version_number)
+        # Get account access token
+        account_repo = YouTubeAccountRepository(self.session)
+        account = await account_repo.get_by_id(video.account_id)
 
-        if not result:
-            raise VideoServiceError(f"Version {version_number} not found")
+        if not account:
+            raise VideoServiceError("YouTube account not found")
 
-        return result
+        # Refresh token if needed
+        from app.modules.account.service import YouTubeAccountService
+        account_service = YouTubeAccountService(self.session)
+        if account.is_token_expired() or account.is_token_expiring_soon(hours=1):
+            account = await account_service._refresh_account_token(account)
+            await self.session.flush()
+
+        # Fetch stats from YouTube
+        client = YouTubeUploadClient(account.access_token)
+        video_data = await client.get_video_details(video.youtube_id)
+
+        if not video_data:
+            raise VideoServiceError("Video not found on YouTube")
+
+        # Update stats
+        statistics = video_data.get("statistics", {})
+        video.view_count = int(statistics.get("viewCount", 0))
+        video.like_count = int(statistics.get("likeCount", 0))
+        video.comment_count = int(statistics.get("commentCount", 0))
+
+        await self.session.flush()
+        await self.session.refresh(video)
+        return video
 
     async def schedule_publish(
         self, video_id: uuid.UUID, publish_at: datetime

@@ -212,6 +212,13 @@ export const videosApi = {
 
         return response.json()
     },
+
+    /**
+     * Sync video stats from YouTube
+     */
+    async syncVideoStats(videoId: string): Promise<Video> {
+        return apiClient.post(`/videos/${videoId}/sync-stats`, {})
+    },
 }
 
 export default videosApi

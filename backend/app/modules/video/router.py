@@ -21,7 +21,6 @@ from app.modules.video.schemas import (
     BulkMetadataUpdate,
     SchedulePublishRequest,
     VideoResponse,
-    MetadataVersionResponse,
     UploadJobResponse,
     UploadProgressResponse,
     BulkUploadResponse,
@@ -725,42 +724,26 @@ async def apply_template(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
-@router.get("/{video_id}/versions", response_model=list[MetadataVersionResponse])
-async def get_metadata_versions(
+@router.post("/{video_id}/sync-stats", response_model=VideoResponse)
+async def sync_video_stats(
     video_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
 ):
-    """Get metadata version history.
+    """Sync video statistics from YouTube.
 
-    Requirements: 4.5
+    Fetches current view count, like count, and comment count from YouTube API.
     """
     service = VideoService(db)
 
     try:
-        versions = await service.get_metadata_versions(video_id)
-        return versions
-    except VideoNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-
-
-@router.post("/{video_id}/rollback/{version_number}", response_model=VideoResponse)
-async def rollback_metadata(
-    video_id: uuid.UUID,
-    version_number: int,
-    db: AsyncSession = Depends(get_db),
-):
-    """Rollback metadata to a specific version.
-
-    Requirements: 4.5
-    """
-    service = VideoService(db)
-
-    try:
-        video = await service.rollback_metadata(video_id, version_number)
+        video = await service.sync_video_stats(video_id)
+        await db.commit()
+        await db.refresh(video)
         return video
     except VideoNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 

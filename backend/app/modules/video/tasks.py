@@ -621,3 +621,78 @@ def check_scheduled_publishes() -> dict:
             return {"status": "success", "published_count": published_count}
 
     return _run_async(_check())
+
+
+@celery_app.task
+def sync_all_video_stats() -> dict:
+    """Sync stats for all published videos from YouTube.
+    
+    This task should be run periodically (e.g., every hour) to keep
+    video statistics up to date.
+    """
+    from app.core.database import celery_session_maker
+    from app.modules.video.models import Video, VideoStatus
+    from app.modules.video.youtube_upload_api import YouTubeUploadClient
+    from app.modules.account.repository import YouTubeAccountRepository
+    from sqlalchemy import select
+
+    async def _sync():
+        async with celery_session_maker() as session:
+            # Get all published videos with youtube_id
+            result = await session.execute(
+                select(Video)
+                .where(Video.status == VideoStatus.PUBLISHED.value)
+                .where(Video.youtube_id.isnot(None))
+            )
+            videos = list(result.scalars().all())
+
+            if not videos:
+                return {"status": "success", "synced": 0, "errors": 0}
+
+            # Group videos by account for efficient token usage
+            videos_by_account: dict[uuid.UUID, list[Video]] = {}
+            for video in videos:
+                if video.account_id not in videos_by_account:
+                    videos_by_account[video.account_id] = []
+                videos_by_account[video.account_id].append(video)
+
+            synced_count = 0
+            error_count = 0
+            account_repo = YouTubeAccountRepository(session)
+
+            for account_id, account_videos in videos_by_account.items():
+                try:
+                    # Get access token for this account
+                    access_token = await _get_account_access_token(session, account_id)
+                    if not access_token:
+                        logger.warning(f"No access token for account {account_id}")
+                        error_count += len(account_videos)
+                        continue
+
+                    client = YouTubeUploadClient(access_token)
+
+                    # Sync each video
+                    for video in account_videos:
+                        try:
+                            video_data = await client.get_video_details(video.youtube_id)
+                            if video_data:
+                                statistics = video_data.get("statistics", {})
+                                video.view_count = int(statistics.get("viewCount", 0))
+                                video.like_count = int(statistics.get("likeCount", 0))
+                                video.comment_count = int(statistics.get("commentCount", 0))
+                                synced_count += 1
+                            else:
+                                logger.warning(f"Video {video.youtube_id} not found on YouTube")
+                                error_count += 1
+                        except Exception as e:
+                            logger.error(f"Failed to sync stats for video {video.id}: {e}")
+                            error_count += 1
+
+                except Exception as e:
+                    logger.error(f"Failed to sync videos for account {account_id}: {e}")
+                    error_count += len(account_videos)
+
+            await session.commit()
+            return {"status": "success", "synced": synced_count, "errors": error_count}
+
+    return _run_async(_sync())

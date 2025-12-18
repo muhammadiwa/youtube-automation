@@ -511,10 +511,16 @@ export default function VideosPage() {
                                             >
                                                 {video.title}
                                             </h3>
-                                            <div className="flex items-center gap-3 mt-2 text-sm text-muted-foreground">
-                                                <span className="flex items-center gap-1">
+                                            <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground flex-wrap">
+                                                <span className="flex items-center gap-1" title="Views">
                                                     <Eye className="h-3 w-3" />
                                                     {formatNumber(video.viewCount)}
+                                                </span>
+                                                <span className="flex items-center gap-1" title="Likes">
+                                                    👍 {formatNumber(video.likeCount)}
+                                                </span>
+                                                <span className="flex items-center gap-1" title="Comments">
+                                                    💬 {formatNumber(video.commentCount)}
                                                 </span>
                                                 <Badge variant="outline" className="text-xs">
                                                     {video.visibility}

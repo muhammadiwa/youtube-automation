@@ -23,6 +23,17 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
     # Fix Celery 6.0 deprecation warning
     broker_connection_retry_on_startup=True,
+    # Periodic tasks schedule
+    beat_schedule={
+        "sync-video-stats-hourly": {
+            "task": "app.modules.video.tasks.sync_all_video_stats",
+            "schedule": 3600.0,  # Every hour
+        },
+        "check-scheduled-publishes": {
+            "task": "app.modules.video.tasks.check_scheduled_publishes",
+            "schedule": 60.0,  # Every minute
+        },
+    },
 )
 
 celery_app.autodiscover_tasks([

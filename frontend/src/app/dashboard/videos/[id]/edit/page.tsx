@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter, useParams } from "next/navigation"
-import { Save, X, ChevronRight, ChevronDown, History } from "lucide-react"
+import { Save, X, RefreshCw } from "lucide-react"
 import { DashboardLayout } from "@/components/dashboard"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -20,19 +20,6 @@ import { CategorySelect } from "@/components/videos/category-select"
 import { SchedulePicker } from "@/components/videos/schedule-picker"
 import { ThumbnailUploader } from "@/components/videos/thumbnail-uploader"
 
-interface MetadataVersion {
-    id: string
-    version: number
-    title: string
-    description: string
-    tags: string[]
-    visibility: string
-    categoryId?: string
-    createdAt: string
-    changedBy?: string
-    changeReason?: string
-}
-
 export default function VideoEditPage() {
     const router = useRouter()
     const params = useParams()
@@ -42,8 +29,7 @@ export default function VideoEditPage() {
     const [video, setVideo] = useState<Video | null>(null)
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
-    const [showVersionHistory, setShowVersionHistory] = useState(false)
-    const [versions, setVersions] = useState<MetadataVersion[]>([])
+    const [syncingStats, setSyncingStats] = useState(false)
 
     // Form state
     const [title, setTitle] = useState("")
@@ -54,11 +40,9 @@ export default function VideoEditPage() {
     const [visibility, setVisibility] = useState<"public" | "unlisted" | "private">("private")
     const [scheduledPublishAt, setScheduledPublishAt] = useState<Date | null>(null)
     const [thumbnailUrl, setThumbnailUrl] = useState<string>("")
-    const [loadingVersions, setLoadingVersions] = useState(false)
 
     useEffect(() => {
         loadVideo()
-        loadVersionHistory()
     }, [videoId])
 
     const loadVideo = async () => {
@@ -82,39 +66,21 @@ export default function VideoEditPage() {
         }
     }
 
-    const loadVersionHistory = async () => {
+    const syncStats = async () => {
+        if (!video?.youtubeId) {
+            addToast({ type: "error", title: "Error", description: "Video not uploaded to YouTube yet" })
+            return
+        }
         try {
-            setLoadingVersions(true)
-            const response = await fetch(
-                `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"}/videos/${videoId}/versions`,
-                {
-                    headers: {
-                        Authorization: `Bearer ${localStorage.getItem("access_token")}`,
-                    },
-                }
-            )
-            if (response.ok) {
-                const data = await response.json()
-                // Backend returns array directly, map snake_case to camelCase
-                const rawVersions = Array.isArray(data) ? data : data.versions || []
-                const mappedVersions = rawVersions.map((v: any) => ({
-                    id: v.id,
-                    version: v.version_number,
-                    title: v.title,
-                    description: v.description,
-                    tags: v.tags || [],
-                    categoryId: v.category_id,
-                    visibility: v.visibility,
-                    createdAt: v.created_at,
-                    changedBy: v.changed_by,
-                    changeReason: v.change_reason,
-                }))
-                setVersions(mappedVersions)
-            }
+            setSyncingStats(true)
+            const updatedVideo = await videosApi.syncVideoStats(videoId)
+            setVideo(updatedVideo)
+            addToast({ type: "success", title: "Success", description: "Stats synced from YouTube" })
         } catch (error) {
-            console.error("Failed to load version history:", error)
+            console.error("Failed to sync stats:", error)
+            addToast({ type: "error", title: "Error", description: "Failed to sync stats from YouTube" })
         } finally {
-            setLoadingVersions(false)
+            setSyncingStats(false)
         }
     }
 
@@ -152,30 +118,6 @@ export default function VideoEditPage() {
             addToast({ type: "error", title: "Error", description: "Failed to update video" })
         } finally {
             setSaving(false)
-        }
-    }
-
-    const handleRollback = async (version: MetadataVersion) => {
-        try {
-            const response = await fetch(
-                `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"}/videos/${videoId}/rollback/${version.version}`,
-                {
-                    method: "POST",
-                    headers: {
-                        Authorization: `Bearer ${localStorage.getItem("access_token")}`,
-                        "Content-Type": "application/json",
-                    },
-                }
-            )
-            if (response.ok) {
-                addToast({ type: "success", title: "Success", description: `Restored to version ${version.version}` })
-                loadVideo()
-                loadVersionHistory()
-            } else {
-                throw new Error("Failed to rollback")
-            }
-        } catch (error) {
-            addToast({ type: "error", title: "Error", description: "Failed to restore version" })
         }
     }
 
@@ -415,67 +357,19 @@ export default function VideoEditPage() {
                                     <span className="text-sm text-muted-foreground">Comments</span>
                                     <span className="text-sm font-medium">{video.commentCount.toLocaleString()}</span>
                                 </div>
+                                {video.youtubeId && (
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="w-full mt-3"
+                                        onClick={syncStats}
+                                        disabled={syncingStats}
+                                    >
+                                        <RefreshCw className={`h-4 w-4 mr-2 ${syncingStats ? "animate-spin" : ""}`} />
+                                        {syncingStats ? "Syncing..." : "Sync from YouTube"}
+                                    </Button>
+                                )}
                             </CardContent>
-                        </Card>
-
-                        {/* Version History */}
-                        <Card>
-                            <CardHeader>
-                                <button
-                                    className="flex items-center justify-between w-full"
-                                    onClick={() => setShowVersionHistory(!showVersionHistory)}
-                                >
-                                    <CardTitle className="flex items-center gap-2">
-                                        <History className="h-4 w-4" />
-                                        Version History
-                                    </CardTitle>
-                                    {showVersionHistory ? (
-                                        <ChevronDown className="h-4 w-4" />
-                                    ) : (
-                                        <ChevronRight className="h-4 w-4" />
-                                    )}
-                                </button>
-                            </CardHeader>
-                            {showVersionHistory && (
-                                <CardContent className="space-y-3">
-                                    {loadingVersions ? (
-                                        <div className="space-y-2">
-                                            <Skeleton className="h-16 w-full" />
-                                            <Skeleton className="h-16 w-full" />
-                                        </div>
-                                    ) : versions.length === 0 ? (
-                                        <p className="text-sm text-muted-foreground">No version history</p>
-                                    ) : (
-                                        versions.map((version) => (
-                                            <div key={version.id} className="border rounded p-3 space-y-2">
-                                                <div className="flex items-center justify-between">
-                                                    <span className="text-sm font-medium">
-                                                        Version {version.version}
-                                                    </span>
-                                                    <Button
-                                                        size="sm"
-                                                        variant="ghost"
-                                                        onClick={() => handleRollback(version)}
-                                                    >
-                                                        Restore
-                                                    </Button>
-                                                </div>
-                                                <p className="text-xs font-medium line-clamp-1">
-                                                    {version.title}
-                                                </p>
-                                                {version.changeReason && (
-                                                    <p className="text-xs text-muted-foreground">
-                                                        {version.changeReason}
-                                                    </p>
-                                                )}
-                                                <p className="text-xs text-muted-foreground">
-                                                    {new Date(version.createdAt).toLocaleString()}
-                                                </p>
-                                            </div>
-                                        ))
-                                    )}
-                                </CardContent>
-                            )}
                         </Card>
                     </div>
                 </div>
