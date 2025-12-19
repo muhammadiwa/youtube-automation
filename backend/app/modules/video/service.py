@@ -94,6 +94,7 @@ class VideoService:
         file_path: str,
         file_size: int,
         thumbnail_path: Optional[str] = None,
+        duration: Optional[int] = None,
     ) -> Video:
         """Create a new video record.
 
@@ -103,6 +104,7 @@ class VideoService:
             file_path: Path to uploaded file
             file_size: Size of file in bytes
             thumbnail_path: Optional path to thumbnail file
+            duration: Video duration in seconds (extracted via ffprobe)
 
         Returns:
             Video: Created video instance
@@ -121,6 +123,7 @@ class VideoService:
             file_size=file_size,
             scheduled_publish_at=request.scheduled_publish_at,
             thumbnail_path=thumbnail_path,
+            duration=duration,
         )
 
         return video

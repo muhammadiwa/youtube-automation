@@ -1140,3 +1140,42 @@ async def _cleanup_old_health_logs_async(retention_days: int) -> dict:
         "sessions_processed": len(session_ids),
         "logs_deleted": total_deleted,
     }
+
+
+# ============================================
+# Import Video-to-Live Stream Job Tasks
+# ============================================
+# This import ensures Celery discovers the stream_job_tasks module
+# which contains FFmpeg worker management tasks for Video-to-Live streaming
+
+from app.modules.stream.stream_job_tasks import (
+    start_ffmpeg_worker,
+    stop_ffmpeg_worker,
+    monitor_ffmpeg_worker,
+    restart_ffmpeg_worker,
+    check_scheduled_streams as check_scheduled_stream_jobs,
+    collect_health_metrics as collect_stream_job_health_metrics,
+)
+
+__all__ = [
+    # YouTube Live tasks
+    "check_scheduled_streams",
+    "start_stream_task",
+    "stop_stream_task",
+    "handle_stream_disconnection",
+    "restart_stream_task",
+    "check_stream_end_times",
+    "collect_stream_health_metrics",
+    "check_active_streams_health",
+    "trigger_health_alert",
+    "attempt_stream_reconnection",
+    "trigger_stream_failover",
+    "cleanup_old_health_logs",
+    # Video-to-Live FFmpeg tasks
+    "start_ffmpeg_worker",
+    "stop_ffmpeg_worker",
+    "monitor_ffmpeg_worker",
+    "restart_ffmpeg_worker",
+    "check_scheduled_stream_jobs",
+    "collect_stream_job_health_metrics",
+]

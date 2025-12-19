@@ -4,7 +4,10 @@ Implements chunked file streaming to avoid memory issues with large files.
 The file is streamed directly to disk without loading entirely into memory.
 """
 
+import asyncio
+import json
 import os
+import subprocess
 import uuid
 import aiofiles
 import logging
@@ -158,3 +161,117 @@ def get_upload_dir() -> str:
     upload_dir = getattr(settings, 'LOCAL_STORAGE_PATH', './storage') + "/uploads"
     os.makedirs(upload_dir, exist_ok=True)
     return upload_dir
+
+
+async def get_video_duration(file_path: str) -> Optional[int]:
+    """Extract video duration using ffprobe.
+    
+    Args:
+        file_path: Path to the video file
+        
+    Returns:
+        Optional[int]: Duration in seconds, or None if extraction fails
+    """
+    try:
+        # Use ffprobe to get video duration
+        cmd = [
+            "ffprobe",
+            "-v", "quiet",
+            "-print_format", "json",
+            "-show_format",
+            "-show_streams",
+            file_path
+        ]
+        
+        # Run ffprobe asynchronously
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        stdout, stderr = await process.communicate()
+        
+        if process.returncode != 0:
+            logger.warning(f"ffprobe failed for {file_path}: {stderr.decode()}")
+            return None
+        
+        # Parse JSON output
+        data = json.loads(stdout.decode())
+        
+        # Try to get duration from format first
+        if "format" in data and "duration" in data["format"]:
+            duration = float(data["format"]["duration"])
+            return int(duration)
+        
+        # Fallback: get duration from video stream
+        if "streams" in data:
+            for stream in data["streams"]:
+                if stream.get("codec_type") == "video" and "duration" in stream:
+                    duration = float(stream["duration"])
+                    return int(duration)
+        
+        logger.warning(f"Could not find duration in ffprobe output for {file_path}")
+        return None
+        
+    except FileNotFoundError:
+        logger.error("ffprobe not found. Please install FFmpeg.")
+        return None
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse ffprobe output: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error getting video duration: {e}")
+        return None
+
+
+def get_video_duration_sync(file_path: str) -> Optional[int]:
+    """Extract video duration using ffprobe (synchronous version).
+    
+    Args:
+        file_path: Path to the video file
+        
+    Returns:
+        Optional[int]: Duration in seconds, or None if extraction fails
+    """
+    try:
+        cmd = [
+            "ffprobe",
+            "-v", "quiet",
+            "-print_format", "json",
+            "-show_format",
+            "-show_streams",
+            file_path
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        
+        if result.returncode != 0:
+            logger.warning(f"ffprobe failed for {file_path}: {result.stderr}")
+            return None
+        
+        data = json.loads(result.stdout)
+        
+        # Try to get duration from format first
+        if "format" in data and "duration" in data["format"]:
+            duration = float(data["format"]["duration"])
+            return int(duration)
+        
+        # Fallback: get duration from video stream
+        if "streams" in data:
+            for stream in data["streams"]:
+                if stream.get("codec_type") == "video" and "duration" in stream:
+                    duration = float(stream["duration"])
+                    return int(duration)
+        
+        return None
+        
+    except FileNotFoundError:
+        logger.error("ffprobe not found. Please install FFmpeg.")
+        return None
+    except subprocess.TimeoutExpired:
+        logger.error(f"ffprobe timed out for {file_path}")
+        return None
+    except Exception as e:
+        logger.error(f"Error getting video duration: {e}")
+        return None

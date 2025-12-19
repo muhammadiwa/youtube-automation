@@ -109,6 +109,10 @@ class VideoResponse(BaseModel):
     comment_count: int = Field(alias="commentCount", serialization_alias="commentCount", default=0)
     status: str
     upload_progress: int = Field(alias="uploadProgress", serialization_alias="uploadProgress", default=0)
+    # File info for Video-to-Live feature
+    file_path: Optional[str] = Field(alias="filePath", serialization_alias="filePath", default=None)
+    file_size: Optional[int] = Field(alias="fileSize", serialization_alias="fileSize", default=None)
+    duration: Optional[int] = Field(default=None)  # in seconds
     created_at: datetime = Field(alias="createdAt", serialization_alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt", serialization_alias="updatedAt")
 

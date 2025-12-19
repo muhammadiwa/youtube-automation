@@ -5,6 +5,7 @@ Requirements: 3.1, 3.2, 3.4, 3.5, 4.1, 4.2, 4.3, 4.4, 4.5
 """
 
 import math
+import os
 import uuid
 from typing import Optional
 
@@ -116,6 +117,7 @@ async def upload_video(
     from app.modules.video.upload_handler import (
         stream_upload_to_disk,
         cleanup_upload,
+        get_video_duration,
         FileTooLargeError,
         InvalidFileTypeError,
         UploadError,
@@ -142,6 +144,9 @@ async def upload_video(
         upload_result = await stream_upload_to_disk(file)
         file_path = upload_result.file_path
         file_size = upload_result.file_size
+
+        # Extract video duration using ffprobe
+        duration = await get_video_duration(file_path)
 
         # Handle optional thumbnail upload
         if thumbnail and thumbnail.filename:
@@ -176,6 +181,7 @@ async def upload_video(
             file_path=file_path,
             file_size=file_size,
             thumbnail_path=thumbnail_path,
+            duration=duration,
         )
 
         await db.commit()
@@ -273,6 +279,98 @@ async def bulk_delete_videos(
     
     await db.commit()
     return BulkDeleteResponse(success=success_count, failed=failed_count, results=results)
+
+
+class BulkExtractDurationResponse(BaseModel):
+    """Response schema for bulk duration extraction."""
+    processed: int
+    updated: int
+    failed: int
+    skipped: int
+    results: list[dict]
+
+
+@router.post("/bulk-extract-duration", response_model=BulkExtractDurationResponse)
+async def bulk_extract_duration(
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Extract duration for all videos that have local files but no duration.
+    
+    This is useful for migrating existing videos that were uploaded before
+    duration extraction was implemented.
+    """
+    from app.modules.video.upload_handler import get_video_duration
+    from sqlalchemy import select
+    from app.modules.video.models import Video
+    from app.modules.account.models import YouTubeAccount
+    
+    # Get all videos for this user that have file_path but no duration
+    result = await db.execute(
+        select(Video)
+        .join(YouTubeAccount, Video.account_id == YouTubeAccount.id)
+        .where(YouTubeAccount.user_id == current_user.id)
+        .where(Video.file_path.isnot(None))
+        .where(Video.duration.is_(None))
+    )
+    videos = result.scalars().all()
+    
+    processed = 0
+    updated = 0
+    failed = 0
+    skipped = 0
+    results = []
+    
+    for video in videos:
+        processed += 1
+        
+        if not video.file_path or not os.path.exists(video.file_path):
+            skipped += 1
+            results.append({
+                "videoId": str(video.id),
+                "title": video.title,
+                "status": "skipped",
+                "reason": "File not found"
+            })
+            continue
+        
+        try:
+            duration = await get_video_duration(video.file_path)
+            if duration:
+                video.duration = duration
+                updated += 1
+                results.append({
+                    "videoId": str(video.id),
+                    "title": video.title,
+                    "status": "updated",
+                    "duration": duration
+                })
+            else:
+                failed += 1
+                results.append({
+                    "videoId": str(video.id),
+                    "title": video.title,
+                    "status": "failed",
+                    "reason": "Could not extract duration"
+                })
+        except Exception as e:
+            failed += 1
+            results.append({
+                "videoId": str(video.id),
+                "title": video.title,
+                "status": "failed",
+                "reason": str(e)
+            })
+    
+    await db.commit()
+    
+    return BulkExtractDurationResponse(
+        processed=processed,
+        updated=updated,
+        failed=failed,
+        skipped=skipped,
+        results=results
+    )
 
 
 # Template endpoints - MUST be before /{video_id} routes
@@ -745,6 +843,59 @@ async def sync_video_stats(
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post("/{video_id}/extract-duration", response_model=VideoResponse)
+async def extract_video_duration(
+    video_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Extract and update video duration using ffprobe.
+
+    Useful for videos that were uploaded before duration extraction was implemented.
+    Only works for videos with local file_path.
+    """
+    from app.modules.video.upload_handler import get_video_duration
+
+    service = VideoService(db)
+
+    try:
+        video = await service.get_video(video_id)
+        
+        if not video.file_path:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Video has no local file. Duration can only be extracted from uploaded videos.",
+            )
+        
+        if not os.path.exists(video.file_path):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Video file not found on server.",
+            )
+        
+        # Extract duration
+        duration = await get_video_duration(video.file_path)
+        
+        if duration is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to extract duration. Make sure ffprobe is installed.",
+            )
+        
+        # Update video
+        video.duration = duration
+        await db.commit()
+        await db.refresh(video)
+        
+        return video
+    except VideoNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.post("/{video_id}/schedule", response_model=VideoResponse)

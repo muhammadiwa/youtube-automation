@@ -40,6 +40,7 @@ class VideoRepository:
         file_size: Optional[int] = None,
         scheduled_publish_at: Optional[datetime] = None,
         thumbnail_path: Optional[str] = None,
+        duration: Optional[int] = None,
     ) -> Video:
         """Create a new video.
 
@@ -54,6 +55,7 @@ class VideoRepository:
             file_size: Size of video file in bytes
             scheduled_publish_at: Scheduled publish datetime
             thumbnail_path: Path to thumbnail file
+            duration: Video duration in seconds
 
         Returns:
             Video: Created video instance
@@ -74,6 +76,7 @@ class VideoRepository:
             scheduled_publish_at=scheduled_publish_at,
             status=status,
             local_thumbnail_path=thumbnail_path,
+            duration=duration,
         )
 
         self.session.add(video)

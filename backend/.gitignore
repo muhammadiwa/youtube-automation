@@ -89,3 +89,4 @@ logs/
 
 # Storage (uploaded files)
 storage/
+tests/

@@ -42,6 +42,9 @@ export interface Video {
     commentCount: number
     status: "draft" | "uploading" | "processing" | "published" | "scheduled" | "failed"
     uploadProgress?: number
+    filePath?: string  // Local file path for Video-to-Live streaming
+    fileSize?: number
+    duration?: number  // Duration in seconds
     createdAt?: string
     updatedAt?: string
 }

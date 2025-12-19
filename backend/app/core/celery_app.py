@@ -33,6 +33,15 @@ celery_app.conf.update(
             "task": "app.modules.video.tasks.check_scheduled_publishes",
             "schedule": 60.0,  # Every minute
         },
+        # Stream Job Tasks (Video-to-Live Streaming)
+        "check-scheduled-streams": {
+            "task": "app.modules.stream.stream_job_tasks.check_scheduled_streams",
+            "schedule": 10.0,  # Every 10 seconds
+        },
+        "collect-stream-health-metrics": {
+            "task": "app.modules.stream.stream_job_tasks.collect_health_metrics",
+            "schedule": 10.0,  # Every 10 seconds
+        },
     },
 )
 

@@ -18,6 +18,9 @@ import {
     Settings,
     Zap,
     Activity,
+    Video,
+    BarChart3,
+    History,
 } from "lucide-react"
 import { DashboardLayout, PausedStreamsIndicator } from "@/components/dashboard"
 import { Button } from "@/components/ui/button"
@@ -38,9 +41,11 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
 import { streamsApi, type LiveEvent } from "@/lib/api/streams"
 import { accountsApi } from "@/lib/api/accounts"
+import { VideoToLiveList, ResourceDashboardCard } from "@/components/streams"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { useToast } from "@/components/ui/toast"
 import type { YouTubeAccount } from "@/types"
@@ -335,26 +340,47 @@ export default function StreamsPage() {
                         </p>
                     </div>
                     <div className="flex gap-2">
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button
-                                    className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white shadow-lg shadow-red-500/25"
-                                >
-                                    <Plus className="mr-2 h-4 w-4" />
-                                    New Stream
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => router.push("/dashboard/streams/create")}>
-                                    <Zap className="mr-2 h-4 w-4" />
-                                    Quick Stream
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => router.push("/dashboard/streams/create-playlist")}>
-                                    <Play className="mr-2 h-4 w-4" />
-                                    Playlist Stream
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
+                        <div className="flex gap-2">
+                            <Button
+                                variant="outline"
+                                onClick={() => router.push("/dashboard/streams/history")}
+                            >
+                                <History className="mr-2 h-4 w-4" />
+                                History
+                            </Button>
+                            <Button
+                                variant="outline"
+                                onClick={() => router.push("/dashboard/streams/analytics")}
+                            >
+                                <BarChart3 className="mr-2 h-4 w-4" />
+                                Analytics
+                            </Button>
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button
+                                        className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white shadow-lg shadow-red-500/25"
+                                    >
+                                        <Plus className="mr-2 h-4 w-4" />
+                                        New Stream
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                    <DropdownMenuItem onClick={() => router.push("/dashboard/streams/create")}>
+                                        <Zap className="mr-2 h-4 w-4" />
+                                        Quick Stream (YouTube Live)
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => router.push("/dashboard/streams/create-video-live")}>
+                                        <Video className="mr-2 h-4 w-4" />
+                                        Video-to-Live (24/7)
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem onClick={() => router.push("/dashboard/streams/create-playlist")}>
+                                        <Play className="mr-2 h-4 w-4" />
+                                        Playlist Stream
+                                    </DropdownMenuItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                        </div>
                     </div>
                 </div>
 
@@ -434,193 +460,219 @@ export default function StreamsPage() {
                     </CardContent>
                 </Card>
 
-                {/* Content */}
-                {loading ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {[...Array(6)].map((_, i) => (
-                            <Card key={i} className="border-0 shadow-lg">
-                                <Skeleton className="aspect-video w-full" />
-                                <CardContent className="p-4">
-                                    <Skeleton className="h-4 w-3/4 mb-2" />
-                                    <Skeleton className="h-3 w-1/2" />
+                {/* Stream Type Tabs */}
+                <Tabs defaultValue="video-to-live" className="space-y-4">
+                    <TabsList className="grid w-full max-w-md grid-cols-2">
+                        <TabsTrigger value="video-to-live" className="flex items-center gap-2">
+                            <Video className="h-4 w-4" />
+                            Video-to-Live (24/7)
+                        </TabsTrigger>
+                        <TabsTrigger value="youtube-live" className="flex items-center gap-2">
+                            <Radio className="h-4 w-4" />
+                            YouTube Live
+                        </TabsTrigger>
+                    </TabsList>
+
+                    {/* Video-to-Live Tab */}
+                    <TabsContent value="video-to-live" className="space-y-4">
+                        <ResourceDashboardCard />
+                        <VideoToLiveList
+                            accountId={accountFilter !== "all" ? accountFilter : undefined}
+                            showResourceDashboard={false}
+                        />
+                    </TabsContent>
+
+                    {/* YouTube Live Tab */}
+                    <TabsContent value="youtube-live" className="space-y-4">
+                        {/* Content */}
+                        {loading ? (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {[...Array(6)].map((_, i) => (
+                                    <Card key={i} className="border-0 shadow-lg">
+                                        <Skeleton className="aspect-video w-full" />
+                                        <CardContent className="p-4">
+                                            <Skeleton className="h-4 w-3/4 mb-2" />
+                                            <Skeleton className="h-3 w-1/2" />
+                                        </CardContent>
+                                    </Card>
+                                ))}
+                            </div>
+                        ) : filteredEvents.length === 0 ? (
+                            <Card className="border-0 shadow-lg">
+                                <CardContent className="py-12 text-center">
+                                    <Radio className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                                    <h3 className="text-lg font-semibold mb-2">No YouTube Live streams found</h3>
+                                    <p className="text-muted-foreground mb-4">
+                                        {searchQuery || statusFilter !== "all" || accountFilter !== "all"
+                                            ? "Try adjusting your filters"
+                                            : "Create your first YouTube Live stream to get started"}
+                                    </p>
+                                    <Button
+                                        className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white shadow-lg shadow-red-500/25"
+                                        onClick={() => router.push("/dashboard/streams/create")}
+                                    >
+                                        <Plus className="mr-2 h-4 w-4" />
+                                        Create YouTube Live
+                                    </Button>
                                 </CardContent>
                             </Card>
-                        ))}
-                    </div>
-                ) : filteredEvents.length === 0 ? (
-                    <Card className="border-0 shadow-lg">
-                        <CardContent className="py-12 text-center">
-                            <Radio className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                            <h3 className="text-lg font-semibold mb-2">No streams found</h3>
-                            <p className="text-muted-foreground mb-4">
-                                {searchQuery || statusFilter !== "all" || accountFilter !== "all"
-                                    ? "Try adjusting your filters"
-                                    : "Create your first live stream to get started"}
-                            </p>
-                            <Button
-                                className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white shadow-lg shadow-red-500/25"
-                                onClick={() => router.push("/dashboard/streams/create")}
-                            >
-                                <Plus className="mr-2 h-4 w-4" />
-                                Create Stream
-                            </Button>
-                        </CardContent>
-                    </Card>
-                ) : viewMode === "calendar" ? (
-                    <CalendarView
-                        events={filteredEvents}
-                        onEventClick={(event) => router.push(`/dashboard/streams/${event.id}/control`)}
-                    />
-                ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {filteredEvents.map((event) => (
-                            <Card
-                                key={event.id}
-                                className="overflow-hidden border-0 shadow-lg hover:shadow-xl transition-shadow"
-                            >
-                                <div className="relative">
-                                    <img
-                                        src={event.thumbnail_url || "/placeholder-stream.jpg"}
-                                        alt={event.title}
-                                        className="w-full aspect-video object-cover cursor-pointer"
-                                        onClick={() => router.push(`/dashboard/streams/${event.id}/control`)}
-                                    />
-                                    <div className="absolute top-2 left-2">
-                                        {getStatusBadge(event.status)}
-                                    </div>
-                                    {event.status === "live" && event.viewer_count !== undefined && (
-                                        <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
-                                            <Users className="h-3 w-3" />
-                                            {event.viewer_count.toLocaleString()}
-                                        </div>
-                                    )}
-                                </div>
-                                <CardContent className="p-4">
-                                    <div className="flex items-start justify-between gap-2">
-                                        <div className="flex-1 min-w-0">
-                                            <h3
-                                                className="font-semibold truncate cursor-pointer hover:text-primary"
+                        ) : viewMode === "calendar" ? (
+                            <CalendarView
+                                events={filteredEvents}
+                                onEventClick={(event) => router.push(`/dashboard/streams/${event.id}/control`)}
+                            />
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {filteredEvents.map((event) => (
+                                    <Card
+                                        key={event.id}
+                                        className="overflow-hidden border-0 shadow-lg hover:shadow-xl transition-shadow"
+                                    >
+                                        <div className="relative">
+                                            <img
+                                                src={event.thumbnail_url || "/placeholder-stream.jpg"}
+                                                alt={event.title}
+                                                className="w-full aspect-video object-cover cursor-pointer"
                                                 onClick={() => router.push(`/dashboard/streams/${event.id}/control`)}
-                                            >
-                                                {event.title}
-                                            </h3>
-                                            <p className="text-sm text-muted-foreground truncate">
-                                                {getAccountName(event.account_id)}
-                                            </p>
-                                            <p className="text-xs text-muted-foreground mt-1">
-                                                {formatDate(event.scheduled_start)}
-                                            </p>
+                                            />
+                                            <div className="absolute top-2 left-2">
+                                                {getStatusBadge(event.status)}
+                                            </div>
+                                            {event.status === "live" && event.viewer_count !== undefined && (
+                                                <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
+                                                    <Users className="h-3 w-3" />
+                                                    {event.viewer_count.toLocaleString()}
+                                                </div>
+                                            )}
                                         </div>
-                                        <DropdownMenu>
-                                            <DropdownMenuTrigger asChild>
-                                                <Button variant="ghost" size="icon">
-                                                    <MoreVertical className="h-4 w-4" />
-                                                </Button>
-                                            </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end">
-                                                {event.status === "scheduled" && (
-                                                    <DropdownMenuItem onClick={() => handleStartStream(event.id)}>
-                                                        <Play className="mr-2 h-4 w-4" />
-                                                        Start Stream
-                                                    </DropdownMenuItem>
-                                                )}
-                                                {event.status === "live" && (
-                                                    <DropdownMenuItem onClick={() => handleStopStream(event.id, event.title)}>
-                                                        <Square className="mr-2 h-4 w-4" />
-                                                        Stop Stream
-                                                    </DropdownMenuItem>
-                                                )}
-                                                <DropdownMenuItem
-                                                    onClick={() => router.push(`/dashboard/streams/${event.id}/control`)}
-                                                >
-                                                    <Settings className="mr-2 h-4 w-4" />
-                                                    Control Panel
-                                                </DropdownMenuItem>
-                                                <DropdownMenuItem
-                                                    onClick={() => router.push(`/dashboard/streams/${event.id}/simulcast`)}
-                                                >
-                                                    <Radio className="mr-2 h-4 w-4" />
-                                                    Simulcast
-                                                </DropdownMenuItem>
-                                                <DropdownMenuItem
-                                                    onClick={() => router.push(`/dashboard/streams/${event.id}/health`)}
-                                                >
-                                                    <Activity className="mr-2 h-4 w-4" />
-                                                    Health Monitor
-                                                </DropdownMenuItem>
-                                                <DropdownMenuSeparator />
-                                                <DropdownMenuItem
-                                                    onClick={() => router.push(`/dashboard/streams/${event.id}/edit`)}
-                                                >
-                                                    <Edit className="mr-2 h-4 w-4" />
-                                                    Edit
-                                                </DropdownMenuItem>
-                                                <DropdownMenuItem
-                                                    className="text-destructive"
-                                                    onClick={() => handleDeleteEvent(event.id, event.title)}
-                                                >
-                                                    <Trash2 className="mr-2 h-4 w-4" />
-                                                    Delete
-                                                </DropdownMenuItem>
-                                            </DropdownMenuContent>
-                                        </DropdownMenu>
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        ))}
-                    </div>
-                )}
+                                        <CardContent className="p-4">
+                                            <div className="flex items-start justify-between gap-2">
+                                                <div className="flex-1 min-w-0">
+                                                    <h3
+                                                        className="font-semibold truncate cursor-pointer hover:text-primary"
+                                                        onClick={() => router.push(`/dashboard/streams/${event.id}/control`)}
+                                                    >
+                                                        {event.title}
+                                                    </h3>
+                                                    <p className="text-sm text-muted-foreground truncate">
+                                                        {getAccountName(event.account_id)}
+                                                    </p>
+                                                    <p className="text-xs text-muted-foreground mt-1">
+                                                        {formatDate(event.scheduled_start)}
+                                                    </p>
+                                                </div>
+                                                <DropdownMenu>
+                                                    <DropdownMenuTrigger asChild>
+                                                        <Button variant="ghost" size="icon">
+                                                            <MoreVertical className="h-4 w-4" />
+                                                        </Button>
+                                                    </DropdownMenuTrigger>
+                                                    <DropdownMenuContent align="end">
+                                                        {event.status === "scheduled" && (
+                                                            <DropdownMenuItem onClick={() => handleStartStream(event.id)}>
+                                                                <Play className="mr-2 h-4 w-4" />
+                                                                Start Stream
+                                                            </DropdownMenuItem>
+                                                        )}
+                                                        {event.status === "live" && (
+                                                            <DropdownMenuItem onClick={() => handleStopStream(event.id, event.title)}>
+                                                                <Square className="mr-2 h-4 w-4" />
+                                                                Stop Stream
+                                                            </DropdownMenuItem>
+                                                        )}
+                                                        <DropdownMenuItem
+                                                            onClick={() => router.push(`/dashboard/streams/${event.id}/control`)}
+                                                        >
+                                                            <Settings className="mr-2 h-4 w-4" />
+                                                            Control Panel
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem
+                                                            onClick={() => router.push(`/dashboard/streams/${event.id}/simulcast`)}
+                                                        >
+                                                            <Radio className="mr-2 h-4 w-4" />
+                                                            Simulcast
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem
+                                                            onClick={() => router.push(`/dashboard/streams/${event.id}/health`)}
+                                                        >
+                                                            <Activity className="mr-2 h-4 w-4" />
+                                                            Health Monitor
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuSeparator />
+                                                        <DropdownMenuItem
+                                                            onClick={() => router.push(`/dashboard/streams/${event.id}/edit`)}
+                                                        >
+                                                            <Edit className="mr-2 h-4 w-4" />
+                                                            Edit
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem
+                                                            className="text-destructive"
+                                                            onClick={() => handleDeleteEvent(event.id, event.title)}
+                                                        >
+                                                            <Trash2 className="mr-2 h-4 w-4" />
+                                                            Delete
+                                                        </DropdownMenuItem>
+                                                    </DropdownMenuContent>
+                                                </DropdownMenu>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                ))}
+                            </div>
+                        )}
 
-                {/* Delete Confirmation Dialog */}
-                <ConfirmDialog
-                    open={deleteConfirm.open}
-                    onOpenChange={(open) => setDeleteConfirm((prev) => ({ ...prev, open }))}
-                    title="Delete Stream"
-                    description={`Are you sure you want to delete "${deleteConfirm.title}"? This action cannot be undone.`}
-                    confirmText="Delete Stream"
-                    variant="destructive"
-                    onConfirm={confirmDeleteEvent}
-                />
+                        {/* Delete Confirmation Dialog */}
+                        <ConfirmDialog
+                            open={deleteConfirm.open}
+                            onOpenChange={(open) => setDeleteConfirm((prev) => ({ ...prev, open }))}
+                            title="Delete Stream"
+                            description={`Are you sure you want to delete "${deleteConfirm.title}"? This action cannot be undone.`}
+                            confirmText="Delete Stream"
+                            variant="destructive"
+                            onConfirm={confirmDeleteEvent}
+                        />
 
-                {/* Stop Stream Confirmation Dialog */}
-                <ConfirmDialog
-                    open={stopConfirm.open}
-                    onOpenChange={(open) => setStopConfirm((prev) => ({ ...prev, open }))}
-                    title="Stop Stream"
-                    description={`Are you sure you want to stop "${stopConfirm.title}"? This will end the live broadcast.`}
-                    confirmText="Stop Stream"
-                    variant="destructive"
-                    onConfirm={confirmStopStream}
-                />
+                        {/* Stop Stream Confirmation Dialog */}
+                        <ConfirmDialog
+                            open={stopConfirm.open}
+                            onOpenChange={(open) => setStopConfirm((prev) => ({ ...prev, open }))}
+                            title="Stop Stream"
+                            description={`Are you sure you want to stop "${stopConfirm.title}"? This will end the live broadcast.`}
+                            confirmText="Stop Stream"
+                            variant="destructive"
+                            onConfirm={confirmStopStream}
+                        />
 
-                {/* Pagination */}
-                {pagination.total > pagination.pageSize && (
-                    <div className="flex items-center justify-between">
-                        <p className="text-sm text-muted-foreground">
-                            Showing {(pagination.page - 1) * pagination.pageSize + 1} to{" "}
-                            {Math.min(pagination.page * pagination.pageSize, pagination.total)} of{" "}
-                            {pagination.total} streams
-                        </p>
-                        <div className="flex gap-2">
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={pagination.page === 1}
-                                onClick={() => setPagination((prev) => ({ ...prev, page: prev.page - 1 }))}
-                            >
-                                Previous
-                            </Button>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={pagination.page * pagination.pageSize >= pagination.total}
-                                onClick={() => setPagination((prev) => ({ ...prev, page: prev.page + 1 }))}
-                            >
-                                Next
-                            </Button>
-                        </div>
-                    </div>
-                )}
+                        {/* Pagination */}
+                        {pagination.total > pagination.pageSize && (
+                            <div className="flex items-center justify-between">
+                                <p className="text-sm text-muted-foreground">
+                                    Showing {(pagination.page - 1) * pagination.pageSize + 1} to{" "}
+                                    {Math.min(pagination.page * pagination.pageSize, pagination.total)} of{" "}
+                                    {pagination.total} streams
+                                </p>
+                                <div className="flex gap-2">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={pagination.page === 1}
+                                        onClick={() => setPagination((prev) => ({ ...prev, page: prev.page - 1 }))}
+                                    >
+                                        Previous
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={pagination.page * pagination.pageSize >= pagination.total}
+                                        onClick={() => setPagination((prev) => ({ ...prev, page: prev.page + 1 }))}
+                                    >
+                                        Next
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
+                    </TabsContent>
+                </Tabs>
             </div>
         </DashboardLayout>
     )

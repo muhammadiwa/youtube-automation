@@ -26,9 +26,13 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { streamsApi, type LiveEvent, type StreamHealth } from "@/lib/api/streams"
+import { streamJobsApi, type StreamJob } from "@/lib/api/stream-jobs"
 import { LiveChatPanel } from "@/components/dashboard/live-chat-panel"
+import { StreamJobControlPanel } from "@/components/streams"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { useToast } from "@/hooks/use-toast"
+
+type StreamType = "youtube" | "video-to-live" | null
 
 function formatDuration(seconds: number): string {
     const hrs = Math.floor(seconds / 3600)
@@ -57,53 +61,80 @@ function HealthIndicator({ status }: { status: StreamHealth["status"] }) {
     )
 }
 
-// ChatPanel is now replaced by LiveChatPanel component
-
 export default function StreamControlPage() {
     const params = useParams()
     const router = useRouter()
     const eventId = params.id as string
 
+    // Stream type detection
+    const [streamType, setStreamType] = useState<StreamType>(null)
+    const [loading, setLoading] = useState(true)
+
+    // YouTube Live state
     const [event, setEvent] = useState<LiveEvent | null>(null)
     const [health, setHealth] = useState<StreamHealth | null>(null)
-    const [loading, setLoading] = useState(true)
     const [actionLoading, setActionLoading] = useState(false)
     const [duration, setDuration] = useState(0)
     const [copied, setCopied] = useState<string | null>(null)
     const [stopConfirmOpen, setStopConfirmOpen] = useState(false)
+
+    // Video-to-Live state
+    const [streamJob, setStreamJob] = useState<StreamJob | null>(null)
+
     const { addToast } = useToast()
 
-    const loadEvent = useCallback(async () => {
+    // Detect stream type and load data
+    const loadStreamData = useCallback(async () => {
+        setLoading(true)
+
+        // Try to load as Video-to-Live stream first
+        try {
+            const job = await streamJobsApi.getStreamJob(eventId)
+            setStreamJob(job)
+            setStreamType("video-to-live")
+            setLoading(false)
+            return
+        } catch {
+            // Not a Video-to-Live stream, try YouTube Live
+        }
+
+        // Try to load as YouTube Live event
         try {
             const data = await streamsApi.getEvent(eventId)
             setEvent(data)
+            setStreamType("youtube")
         } catch (error) {
-            console.error("Failed to load event:", error)
+            console.error("Failed to load stream:", error)
+            setStreamType(null)
         } finally {
             setLoading(false)
         }
     }, [eventId])
 
     const loadHealth = useCallback(async () => {
+        if (streamType !== "youtube" || !event) return
         try {
             const data = await streamsApi.getHealth(eventId)
             setHealth(data)
         } catch (error) {
             console.error("Failed to load health:", error)
         }
-    }, [eventId])
+    }, [eventId, streamType, event])
 
     useEffect(() => {
-        loadEvent()
+        loadStreamData()
+    }, [loadStreamData])
+
+    useEffect(() => {
+        if (streamType !== "youtube") return
         loadHealth()
-        // Poll health every 10 seconds
         const healthInterval = setInterval(loadHealth, 10000)
         return () => clearInterval(healthInterval)
-    }, [loadEvent, loadHealth])
+    }, [loadHealth, streamType])
 
-    // Duration timer
+    // Duration timer for YouTube Live
     useEffect(() => {
-        if (event?.status !== "live") return
+        if (streamType !== "youtube" || event?.status !== "live") return
         const startTime = event.scheduled_start ? new Date(event.scheduled_start).getTime() : Date.now()
         const updateDuration = () => {
             const elapsed = Math.floor((Date.now() - startTime) / 1000)
@@ -112,13 +143,14 @@ export default function StreamControlPage() {
         updateDuration()
         const interval = setInterval(updateDuration, 1000)
         return () => clearInterval(interval)
-    }, [event?.status, event?.scheduled_start])
+    }, [streamType, event?.status, event?.scheduled_start])
 
+    // YouTube Live handlers
     const handleStartStream = async () => {
         try {
             setActionLoading(true)
             await streamsApi.startEvent(eventId)
-            await loadEvent()
+            await loadStreamData()
             addToast({
                 title: "Stream Started",
                 description: "Your stream is now live!",
@@ -140,7 +172,7 @@ export default function StreamControlPage() {
         try {
             setActionLoading(true)
             await streamsApi.stopEvent(eventId)
-            await loadEvent()
+            await loadStreamData()
             addToast({
                 title: "Stream Ended",
                 description: "Your stream has been stopped successfully.",
@@ -164,6 +196,7 @@ export default function StreamControlPage() {
         setTimeout(() => setCopied(null), 2000)
     }
 
+    // Loading state
     if (loading) {
         return (
             <DashboardLayout
@@ -186,7 +219,8 @@ export default function StreamControlPage() {
         )
     }
 
-    if (!event) {
+    // Not found state
+    if (streamType === null || (streamType === "youtube" && !event) || (streamType === "video-to-live" && !streamJob)) {
         return (
             <DashboardLayout
                 breadcrumbs={[
@@ -206,15 +240,34 @@ export default function StreamControlPage() {
         )
     }
 
-    const isLive = event.status === "live"
-    const isScheduled = event.status === "scheduled"
+    // Video-to-Live Control Panel
+    if (streamType === "video-to-live" && streamJob) {
+        return (
+            <DashboardLayout
+                breadcrumbs={[
+                    { label: "Dashboard", href: "/dashboard" },
+                    { label: "Streams", href: "/dashboard/streams" },
+                    { label: streamJob.title },
+                ]}
+            >
+                <StreamJobControlPanel
+                    job={streamJob}
+                    onUpdate={loadStreamData}
+                />
+            </DashboardLayout>
+        )
+    }
+
+    // YouTube Live Control Panel (existing implementation)
+    const isLive = event?.status === "live"
+    const isScheduled = event?.status === "scheduled"
 
     return (
         <DashboardLayout
             breadcrumbs={[
                 { label: "Dashboard", href: "/dashboard" },
                 { label: "Streams", href: "/dashboard/streams" },
-                { label: event.title },
+                { label: event?.title || "Stream" },
             ]}
         >
             <div className="space-y-6">
@@ -223,16 +276,17 @@ export default function StreamControlPage() {
                     <div className="flex items-center gap-4">
                         <div>
                             <h1 className="text-2xl font-bold flex items-center gap-3">
-                                {event.title}
+                                {event?.title}
                                 {isLive && (
                                     <Badge className="bg-red-500 text-white animate-pulse">
                                         <Radio className="mr-1 h-3 w-3" />
                                         LIVE
                                     </Badge>
                                 )}
+                                <Badge variant="secondary" className="text-xs">YouTube Live</Badge>
                             </h1>
                             <p className="text-muted-foreground">
-                                {isLive ? `Live for ${formatDuration(duration)}` : event.status}
+                                {isLive ? `Live for ${formatDuration(duration)}` : event?.status}
                             </p>
                         </div>
                     </div>
@@ -281,7 +335,7 @@ export default function StreamControlPage() {
                         {/* Video Preview */}
                         <Card className="border-0 shadow-lg overflow-hidden">
                             <div className="aspect-video bg-black relative">
-                                {event.broadcast_id ? (
+                                {event?.broadcast_id ? (
                                     <iframe
                                         src={`https://www.youtube.com/embed/${event.broadcast_id}?autoplay=0`}
                                         className="w-full h-full"
@@ -304,7 +358,7 @@ export default function StreamControlPage() {
                                         </Badge>
                                         <Badge variant="secondary" className="bg-black/70 text-white">
                                             <Users className="mr-1 h-3 w-3" />
-                                            {event.viewer_count?.toLocaleString() || 0}
+                                            {event?.viewer_count?.toLocaleString() || 0}
                                         </Badge>
                                         <Badge variant="secondary" className="bg-black/70 text-white">
                                             <Clock className="mr-1 h-3 w-3" />
@@ -394,7 +448,7 @@ export default function StreamControlPage() {
                                         <CardTitle className="text-lg">Stream Settings</CardTitle>
                                     </CardHeader>
                                     <CardContent className="space-y-4">
-                                        {event.rtmp_url && (
+                                        {event?.rtmp_url && (
                                             <div className="space-y-2">
                                                 <label className="text-sm font-medium">RTMP URL</label>
                                                 <div className="flex gap-2">
@@ -413,7 +467,7 @@ export default function StreamControlPage() {
                                                 </div>
                                             </div>
                                         )}
-                                        {event.stream_key && (
+                                        {event?.stream_key && (
                                             <div className="space-y-2">
                                                 <label className="text-sm font-medium">Stream Key</label>
                                                 <div className="flex gap-2">
@@ -440,14 +494,14 @@ export default function StreamControlPage() {
                                         <div className="grid grid-cols-2 gap-4 pt-2">
                                             <div>
                                                 <p className="text-sm text-muted-foreground">Privacy</p>
-                                                <p className="font-medium capitalize">{event.privacy_status}</p>
+                                                <p className="font-medium capitalize">{event?.privacy_status}</p>
                                             </div>
                                             <div>
                                                 <p className="text-sm text-muted-foreground">DVR</p>
-                                                <p className="font-medium">{event.enable_dvr ? "Enabled" : "Disabled"}</p>
+                                                <p className="font-medium">{event?.enable_dvr ? "Enabled" : "Disabled"}</p>
                                             </div>
                                         </div>
-                                        {event.broadcast_id && (
+                                        {event?.broadcast_id && (
                                             <Button
                                                 variant="outline"
                                                 className="w-full"
@@ -470,7 +524,7 @@ export default function StreamControlPage() {
 
                     {/* Chat Panel */}
                     <div className="lg:col-span-1">
-                        <LiveChatPanel eventId={eventId} isLive={isLive} />
+                        <LiveChatPanel eventId={eventId} isLive={isLive || false} />
                     </div>
                 </div>
             </div>

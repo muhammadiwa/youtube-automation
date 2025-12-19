@@ -219,6 +219,32 @@ export const videosApi = {
     async syncVideoStats(videoId: string): Promise<Video> {
         return apiClient.post(`/videos/${videoId}/sync-stats`, {})
     },
+
+    /**
+     * Extract duration for a single video
+     */
+    async extractDuration(videoId: string): Promise<Video> {
+        return apiClient.post(`/videos/${videoId}/extract-duration`, {})
+    },
+
+    /**
+     * Bulk extract duration for all videos without duration
+     */
+    async bulkExtractDuration(): Promise<{
+        processed: number
+        updated: number
+        failed: number
+        skipped: number
+        results: Array<{
+            videoId: string
+            title: string
+            status: string
+            duration?: number
+            reason?: string
+        }>
+    }> {
+        return apiClient.post("/videos/bulk-extract-duration", {})
+    },
 }
 
 export default videosApi

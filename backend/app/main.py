@@ -21,6 +21,7 @@ from app.modules.auth.router import router as auth_router
 from app.modules.account import account_router
 from app.modules.video.router import router as video_router
 from app.modules.stream import router as stream_router
+from app.modules.stream.stream_job_router import router as stream_job_router
 from app.modules.ai.router import router as ai_router
 from app.modules.analytics.router import router as analytics_router
 from app.modules.competitor.router import router as competitor_router
@@ -284,6 +285,7 @@ app.include_router(auth_router, prefix=settings.API_V1_PREFIX)
 app.include_router(account_router, prefix=settings.API_V1_PREFIX)
 app.include_router(video_router, prefix=settings.API_V1_PREFIX)
 app.include_router(stream_router, prefix=settings.API_V1_PREFIX)
+app.include_router(stream_job_router, prefix=settings.API_V1_PREFIX)
 app.include_router(ai_router, prefix=settings.API_V1_PREFIX)
 app.include_router(analytics_router, prefix=settings.API_V1_PREFIX)
 app.include_router(competitor_router, prefix=settings.API_V1_PREFIX)
