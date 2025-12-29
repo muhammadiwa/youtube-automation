@@ -20,6 +20,7 @@ from app.core.middleware import (
 from app.modules.auth.router import router as auth_router
 from app.modules.account import account_router
 from app.modules.video.router import router as video_router
+from app.modules.video.library_router import router as library_router
 from app.modules.stream import router as stream_router
 from app.modules.stream.stream_job_router import router as stream_job_router
 from app.modules.ai.router import router as ai_router
@@ -284,6 +285,7 @@ async def health_check() -> dict[str, str]:
 app.include_router(auth_router, prefix=settings.API_V1_PREFIX)
 app.include_router(account_router, prefix=settings.API_V1_PREFIX)
 app.include_router(video_router, prefix=settings.API_V1_PREFIX)
+app.include_router(library_router, prefix=settings.API_V1_PREFIX)
 app.include_router(stream_router, prefix=settings.API_V1_PREFIX)
 app.include_router(stream_job_router, prefix=settings.API_V1_PREFIX)
 app.include_router(ai_router, prefix=settings.API_V1_PREFIX)

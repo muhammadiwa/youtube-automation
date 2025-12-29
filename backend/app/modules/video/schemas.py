@@ -94,7 +94,8 @@ class VideoResponse(BaseModel):
     """Response schema for video."""
 
     id: uuid.UUID
-    account_id: uuid.UUID = Field(alias="accountId", serialization_alias="accountId")
+    account_id: Optional[uuid.UUID] = Field(alias="accountId", serialization_alias="accountId", default=None)
+    user_id: uuid.UUID = Field(alias="userId", serialization_alias="userId")
     youtube_id: Optional[str] = Field(alias="youtubeId", serialization_alias="youtubeId", default=None)
     title: str
     description: Optional[str] = None
@@ -109,10 +110,21 @@ class VideoResponse(BaseModel):
     comment_count: int = Field(alias="commentCount", serialization_alias="commentCount", default=0)
     status: str
     upload_progress: int = Field(alias="uploadProgress", serialization_alias="uploadProgress", default=0)
-    # File info for Video-to-Live feature
+    # File info
     file_path: Optional[str] = Field(alias="filePath", serialization_alias="filePath", default=None)
     file_size: Optional[int] = Field(alias="fileSize", serialization_alias="fileSize", default=None)
     duration: Optional[int] = Field(default=None)  # in seconds
+    format: Optional[str] = None
+    resolution: Optional[str] = None
+    # Library organization
+    folder_id: Optional[uuid.UUID] = Field(alias="folderId", serialization_alias="folderId", default=None)
+    is_favorite: bool = Field(alias="isFavorite", serialization_alias="isFavorite", default=False)
+    custom_tags: Optional[list[str]] = Field(alias="customTags", serialization_alias="customTags", default=None)
+    notes: Optional[str] = None
+    # Streaming usage
+    is_used_for_streaming: bool = Field(alias="isUsedForStreaming", serialization_alias="isUsedForStreaming", default=False)
+    streaming_count: int = Field(alias="streamingCount", serialization_alias="streamingCount", default=0)
+    # Timestamps
     created_at: datetime = Field(alias="createdAt", serialization_alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt", serialization_alias="updatedAt")
 
@@ -154,11 +166,14 @@ class UploadJobResponse(BaseModel):
 class UploadProgressResponse(BaseModel):
     """Response schema for upload progress."""
 
-    video_id: uuid.UUID
-    job_id: Optional[str]
+    video_id: str
+    job_id: Optional[str] = None
     status: str
     progress: int
-    error: Optional[str] = None
+    youtube_id: Optional[str] = None
+    upload_attempts: int = 0
+    last_error: Optional[str] = None
+    error: Optional[str] = None  # Alias for last_error
 
 
 class BulkUploadEntry(BaseModel):
@@ -231,3 +246,54 @@ class PaginatedVideoResponse(BaseModel):
     class Config:
         from_attributes = True
         populate_by_name = True
+
+
+# Library Management Schemas
+
+class VideoFolderCreate(BaseModel):
+    """Request schema for creating folder."""
+    
+    name: str = Field(..., min_length=1, max_length=255)
+    parent_id: Optional[uuid.UUID] = None
+    description: Optional[str] = Field(None, max_length=500)
+    color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')  # Hex color
+    icon: Optional[str] = Field(None, max_length=50)
+
+
+class VideoFolderUpdate(BaseModel):
+    """Request schema for updating folder."""
+    
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = Field(None, max_length=500)
+    color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
+    icon: Optional[str] = Field(None, max_length=50)
+
+
+class VideoFolderResponse(BaseModel):
+    """Response schema for folder."""
+    
+    id: uuid.UUID
+    user_id: uuid.UUID
+    name: str
+    parent_id: Optional[uuid.UUID] = None
+    description: Optional[str] = None
+    color: Optional[str] = None
+    icon: Optional[str] = None
+    position: int
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class YouTubeUploadRequest(BaseModel):
+    """Request schema for uploading to YouTube."""
+    
+    account_id: uuid.UUID
+    title: Optional[str] = Field(None, min_length=1, max_length=MAX_TITLE_LENGTH)
+    description: Optional[str] = Field(None, max_length=MAX_DESCRIPTION_LENGTH)
+    tags: Optional[list[str]] = Field(None, max_length=MAX_TAGS)
+    category_id: Optional[str] = None
+    visibility: Optional[str] = "private"
+    scheduled_publish_at: Optional[datetime] = None
