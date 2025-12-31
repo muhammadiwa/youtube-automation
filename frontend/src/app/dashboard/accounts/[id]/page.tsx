@@ -33,20 +33,26 @@ import {
     AlertTriangle,
     TrendingUp,
     PartyPopper,
+    Key,
+    Radio,
+    Loader2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useToast } from "@/components/ui/toast"
 
 export default function AccountDetailPage() {
     const params = useParams()
     const router = useRouter()
     const searchParams = useSearchParams()
     const accountId = params.id as string
+    const { addToast } = useToast()
 
     const [account, setAccount] = useState<YouTubeAccount | null>(null)
     const [health, setHealth] = useState<AccountHealth | null>(null)
     const [quota, setQuota] = useState<QuotaUsage | null>(null)
     const [loading, setLoading] = useState(true)
     const [syncing, setSyncing] = useState(false)
+    const [syncingStreamKey, setSyncingStreamKey] = useState(false)
     const [disconnectDialogOpen, setDisconnectDialogOpen] = useState(false)
     const [disconnecting, setDisconnecting] = useState(false)
     const [showConnectedAlert, setShowConnectedAlert] = useState(false)
@@ -88,12 +94,50 @@ export default function AccountDetailPage() {
             setSyncing(true)
             await accountsApi.syncAccount(accountId)
             await loadAccountData()
-            // Data will be refreshed automatically
+            addToast({
+                type: "success",
+                title: "Account Synced",
+                description: "Account data has been synced from YouTube.",
+            })
         } catch (error: any) {
             console.error("Failed to sync account:", error)
-            // Error is handled by api-error-provider with a helpful message
+            addToast({
+                type: "error",
+                title: "Sync Failed",
+                description: error.message || "Failed to sync account data.",
+            })
         } finally {
             setSyncing(false)
+        }
+    }
+
+    const handleSyncStreamKey = async () => {
+        try {
+            setSyncingStreamKey(true)
+            const result = await accountsApi.syncStreamKey(accountId)
+            await loadAccountData()
+            if (result.hasStreamKey) {
+                addToast({
+                    type: "success",
+                    title: "Stream Key Synced",
+                    description: `Stream key synced successfully: ${result.streamKeyMasked}`,
+                })
+            } else {
+                addToast({
+                    type: "warning",
+                    title: "No Stream Key Found",
+                    description: result.message || "Please create a stream in YouTube Studio first.",
+                })
+            }
+        } catch (error: any) {
+            console.error("Failed to sync stream key:", error)
+            addToast({
+                type: "error",
+                title: "Sync Failed",
+                description: error.message || "Failed to sync stream key from YouTube.",
+            })
+        } finally {
+            setSyncingStreamKey(false)
         }
     }
 
@@ -347,6 +391,90 @@ export default function AccountDetailPage() {
                                 </div>
                             </div>
                         )}
+                    </CardContent>
+                </Card>
+
+                {/* Stream Key Configuration */}
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                            <Key className="h-5 w-5" />
+                            Stream Key Configuration
+                        </CardTitle>
+                        <CardDescription>
+                            YouTube Live stream key for 24/7 streaming
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium">Stream Key Status</span>
+                            {account.hasStreamKey ? (
+                                <Badge variant="default" className="flex items-center gap-1">
+                                    <CheckCircle className="h-3 w-3" />
+                                    Configured
+                                </Badge>
+                            ) : (
+                                <Badge variant="secondary" className="flex items-center gap-1">
+                                    <AlertCircle className="h-3 w-3" />
+                                    Not Configured
+                                </Badge>
+                            )}
+                        </div>
+
+                        {account.hasStreamKey && (
+                            <>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-sm font-medium">Stream Key</span>
+                                    <code className="text-sm bg-muted px-2 py-1 rounded">
+                                        {account.streamKeyMasked}
+                                    </code>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-sm font-medium">RTMP URL</span>
+                                    <code className="text-sm bg-muted px-2 py-1 rounded">
+                                        {account.rtmpUrl || "rtmp://a.rtmp.youtube.com/live2"}
+                                    </code>
+                                </div>
+                            </>
+                        )}
+
+                        {!account.hasStreamKey && account.hasLiveStreamingEnabled && (
+                            <div className="flex items-center gap-2 p-3 bg-blue-500/10 border border-blue-500/20 rounded-md">
+                                <Radio className="h-4 w-4 text-blue-500" />
+                                <div className="text-sm text-blue-600 dark:text-blue-400">
+                                    <p className="font-medium">Live streaming is enabled</p>
+                                    <p className="mt-1">
+                                        Click &quot;Sync Stream Key&quot; to fetch your stream key from YouTube.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
+                        {!account.hasLiveStreamingEnabled && (
+                            <div className="flex items-center gap-2 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-md">
+                                <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                                <div className="text-sm text-yellow-600 dark:text-yellow-400">
+                                    <p className="font-medium">Live streaming is not enabled</p>
+                                    <p className="mt-1">
+                                        Please enable live streaming in YouTube Studio first, then sync your account.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
+                        <Button
+                            variant="outline"
+                            onClick={handleSyncStreamKey}
+                            disabled={syncingStreamKey || !account.hasLiveStreamingEnabled || account.status !== "active"}
+                            className="w-full"
+                        >
+                            {syncingStreamKey ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                                <RefreshCw className="mr-2 h-4 w-4" />
+                            )}
+                            Sync Stream Key from YouTube
+                        </Button>
                     </CardContent>
                 </Card>
 

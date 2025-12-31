@@ -103,6 +103,7 @@ export function CreateStreamDialog({
     const isSelectedAccountExpired = selectedAccount?.status === "expired"
     const isSelectedAccountError = selectedAccount?.status === "error"
     const hasActiveAccounts = accounts.some(a => a.status === "active")
+    const selectedAccountHasStreamKey = selectedAccount?.hasStreamKey ?? false
 
     const validateForm = () => {
         const newErrors: Record<string, string> = {}
@@ -111,6 +112,8 @@ export function CreateStreamDialog({
             newErrors.accountId = "Please select a YouTube account"
         } else if (isSelectedAccountExpired || isSelectedAccountError) {
             newErrors.accountId = "Selected account needs to be reconnected"
+        } else if (!selectedAccountHasStreamKey) {
+            newErrors.accountId = "Selected account has no stream key. Please sync stream key first."
         }
         if (!formData.title.trim()) {
             newErrors.title = "Stream title is required"
@@ -274,6 +277,22 @@ export function CreateStreamDialog({
                                                 This account&apos;s token has expired or been revoked. Please go to Accounts page and reconnect this account.
                                             </p>
                                         </div>
+                                    )}
+                                    {selectedAccount && !isSelectedAccountExpired && !isSelectedAccountError && !selectedAccountHasStreamKey && (
+                                        <div className="rounded-lg border border-amber-500 bg-amber-500/10 p-3 text-sm space-y-2">
+                                            <div className="flex items-center gap-2 text-amber-600">
+                                                <AlertTriangle className="h-4 w-4" />
+                                                <span className="font-medium">No stream key configured</span>
+                                            </div>
+                                            <p className="text-muted-foreground">
+                                                This account doesn&apos;t have a stream key. Please go to Accounts page and click &quot;Sync Stream Key&quot; to fetch it from YouTube.
+                                            </p>
+                                        </div>
+                                    )}
+                                    {selectedAccount && selectedAccountHasStreamKey && (
+                                        <p className="text-xs text-muted-foreground">
+                                            Stream Key: {selectedAccount.streamKeyMasked}
+                                        </p>
                                     )}
                                 </>
                             )}
@@ -475,7 +494,7 @@ export function CreateStreamDialog({
                         </Button>
                         <Button
                             type="submit"
-                            disabled={loading || accounts.length === 0 || !hasActiveAccounts || isSelectedAccountExpired || isSelectedAccountError}
+                            disabled={loading || accounts.length === 0 || !hasActiveAccounts || isSelectedAccountExpired || isSelectedAccountError || !selectedAccountHasStreamKey}
                         >
                             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             {streamScheduled ? "Schedule Stream" : "Create Stream"}

@@ -23,6 +23,10 @@ export interface YouTubeAccount {
     tokenExpiresAt: string
     lastSyncAt: string
     status: "active" | "expired" | "error"
+    // Stream key info
+    hasStreamKey: boolean
+    streamKeyMasked: string | null
+    rtmpUrl: string | null
 }
 
 export interface Video {

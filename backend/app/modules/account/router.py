@@ -236,6 +236,7 @@ async def get_quota_usage(
     Syncs channel data from YouTube API.
     
     Updates subscriber count, video count, and other metadata.
+    Also attempts to sync stream key if live streaming is enabled.
     
     **Requirements: 2.4**
     """,
@@ -258,6 +259,77 @@ async def sync_channel_data(
     except OAuthError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+        )
+
+
+@router.post(
+    "/{account_id}/sync-stream-key",
+    status_code=status.HTTP_200_OK,
+    summary="Sync stream key from YouTube",
+    description="""
+    Syncs the stream key from YouTube Live Streaming API.
+    
+    Fetches the default live stream configuration including:
+    - Stream key (encrypted and stored)
+    - RTMP URL
+    - Stream ID
+    
+    Requires live streaming to be enabled on the channel.
+    
+    **Requirements: 2.4**
+    """,
+)
+async def sync_stream_key(
+    account_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """Sync stream key from YouTube Live Streaming API."""
+    service = YouTubeAccountService(session)
+    
+    try:
+        account = await service.sync_stream_key(account_id)
+        return {
+            "success": True,
+            "message": "Stream key synced successfully",
+            "has_stream_key": account.has_stream_key(),
+            "stream_key_masked": account.get_masked_stream_key(),
+            "rtmp_url": account.rtmp_url,
+        }
+    except AccountNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+    except OAuthError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@router.get(
+    "/{account_id}/stream-key-status",
+    status_code=status.HTTP_200_OK,
+    summary="Get stream key status",
+    description="""
+    Get the stream key status for an account.
+    
+    Returns whether a stream key is configured and its masked value.
+    """,
+)
+async def get_stream_key_status(
+    account_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """Get stream key status for an account."""
+    service = YouTubeAccountService(session)
+    
+    try:
+        return await service.get_stream_key_status(account_id)
+    except AccountNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e),
         )
 

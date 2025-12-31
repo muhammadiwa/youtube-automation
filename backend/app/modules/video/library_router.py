@@ -40,7 +40,8 @@ from app.modules.video.schemas import (
     VideoFolderUpdate,
     YouTubeUploadRequest,
     UploadProgressResponse,
-    UploadJobResponse
+    UploadJobResponse,
+    CreateStreamFromVideoRequest
 )
 
 router = APIRouter(prefix="/videos/library", tags=["video-library"])
@@ -576,27 +577,21 @@ async def get_youtube_video_info(
 @router.post("/{video_id}/create-stream")
 async def create_stream_from_video(
     video_id: uuid.UUID,
-    account_id: uuid.UUID,
-    title: Optional[str] = None,
-    loop_mode: str = "infinite",
-    loop_count: Optional[int] = None,
-    resolution: str = "1080p",
-    target_bitrate: int = 6000,
-    target_fps: int = 30,
-    scheduled_start_at: Optional[str] = None,
+    request: CreateStreamFromVideoRequest,
     current_user = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a stream job from library video.
     
     Creates a 24/7 looping stream using the video from library.
+    Uses the stream key stored in the YouTube account.
     Tracks video usage for streaming.
     """
     from app.modules.stream.stream_job_service import StreamJobService
     from app.modules.stream.stream_job_schemas import CreateStreamJobRequest
-    from app.modules.video.video_storage_service import VideoStorageService
-    from app.core.storage import get_storage_service
+    from app.core.config import settings
     from datetime import datetime
+    from pathlib import Path
     
     user_id = current_user.id
     
@@ -607,26 +602,25 @@ async def create_stream_from_video(
         user_id=user_id
     )
     
-    # Get video file path from storage
-    storage_service = VideoStorageService(get_storage_service())
-    video_path = await storage_service.get_video_url(
-        video_id=video_id,
-        user_id=user_id,
-        expiry_seconds=86400 * 365  # 1 year for streaming
-    )
+    # Get video file path - convert relative storage key to full path
+    if not video.file_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Video file not found"
+        )
+    
+    base_path = Path(settings.LOCAL_STORAGE_PATH)
+    video_path = str((base_path / video.file_path).resolve())
     
     # Parse scheduled start time
     scheduled_start = None
-    if scheduled_start_at:
-        scheduled_start = datetime.fromisoformat(scheduled_start_at.replace('Z', '+00:00'))
+    if request.scheduled_start_at:
+        scheduled_start = datetime.fromisoformat(request.scheduled_start_at.replace('Z', '+00:00'))
     
-    # Create stream job
-    stream_service = StreamJobService(db)
-    
-    # Get stream key from account
+    # Get account and verify ownership
     from app.modules.account.repository import YouTubeAccountRepository
     account_repo = YouTubeAccountRepository(db)
-    account = await account_repo.get_by_id(account_id)
+    account = await account_repo.get_by_id(request.account_id)
     
     if not account or account.user_id != user_id:
         raise HTTPException(
@@ -634,20 +628,30 @@ async def create_stream_from_video(
             detail="YouTube account not found"
         )
     
-    # Create stream job request
+    # Check if account has stream key
+    if not account.has_stream_key():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No stream key configured for this account. Please sync stream key from YouTube first."
+        )
+    
+    # Create stream job
+    stream_service = StreamJobService(db)
+    
+    # Create stream job request using account's stream key
     stream_request = CreateStreamJobRequest(
-        account_id=account_id,
+        account_id=request.account_id,
         video_id=video_id,
         video_path=video_path,
-        rtmp_url="rtmp://a.rtmp.youtube.com/live2",
-        stream_key=account.stream_key if hasattr(account, 'stream_key') else "",
-        title=title or video.title,
+        rtmp_url=account.rtmp_url or "rtmp://a.rtmp.youtube.com/live2",
+        stream_key=account.stream_key,
+        title=request.title or video.title,
         description=video.description,
-        loop_mode=loop_mode,
-        loop_count=loop_count,
-        resolution=resolution,
-        target_bitrate=target_bitrate,
-        target_fps=target_fps,
+        loop_mode=request.loop_mode,
+        loop_count=request.loop_count,
+        resolution=request.resolution,
+        target_bitrate=request.target_bitrate,
+        target_fps=request.target_fps,
         scheduled_start_at=scheduled_start
     )
     
@@ -662,10 +666,10 @@ async def create_stream_from_video(
         video_id=video_id,
         stream_job_id=stream_job.id,
         metadata={
-            "resolution": resolution,
-            "bitrate": target_bitrate,
-            "fps": target_fps,
-            "loop_mode": loop_mode
+            "resolution": request.resolution,
+            "bitrate": request.target_bitrate,
+            "fps": request.target_fps,
+            "loop_mode": request.loop_mode
         }
     )
     

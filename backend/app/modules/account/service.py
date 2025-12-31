@@ -256,8 +256,90 @@ class YouTubeAccountService:
             has_live_streaming_enabled=channel_info.get("has_live_streaming_enabled"),
         )
 
+        # Also try to sync stream key if live streaming is enabled
+        if channel_info.get("has_live_streaming_enabled"):
+            try:
+                await self.sync_stream_key(account_id)
+            except OAuthError:
+                # Stream key sync failed, but channel sync succeeded
+                # Don't fail the whole operation
+                pass
+
         await self.session.commit()
         return account
+
+    async def sync_stream_key(
+        self,
+        account_id: uuid.UUID,
+    ) -> YouTubeAccount:
+        """Sync stream key from YouTube Live Streaming API.
+
+        Fetches the default live stream configuration including stream key.
+
+        Args:
+            account_id: Account UUID
+
+        Returns:
+            YouTubeAccount: Updated account with stream key
+
+        Raises:
+            AccountNotFoundError: If account not found
+            OAuthError: If API call fails or live streaming not enabled
+        """
+        account = await self.repository.get_by_id(account_id)
+        if not account:
+            raise AccountNotFoundError(f"Account {account_id} not found")
+
+        # Refresh token if expired
+        if account.is_token_expired():
+            await self._refresh_account_token(account)
+
+        # Fetch live stream info
+        stream_info = await self.oauth_client.get_live_stream_info(account.access_token)
+
+        if not stream_info.get("has_streams"):
+            raise OAuthError(stream_info.get("message", "No live streams found"))
+
+        # Update stream key
+        account = await self.repository.update_stream_key(
+            account,
+            stream_key=stream_info.get("stream_key"),
+            rtmp_url=stream_info.get("rtmp_url"),
+            default_stream_id=stream_info.get("stream_id"),
+        )
+
+        await self.session.commit()
+        return account
+
+    async def get_stream_key_status(
+        self,
+        account_id: uuid.UUID,
+    ) -> dict:
+        """Get stream key status for an account.
+
+        Args:
+            account_id: Account UUID
+
+        Returns:
+            dict: Stream key status information
+
+        Raises:
+            AccountNotFoundError: If account not found
+        """
+        account = await self.repository.get_by_id(account_id)
+        if not account:
+            raise AccountNotFoundError(f"Account {account_id} not found")
+
+        return {
+            "account_id": account.id,
+            "channel_title": account.channel_title,
+            "has_stream_key": account.has_stream_key(),
+            "stream_key_masked": account.get_masked_stream_key(),
+            "rtmp_url": account.rtmp_url,
+            "default_stream_id": account.default_stream_id,
+            "has_live_streaming_enabled": account.has_live_streaming_enabled,
+            "last_sync_at": account.last_sync_at,
+        }
 
     async def disconnect_account(self, account_id: uuid.UUID) -> None:
         """Disconnect a YouTube account.

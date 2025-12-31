@@ -361,3 +361,32 @@ class YouTubeAccountRepository:
             .where(YouTubeAccount.daily_quota_used >= threshold_value)
         )
         return list(result.scalars().all())
+
+    async def update_stream_key(
+        self,
+        account: YouTubeAccount,
+        stream_key: Optional[str] = None,
+        rtmp_url: Optional[str] = None,
+        default_stream_id: Optional[str] = None,
+    ) -> YouTubeAccount:
+        """Update stream key and RTMP configuration for an account.
+
+        Args:
+            account: Account instance
+            stream_key: YouTube stream key (will be encrypted)
+            rtmp_url: RTMP ingestion URL
+            default_stream_id: YouTube liveStream ID
+
+        Returns:
+            YouTubeAccount: Updated account instance
+        """
+        if stream_key is not None:
+            account.stream_key = stream_key
+        if rtmp_url is not None:
+            account.rtmp_url = rtmp_url
+        if default_stream_id is not None:
+            account.default_stream_id = default_stream_id
+        
+        account.last_sync_at = datetime.utcnow()
+        await self.session.flush()
+        return account

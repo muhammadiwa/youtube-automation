@@ -297,3 +297,16 @@ class YouTubeUploadRequest(BaseModel):
     category_id: Optional[str] = None
     visibility: Optional[str] = "private"
     scheduled_publish_at: Optional[datetime] = None
+
+
+class CreateStreamFromVideoRequest(BaseModel):
+    """Request schema for creating stream from library video."""
+    
+    account_id: uuid.UUID
+    title: Optional[str] = Field(None, min_length=1, max_length=MAX_TITLE_LENGTH)
+    loop_mode: str = "infinite"
+    loop_count: Optional[int] = Field(None, ge=1)
+    resolution: str = "1080p"
+    target_bitrate: int = Field(6000, ge=1000, le=50000)
+    target_fps: int = Field(30, ge=15, le=60)
+    scheduled_start_at: Optional[str] = None

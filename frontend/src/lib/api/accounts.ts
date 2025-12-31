@@ -43,6 +43,10 @@ interface BackendYouTubeAccount {
     daily_quota_used?: number
     status: "active" | "expired" | "error"
     last_sync_at?: string | null
+    // Stream key info
+    has_stream_key?: boolean
+    stream_key_masked?: string | null
+    rtmp_url?: string | null
     created_at?: string
     updated_at?: string
 }
@@ -68,6 +72,9 @@ function transformAccount(account: BackendYouTubeAccount): YouTubeAccount {
         tokenExpiresAt: account.token_expires_at || "",
         lastSyncAt: account.last_sync_at || "",
         status: account.status || "error",
+        hasStreamKey: account.has_stream_key || false,
+        streamKeyMasked: account.stream_key_masked || null,
+        rtmpUrl: account.rtmp_url || null,
     }
 }
 
@@ -197,6 +204,67 @@ export const accountsApi = {
     async syncAccount(accountId: string): Promise<YouTubeAccount> {
         const response = await apiClient.post<BackendYouTubeAccount>(`/accounts/${accountId}/sync`)
         return transformAccount(response)
+    },
+
+    /**
+     * Sync stream key from YouTube Live Streaming API
+     */
+    async syncStreamKey(accountId: string): Promise<{
+        success: boolean
+        message: string
+        hasStreamKey: boolean
+        streamKeyMasked: string | null
+        rtmpUrl: string | null
+    }> {
+        const response = await apiClient.post<{
+            success: boolean
+            message: string
+            has_stream_key: boolean
+            stream_key_masked: string | null
+            rtmp_url: string | null
+        }>(`/accounts/${accountId}/sync-stream-key`)
+        return {
+            success: response.success,
+            message: response.message,
+            hasStreamKey: response.has_stream_key,
+            streamKeyMasked: response.stream_key_masked,
+            rtmpUrl: response.rtmp_url,
+        }
+    },
+
+    /**
+     * Get stream key status for account
+     */
+    async getStreamKeyStatus(accountId: string): Promise<{
+        accountId: string
+        channelTitle: string
+        hasStreamKey: boolean
+        streamKeyMasked: string | null
+        rtmpUrl: string | null
+        defaultStreamId: string | null
+        hasLiveStreamingEnabled: boolean
+        lastSyncAt: string | null
+    }> {
+        const response = await apiClient.get<{
+            account_id: string
+            channel_title: string
+            has_stream_key: boolean
+            stream_key_masked: string | null
+            rtmp_url: string | null
+            default_stream_id: string | null
+            has_live_streaming_enabled: boolean
+            last_sync_at: string | null
+        }>(`/accounts/${accountId}/stream-key-status`)
+        return {
+            accountId: response.account_id,
+            channelTitle: response.channel_title,
+            hasStreamKey: response.has_stream_key,
+            streamKeyMasked: response.stream_key_masked,
+            rtmpUrl: response.rtmp_url,
+            defaultStreamId: response.default_stream_id,
+            hasLiveStreamingEnabled: response.has_live_streaming_enabled,
+            lastSyncAt: response.last_sync_at,
+        }
     },
 }
 

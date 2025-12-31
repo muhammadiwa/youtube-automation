@@ -92,6 +92,17 @@ class YouTubeAccount(Base):
     )
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Live streaming configuration (encrypted stream key)
+    _stream_key: Mapped[Optional[str]] = mapped_column(
+        "stream_key", Text, nullable=True
+    )
+    rtmp_url: Mapped[Optional[str]] = mapped_column(
+        String(512), nullable=True, default="rtmp://a.rtmp.youtube.com/live2"
+    )
+    default_stream_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # YouTube liveStream ID for the default stream
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -180,6 +191,50 @@ class YouTubeAccount(Base):
         from datetime import timedelta
         expiry_threshold = datetime.utcnow() + timedelta(hours=hours)
         return self.token_expires_at.replace(tzinfo=None) <= expiry_threshold
+
+    @property
+    def stream_key(self) -> Optional[str]:
+        """Get decrypted stream key.
+
+        Returns:
+            Optional[str]: Decrypted stream key or None
+        """
+        if not self._stream_key:
+            return None
+        return decrypt_token(self._stream_key)
+
+    @stream_key.setter
+    def stream_key(self, value: Optional[str]) -> None:
+        """Set and encrypt stream key.
+
+        Args:
+            value: Plain text stream key to encrypt and store
+        """
+        if value is None:
+            self._stream_key = None
+        else:
+            self._stream_key = encrypt_token(value)
+
+    def get_masked_stream_key(self) -> Optional[str]:
+        """Get masked stream key for display.
+
+        Returns:
+            Optional[str]: Masked stream key (e.g., "xxxx-xxxx-xxxx-1234")
+        """
+        key = self.stream_key
+        if not key:
+            return None
+        if len(key) <= 4:
+            return "****"
+        return f"****-****-****-{key[-4:]}"
+
+    def has_stream_key(self) -> bool:
+        """Check if account has a stream key configured.
+
+        Returns:
+            bool: True if stream key is set
+        """
+        return self._stream_key is not None and len(self._stream_key) > 0
 
     def get_quota_usage_percent(self, daily_limit: int = 10000) -> float:
         """Calculate quota usage percentage.
