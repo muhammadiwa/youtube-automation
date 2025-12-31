@@ -690,9 +690,10 @@ def validate_ffmpeg_command(cmd: List[str]) -> tuple[bool, Optional[str]]:
     Returns:
         tuple[bool, Optional[str]]: (is_valid, error_message)
     """
+    # Required parameters with their expected values (None means any value is OK)
     required_params = {
         "-c:v": "libx264",  # Video codec
-        "-preset": "veryfast",  # Preset
+        "-preset": None,  # Preset (any valid preset is OK: ultrafast, veryfast, etc.)
         "-c:a": "aac",  # Audio codec
         "-b:a": "128k",  # Audio bitrate
         "-ar": "44100",  # Sample rate
@@ -704,7 +705,7 @@ def validate_ffmpeg_command(cmd: List[str]) -> tuple[bool, Optional[str]]:
     for param, value in required_params.items():
         if param not in cmd_str:
             return False, f"Missing required parameter: {param}"
-        if value and value not in cmd_str:
+        if value is not None and value not in cmd_str:
             return False, f"Missing required value for {param}: {value}"
     
     return True, None

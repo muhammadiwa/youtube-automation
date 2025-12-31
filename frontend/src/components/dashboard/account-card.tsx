@@ -37,7 +37,7 @@ import {
 interface AccountCardProps {
     account: YouTubeAccount
     view?: "grid" | "list"
-    onRefresh?: (id: string) => void
+    onSync?: (id: string) => void
     onDisconnect?: (id: string) => void
 }
 
@@ -78,7 +78,7 @@ function formatNumber(num: number): string {
     return num.toString()
 }
 
-export function AccountCard({ account, view = "grid", onRefresh, onDisconnect }: AccountCardProps) {
+export function AccountCard({ account, view = "grid", onSync, onDisconnect }: AccountCardProps) {
     const status = statusConfig[account.status] || statusConfig.error
     const StatusIcon = status.icon
 
@@ -175,9 +175,9 @@ export function AccountCard({ account, view = "grid", onRefresh, onDisconnect }:
                                                     View Details
                                                 </Link>
                                             </DropdownMenuItem>
-                                            <DropdownMenuItem onClick={() => onRefresh?.(account.id)}>
+                                            <DropdownMenuItem onClick={() => onSync?.(account.id)}>
                                                 <RefreshCw className="mr-2 h-4 w-4" />
-                                                Refresh Token
+                                                Sync Account
                                             </DropdownMenuItem>
                                             <DropdownMenuSeparator />
                                             <DropdownMenuItem
@@ -236,9 +236,9 @@ export function AccountCard({ account, view = "grid", onRefresh, onDisconnect }:
                                         View Details
                                     </Link>
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => onRefresh?.(account.id)}>
+                                <DropdownMenuItem onClick={() => onSync?.(account.id)}>
                                     <RefreshCw className="mr-2 h-4 w-4" />
-                                    Refresh Token
+                                    Sync Account
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem

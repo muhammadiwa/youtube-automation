@@ -74,20 +74,29 @@ class VideoMetadataExtractor:
         ]
 
         try:
-            # Run ffprobe
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await process.communicate()
+            # Run ffprobe using subprocess.run (more reliable on Windows)
+            # Run in thread pool to avoid blocking
+            import concurrent.futures
+            loop = asyncio.get_event_loop()
+            
+            def run_ffprobe():
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+                )
+                return result
+            
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                result = await loop.run_in_executor(executor, run_ffprobe)
 
-            if process.returncode != 0:
-                error_msg = stderr.decode() if stderr else "Unknown error"
+            if result.returncode != 0:
+                error_msg = result.stderr if result.stderr else "Unknown error"
                 raise RuntimeError(f"ffprobe failed: {error_msg}")
 
             # Parse JSON output
-            data = json.loads(stdout.decode())
+            data = json.loads(result.stdout)
             
             # Extract format info
             format_info = data.get("format", {})
@@ -183,16 +192,24 @@ class VideoMetadataExtractor:
         ]
 
         try:
-            # Run ffmpeg
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await process.communicate()
+            # Run ffmpeg using subprocess.run (more reliable on Windows)
+            import concurrent.futures
+            loop = asyncio.get_event_loop()
+            
+            def run_ffmpeg():
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+                )
+                return result
+            
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                result = await loop.run_in_executor(executor, run_ffmpeg)
 
-            if process.returncode != 0:
-                error_msg = stderr.decode() if stderr else "Unknown error"
+            if result.returncode != 0:
+                error_msg = result.stderr if result.stderr else "Unknown error"
                 raise RuntimeError(f"ffmpeg failed: {error_msg}")
 
             if not output.exists():

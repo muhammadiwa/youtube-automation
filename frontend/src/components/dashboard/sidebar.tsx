@@ -32,7 +32,7 @@ import { useAdmin } from "@/hooks/use-admin";
 const navigation = [
     { name: "Dashboard", href: "/dashboard", icon: Home },
     { name: "Accounts", href: "/dashboard/accounts", icon: Users },
-    { name: "Videos", href: "/dashboard/videos", icon: Video },
+    { name: "Videos", href: "/dashboard/videos/library", icon: Video },
     { name: "Streams", href: "/dashboard/streams", icon: Radio },
     { name: "Comments", href: "/dashboard/comments", icon: MessageSquare },
     { name: "Moderation", href: "/dashboard/moderation/settings", icon: Shield },
@@ -91,6 +91,10 @@ export function Sidebar({ className }: SidebarProps) {
     const isActiveRoute = (href: string) => {
         if (href === "/dashboard") {
             return pathname === "/dashboard";
+        }
+        // Handle videos routes - check if pathname starts with /dashboard/videos
+        if (href.startsWith("/dashboard/videos")) {
+            return pathname.startsWith("/dashboard/videos");
         }
         // Handle moderation routes - check if pathname starts with /dashboard/moderation
         if (href.startsWith("/dashboard/moderation")) {

@@ -7,14 +7,30 @@ Requirements: 3.1, 3.2, 3.3
 import uuid
 import os
 import logging
+from pathlib import Path
 from typing import Any, Optional
 
 from celery import Task
 
 from app.core.celery_app import celery_app
+from app.core.config import settings
 from app.modules.job.tasks import RetryConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _get_full_storage_path(relative_path: str) -> str:
+    """Get full storage path from relative storage key.
+    
+    Args:
+        relative_path: Relative storage key like 'videos/user_id/video_id.mp4'
+        
+    Returns:
+        Full absolute path to the file
+    """
+    base_path = Path(settings.LOCAL_STORAGE_PATH)
+    full_path = base_path / relative_path
+    return str(full_path.resolve())
 
 
 class UploadRetryConfig(RetryConfig):
@@ -254,9 +270,10 @@ def upload_video_task(self: VideoUploadTask, video_id: str) -> dict:
                 logger.info(f"Video {video_id} already uploaded with youtube_id {video.youtube_id}, skipping upload")
                 return None, None, f"already_uploaded:{video.youtube_id}"
 
-            # Check if file exists
-            if not video.file_path or not os.path.exists(video.file_path):
-                return None, None, f"Video file not found: {video.file_path}"
+            # Check if file exists - convert relative storage key to full path
+            full_file_path = _get_full_storage_path(video.file_path) if video.file_path else None
+            if not full_file_path or not os.path.exists(full_file_path):
+                return None, None, f"Video file not found: {video.file_path} (full path: {full_file_path})"
 
             # Get access token
             access_token = await _get_account_access_token(session, video.account_id)
@@ -270,9 +287,10 @@ def upload_video_task(self: VideoUploadTask, video_id: str) -> dict:
             await session.commit()
 
             # Extract video data for upload (avoid passing ORM object)
+            # Use full path for file_path so upload can find the file
             video_data = {
                 "id": str(video.id),
-                "file_path": video.file_path,
+                "file_path": full_file_path,  # Use full path, not relative storage key
                 "title": video.title,
                 "description": video.description,
                 "tags": video.tags,
@@ -280,7 +298,7 @@ def upload_video_task(self: VideoUploadTask, video_id: str) -> dict:
                 "visibility": video.visibility,
                 "scheduled_publish_at": video.scheduled_publish_at,
                 "account_id": str(video.account_id),
-                "local_thumbnail_path": video.local_thumbnail_path,
+                "local_thumbnail_path": _get_full_storage_path(video.local_thumbnail_path) if video.local_thumbnail_path else None,
             }
 
             return video_data, access_token, None
@@ -293,6 +311,7 @@ def upload_video_task(self: VideoUploadTask, video_id: str) -> dict:
         """Phase 3: Update DB with upload result."""
         async with celery_session_maker() as session:
             from sqlalchemy import select
+            from app.modules.video.video_usage_tracker import VideoUsageTracker
 
             result = await session.execute(
                 select(Video).where(Video.id == uuid.UUID(video_id))
@@ -307,6 +326,20 @@ def upload_video_task(self: VideoUploadTask, video_id: str) -> dict:
             video.upload_progress = 100
             video.last_upload_error = None
             await session.commit()
+
+            # Log YouTube upload usage
+            try:
+                usage_tracker = VideoUsageTracker(session)
+                await usage_tracker.log_youtube_upload(
+                    video_id=uuid.UUID(video_id),
+                    youtube_id=upload_result["youtube_id"],
+                    account_id=uuid.UUID(video_data["account_id"]),
+                    duration=0  # Upload duration not tracked yet
+                )
+                logger.info(f"Logged YouTube upload usage for video {video_id}")
+            except Exception as e:
+                logger.error(f"Failed to log YouTube upload usage: {e}")
+                # Don't fail the upload if usage tracking fails
 
             # Queue thumbnail upload if provided - delay 30s to let YouTube process video
             local_thumb = video_data.get("local_thumbnail_path")

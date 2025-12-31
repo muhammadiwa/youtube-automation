@@ -135,6 +135,145 @@ async def get_library_videos(
     )
 
 
+# ============================================
+# STATIC ROUTES (must be before {video_id})
+# ============================================
+
+# Folder Management Endpoints
+
+@router.get("/folders/all", response_model=list[VideoFolderResponse])
+async def get_all_folders(
+    current_user = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all folders for user (tree structure)."""
+    service = VideoFolderService(db)
+    user_id = current_user.id
+    
+    folders = await service.get_folder_tree(user_id=user_id)
+    
+    return [VideoFolderResponse.from_orm(f) for f in folders]
+
+
+@router.post("/folders", response_model=VideoFolderResponse, status_code=status.HTTP_201_CREATED)
+async def create_folder(
+    folder: VideoFolderCreate,
+    current_user = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create new folder."""
+    service = VideoFolderService(db)
+    user_id = current_user.id
+    
+    new_folder = await service.create_folder(
+        user_id=user_id,
+        name=folder.name,
+        parent_id=folder.parent_id,
+        description=folder.description,
+        color=folder.color,
+        icon=folder.icon
+    )
+    
+    return VideoFolderResponse.from_orm(new_folder)
+
+
+@router.patch("/folders/{folder_id}", response_model=VideoFolderResponse)
+async def update_folder(
+    folder_id: uuid.UUID,
+    folder: VideoFolderUpdate,
+    current_user = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update folder."""
+    service = VideoFolderService(db)
+    user_id = current_user.id
+    
+    updated_folder = await service.update_folder(
+        folder_id=folder_id,
+        user_id=user_id,
+        name=folder.name,
+        description=folder.description,
+        color=folder.color,
+        icon=folder.icon
+    )
+    
+    return VideoFolderResponse.from_orm(updated_folder)
+
+
+@router.delete("/folders/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_folder(
+    folder_id: uuid.UUID,
+    current_user = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete folder (must be empty)."""
+    service = VideoFolderService(db)
+    user_id = current_user.id
+    
+    await service.delete_folder(
+        folder_id=folder_id,
+        user_id=user_id
+    )
+    
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# Bulk Operations
+
+@router.post("/bulk-upload-to-youtube")
+async def bulk_upload_to_youtube(
+    video_ids: list[uuid.UUID],
+    account_id: uuid.UUID,
+    current_user = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk upload multiple library videos to YouTube.
+    
+    Uploads multiple videos to the same YouTube account.
+    Each video uses its existing metadata from the library.
+    """
+    service = YouTubeUploadService(db)
+    user_id = current_user.id
+    
+    jobs = []
+    errors = []
+    
+    for video_id in video_ids:
+        try:
+            result = await service.upload_to_youtube(
+                video_id=video_id,
+                user_id=user_id,
+                account_id=account_id,
+                # Use existing metadata from library
+                title=None,
+                description=None,
+                tags=None,
+                category_id=None,
+                visibility=None,
+                scheduled_publish_at=None
+            )
+            jobs.append(UploadJobResponse(
+                job_id=result.get("job_id", ""),
+                video_id=video_id,
+                status=result.get("status", "queued"),
+                progress=0,
+                message=result.get("message")
+            ))
+        except Exception as e:
+            errors.append(f"Video {video_id}: {str(e)}")
+    
+    return {
+        "total_videos": len(video_ids),
+        "jobs_created": len(jobs),
+        "jobs": jobs,
+        "errors": errors
+    }
+
+
+# ============================================
+# DYNAMIC ROUTES (with {video_id} parameter)
+# ============================================
+
 @router.get("/{video_id}", response_model=VideoResponse)
 async def get_video_details(
     video_id: uuid.UUID,
@@ -215,7 +354,7 @@ async def toggle_favorite(
 @router.post("/{video_id}/move")
 async def move_to_folder(
     video_id: uuid.UUID,
-    folder_id: Optional[uuid.UUID] = None,
+    folder_id: Optional[uuid.UUID] = Query(None, description="Target folder ID (null for root)"),
     current_user = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -235,114 +374,101 @@ async def move_to_folder(
 @router.get("/{video_id}/stream")
 async def stream_video_preview(
     video_id: uuid.UUID,
-    current_user = Depends(get_current_user),
+    token: Optional[str] = Query(None, description="Auth token for video streaming"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Stream video for preview.
+    """Stream video file for preview.
     
-    Returns video file URL for streaming.
-    Note: Actual streaming is handled by storage service (S3/MinIO).
+    Returns the actual video file for streaming.
+    Supports range requests for seeking.
+    Accepts auth token via query parameter for video element compatibility.
     """
-    service = VideoLibraryService(db)
-    user_id = current_user.id
+    import os
+    import logging
+    from fastapi.responses import FileResponse
+    from app.core.config import settings
+    from app.modules.auth.jwt import validate_token
     
-    # Get video to verify ownership
+    logger = logging.getLogger(__name__)
+    
+    # Verify token from query parameter
+    if not token:
+        logger.warning("Stream request without token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required. Provide token as query parameter."
+        )
+    
+    # Validate token - checks type, blacklist, and expiration
+    payload = validate_token(token, expected_type="access")
+    if payload is None:
+        logger.warning(f"Invalid token for stream request: token={token[:20]}...")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token"
+        )
+    
+    logger.info(f"Stream request authenticated for user: {payload.sub}")
+    
+    # Get user_id from payload.sub (it's a string UUID)
+    try:
+        user_id = uuid.UUID(payload.sub)
+    except (ValueError, AttributeError) as e:
+        logger.error(f"Invalid user_id in token: {payload.sub}, error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload"
+        )
+    
+    service = VideoLibraryService(db)
+    
+    # Get video to verify ownership and get file_path
     video = await service.get_video_by_id(
         video_id=video_id,
         user_id=user_id
     )
     
-    # Get streaming URL from storage
-    from app.modules.video.video_storage_service import VideoStorageService
-    from app.core.storage import get_storage_service
+    # Check if video has a file path
+    if not video.file_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video file not found. This video may have been imported from YouTube without a local file."
+        )
     
-    storage_service = VideoStorageService(get_storage_service())
-    stream_url = await storage_service.get_video_url(
-        video_id=video_id,
-        user_id=user_id,
-        expiry_seconds=3600  # 1 hour
+    # For local storage, serve the file directly
+    # The file_path could be a relative path or absolute path
+    file_path = video.file_path
+    
+    # If it's a relative path (storage key), prepend the local storage path
+    if not os.path.isabs(file_path):
+        local_storage_path = getattr(settings, 'LOCAL_STORAGE_PATH', './storage')
+        file_path = os.path.join(local_storage_path, file_path)
+    
+    # Check if file exists
+    if not os.path.exists(file_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video file not found on disk"
+        )
+    
+    # Determine content type based on file extension
+    ext = os.path.splitext(file_path)[1].lower()
+    content_types = {
+        '.mp4': 'video/mp4',
+        '.webm': 'video/webm',
+        '.mkv': 'video/x-matroska',
+        '.avi': 'video/x-msvideo',
+        '.mov': 'video/quicktime',
+        '.wmv': 'video/x-ms-wmv',
+        '.flv': 'video/x-flv',
+    }
+    content_type = content_types.get(ext, 'video/mp4')
+    
+    return FileResponse(
+        path=file_path,
+        media_type=content_type,
+        filename=f"{video.title}{ext}"
     )
-    
-    return {"stream_url": stream_url}
-
-
-# Folder Management Endpoints
-
-@router.get("/folders/all", response_model=list[VideoFolderResponse])
-async def get_all_folders(
-    current_user = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Get all folders for user (tree structure)."""
-    service = VideoFolderService(db)
-    user_id = current_user.id
-    
-    folders = await service.get_folder_tree(user_id=user_id)
-    
-    return [VideoFolderResponse.from_orm(f) for f in folders]
-
-
-@router.post("/folders", response_model=VideoFolderResponse, status_code=status.HTTP_201_CREATED)
-async def create_folder(
-    folder: VideoFolderCreate,
-    current_user = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Create new folder."""
-    service = VideoFolderService(db)
-    user_id = current_user.id
-    
-    new_folder = await service.create_folder(
-        user_id=user_id,
-        name=folder.name,
-        parent_id=folder.parent_id,
-        description=folder.description,
-        color=folder.color,
-        icon=folder.icon
-    )
-    
-    return VideoFolderResponse.from_orm(new_folder)
-
-
-@router.patch("/folders/{folder_id}", response_model=VideoFolderResponse)
-async def update_folder(
-    folder_id: uuid.UUID,
-    folder: VideoFolderUpdate,
-    current_user = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Update folder."""
-    service = VideoFolderService(db)
-    user_id = current_user.id
-    
-    updated_folder = await service.update_folder(
-        folder_id=folder_id,
-        user_id=user_id,
-        name=folder.name,
-        description=folder.description,
-        color=folder.color,
-        icon=folder.icon
-    )
-    
-    return VideoFolderResponse.from_orm(updated_folder)
-
-
-@router.delete("/folders/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_folder(
-    folder_id: uuid.UUID,
-    current_user = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Delete folder (must be empty)."""
-    service = VideoFolderService(db)
-    user_id = current_user.id
-    
-    await service.delete_folder(
-        folder_id=folder_id,
-        user_id=user_id
-    )
-    
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # YouTube Upload Endpoints
@@ -443,56 +569,6 @@ async def get_youtube_video_info(
     )
     
     return info
-
-
-@router.post("/bulk-upload-to-youtube")
-async def bulk_upload_to_youtube(
-    video_ids: list[uuid.UUID],
-    account_id: uuid.UUID,
-    current_user = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Bulk upload multiple library videos to YouTube.
-    
-    Uploads multiple videos to the same YouTube account.
-    Each video uses its existing metadata from the library.
-    """
-    service = YouTubeUploadService(db)
-    user_id = current_user.id
-    
-    jobs = []
-    errors = []
-    
-    for video_id in video_ids:
-        try:
-            result = await service.upload_to_youtube(
-                video_id=video_id,
-                user_id=user_id,
-                account_id=account_id,
-                # Use existing metadata from library
-                title=None,
-                description=None,
-                tags=None,
-                category_id=None,
-                visibility=None,
-                scheduled_publish_at=None
-            )
-            jobs.append(UploadJobResponse(
-                job_id=result.get("job_id", ""),
-                video_id=video_id,
-                status=result.get("status", "queued"),
-                progress=0,
-                message=result.get("message")
-            ))
-        except Exception as e:
-            errors.append(f"Video {video_id}: {str(e)}")
-    
-    return {
-        "total_videos": len(video_ids),
-        "jobs_created": len(jobs),
-        "jobs": jobs,
-        "errors": errors
-    }
 
 
 # Streaming Integration Endpoints
@@ -642,12 +718,13 @@ async def get_streaming_history(
 @router.get("/{video_id}/usage")
 async def get_video_usage_stats(
     video_id: uuid.UUID,
+    include_logs: bool = True,
     current_user = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get usage statistics for a video.
     
-    Returns YouTube upload and streaming usage stats.
+    Returns YouTube upload and streaming usage stats with optional usage logs.
     """
     user_id = current_user.id
     
@@ -658,17 +735,38 @@ async def get_video_usage_stats(
         user_id=user_id
     )
     
-    # Get usage stats
+    # Get usage stats with logs
     usage_tracker = VideoUsageTracker(db)
-    stats = await usage_tracker.get_usage_stats(video_id=video_id)
+    stats = await usage_tracker.get_usage_stats(
+        video_id=video_id,
+        include_logs=include_logs
+    )
     
     # Check if video is currently in use
     is_in_use = await usage_tracker.is_video_in_use(video_id=video_id)
     
+    # Format usage logs for response
+    usage_logs = []
+    if include_logs and stats.usage_logs:
+        for log in stats.usage_logs:
+            usage_logs.append({
+                "id": str(log.id),
+                "usage_type": log.usage_type,
+                "started_at": log.started_at.isoformat() if log.started_at else None,
+                "ended_at": log.ended_at.isoformat() if log.ended_at else None,
+                "usage_metadata": log.usage_metadata or {}
+            })
+    
     return {
         "video_id": str(video_id),
         "title": video.title,
-        "usage_stats": stats,
+        "usage_stats": {
+            "youtube_uploads": stats.youtube_uploads,
+            "streaming_sessions": stats.streaming_sessions,
+            "total_streaming_duration": stats.total_streaming_duration,
+            "last_used_at": stats.last_used_at.isoformat() if stats.last_used_at else None
+        },
+        "usage_logs": usage_logs,
         "is_currently_in_use": is_in_use,
         "youtube_id": video.youtube_id,
         "is_used_for_streaming": video.is_used_for_streaming,

@@ -46,7 +46,7 @@ export default function AccountDetailPage() {
     const [health, setHealth] = useState<AccountHealth | null>(null)
     const [quota, setQuota] = useState<QuotaUsage | null>(null)
     const [loading, setLoading] = useState(true)
-    const [refreshing, setRefreshing] = useState(false)
+    const [syncing, setSyncing] = useState(false)
     const [disconnectDialogOpen, setDisconnectDialogOpen] = useState(false)
     const [disconnecting, setDisconnecting] = useState(false)
     const [showConnectedAlert, setShowConnectedAlert] = useState(false)
@@ -83,15 +83,17 @@ export default function AccountDetailPage() {
         }
     }
 
-    const handleRefreshToken = async () => {
+    const handleSyncAccount = async () => {
         try {
-            setRefreshing(true)
-            await accountsApi.refreshToken(accountId)
+            setSyncing(true)
+            await accountsApi.syncAccount(accountId)
             await loadAccountData()
-        } catch (error) {
-            console.error("Failed to refresh token:", error)
+            // Data will be refreshed automatically
+        } catch (error: any) {
+            console.error("Failed to sync account:", error)
+            // Error is handled by api-error-provider with a helpful message
         } finally {
-            setRefreshing(false)
+            setSyncing(false)
         }
     }
 
@@ -237,11 +239,11 @@ export default function AccountDetailPage() {
                             <div className="flex gap-2">
                                 <Button
                                     variant="outline"
-                                    onClick={handleRefreshToken}
-                                    disabled={refreshing}
+                                    onClick={handleSyncAccount}
+                                    disabled={syncing}
                                 >
-                                    <RefreshCw className={cn("mr-2 h-4 w-4", refreshing && "animate-spin")} />
-                                    Refresh Token
+                                    <RefreshCw className={cn("mr-2 h-4 w-4", syncing && "animate-spin")} />
+                                    Sync Account
                                 </Button>
                                 <Button
                                     variant="destructive"
@@ -336,10 +338,13 @@ export default function AccountDetailPage() {
                         </div>
                         {account.status === "expired" && (
                             <div className="flex items-center gap-2 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-md">
-                                <AlertTriangle className="h-4 w-4 text-yellow-500" />
-                                <p className="text-sm text-yellow-600 dark:text-yellow-400">
-                                    Token has expired. Please refresh to continue using this account.
-                                </p>
+                                <AlertTriangle className="h-4 w-4 text-yellow-500 flex-shrink-0" />
+                                <div className="text-sm text-yellow-600 dark:text-yellow-400">
+                                    <p className="font-medium">Token has expired or been revoked.</p>
+                                    <p className="mt-1">
+                                        Please disconnect this account and reconnect it to get a new token.
+                                    </p>
+                                </div>
                             </div>
                         )}
                     </CardContent>

@@ -8,7 +8,7 @@ Requirements: 3.4, 4.5
 import uuid
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, JSON, Float
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
@@ -17,6 +17,9 @@ from sqlalchemy.sql import func
 import sqlalchemy as sa
 
 from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.modules.stream.stream_job_models import StreamJob
 
 
 class VideoStatus(str, Enum):
@@ -169,6 +172,12 @@ class Video(Base):
         back_populates="video",
         cascade="all, delete-orphan",
     )  # NEW
+    # NOTE: stream_jobs relationship commented out to avoid circular import issues
+    # Access stream jobs via query: session.query(StreamJob).filter_by(video_id=video.id)
+    # stream_jobs: Mapped[list["StreamJob"]] = relationship(
+    #     "app.modules.stream.stream_job_models.StreamJob",
+    #     back_populates="video",
+    # )  # NEW - relationship to stream jobs
     metadata_versions: Mapped[list["MetadataVersion"]] = relationship(
         "MetadataVersion",
         back_populates="video",

@@ -296,6 +296,12 @@ export function StreamJobCard({ job, onUpdate }: StreamJobCardProps) {
                             >
                                 {job.title}
                             </h3>
+                            {job.videoId && (
+                                <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                                    <Video className="h-3 w-3" />
+                                    From Video Library
+                                </p>
+                            )}
                             <p className="text-sm text-muted-foreground">
                                 {job.resolution} • {job.targetBitrate} kbps • {job.targetFps} fps
                             </p>

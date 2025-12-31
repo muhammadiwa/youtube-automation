@@ -284,8 +284,10 @@ async def health_check() -> dict[str, str]:
 # Include routers
 app.include_router(auth_router, prefix=settings.API_V1_PREFIX)
 app.include_router(account_router, prefix=settings.API_V1_PREFIX)
-app.include_router(video_router, prefix=settings.API_V1_PREFIX)
+# IMPORTANT: library_router MUST be registered BEFORE video_router
+# because /videos/library is more specific than /videos/{video_id}
 app.include_router(library_router, prefix=settings.API_V1_PREFIX)
+app.include_router(video_router, prefix=settings.API_V1_PREFIX)
 app.include_router(stream_router, prefix=settings.API_V1_PREFIX)
 app.include_router(stream_job_router, prefix=settings.API_V1_PREFIX)
 app.include_router(ai_router, prefix=settings.API_V1_PREFIX)

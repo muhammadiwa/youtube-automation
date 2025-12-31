@@ -150,10 +150,14 @@ class VideoLibraryService:
                 video.codec = metadata.codec
                 video.file_size = metadata.file_size
                 
+                print(f"Metadata extracted successfully: duration={metadata.duration}, resolution={metadata.resolution}, format={metadata.format}")
+                
             except Exception as e:
                 # If metadata extraction fails, continue with upload
-                # but log the error
-                print(f"Warning: Failed to extract metadata: {e}")
+                # but log the error with full details
+                import traceback
+                print(f"Warning: Failed to extract metadata from {tmp_file_path}: {e}")
+                print(f"Traceback: {traceback.format_exc()}")
             
             # Generate thumbnail
             try:

@@ -61,6 +61,13 @@ const SILENT_ENDPOINTS = [
     "/jobs/dlq",
     // Notifications endpoints - handled gracefully
     "/notifications",
+    // Account OAuth endpoints - 401 here means YouTube token expired, not app session
+    "/accounts/", // Covers /accounts/{id}/refresh-token, /accounts/{id}/sync, etc.
+]
+
+// Endpoints where 401 should NOT trigger logout (YouTube OAuth errors)
+const NO_LOGOUT_ON_401_ENDPOINTS = [
+    "/accounts/", // YouTube account operations - 401 means YouTube token expired
 ]
 
 export function ApiErrorProvider({ children }: { children: React.ReactNode }) {
@@ -88,6 +95,22 @@ export function ApiErrorProvider({ children }: { children: React.ReactNode }) {
 
             // Handle authentication errors
             if (error.status === 401) {
+                // Check if this is a YouTube OAuth error (not app session expired)
+                const isYouTubeOAuthError = NO_LOGOUT_ON_401_ENDPOINTS.some(endpoint =>
+                    config.url?.includes(endpoint)
+                )
+
+                if (isYouTubeOAuthError) {
+                    // Don't logout - this is a YouTube token error, not app session
+                    // Show a more helpful message
+                    addToast({
+                        type: "error",
+                        title: "YouTube Token Expired",
+                        description: "Please reconnect your YouTube account to continue.",
+                    })
+                    return
+                }
+
                 // Clear tokens and redirect to login
                 localStorage.removeItem("auth_access_token")
                 localStorage.removeItem("auth_refresh_token")

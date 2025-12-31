@@ -726,3 +726,98 @@ async def health_websocket(
         pass
     except Exception as e:
         await websocket.close(code=4000, reason=str(e))
+
+
+# ============================================
+# Video Library Integration Endpoints (Requirements: 3.1, 3.2, 3.3)
+# ============================================
+
+
+@router.post(
+    "/from-video/{video_id}",
+    response_model=StreamJobResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create stream from video library",
+    description="Create a stream job from a video in the library.",
+)
+async def create_stream_from_video(
+    video_id: uuid.UUID,
+    request: CreateStreamJobRequest,
+    current_user=Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> StreamJobResponse:
+    """Create a stream job from a video in the library.
+    
+    Requirements: 3.1
+    
+    Args:
+        video_id: Video UUID from library
+        request: Stream job creation request
+        current_user: Current authenticated user
+        session: Database session
+        
+    Returns:
+        StreamJobResponse: Created stream job
+    """
+    from app.modules.stream.video_library_integration import VideoLibraryStreamIntegration
+    
+    try:
+        integration = VideoLibraryStreamIntegration(session)
+        job = await integration.create_stream_from_video(
+            user_id=current_user.id,
+            video_id=video_id,
+            request=request,
+        )
+        return StreamJobResponse.from_model(job)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except VideoNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+    except AccountNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+
+
+@router.get(
+    "/video/{video_id}/status",
+    summary="Get video streaming status",
+    description="Get streaming status and usage for a video from library.",
+)
+async def get_video_streaming_status(
+    video_id: uuid.UUID,
+    current_user=Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Get streaming status for a video.
+    
+    Requirements: 3.3
+    
+    Args:
+        video_id: Video UUID
+        current_user: Current authenticated user
+        session: Database session
+        
+    Returns:
+        dict: Streaming status information
+    """
+    from app.modules.stream.video_library_integration import VideoLibraryStreamIntegration
+    
+    try:
+        integration = VideoLibraryStreamIntegration(session)
+        return await integration.get_video_streaming_status(
+            video_id=video_id,
+            user_id=current_user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )

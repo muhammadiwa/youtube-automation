@@ -425,12 +425,12 @@ export default function AccountsPage() {
                                     key={account.id}
                                     account={account}
                                     view={view}
-                                    onRefresh={async (id) => {
+                                    onSync={async (id) => {
                                         try {
-                                            await accountsApi.refreshToken(id)
+                                            await accountsApi.syncAccount(id)
                                             await loadAccounts()
                                         } catch (e) {
-                                            console.error("Failed to refresh token:", e)
+                                            console.error("Failed to sync account:", e)
                                         }
                                     }}
                                     onDisconnect={(id) => {

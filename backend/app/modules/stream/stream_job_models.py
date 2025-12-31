@@ -214,6 +214,13 @@ class StreamJob(Base):
     )
 
     # Relationships
+    # NOTE: video relationship commented out to avoid circular import issues
+    # Access video via query: session.query(Video).filter_by(id=stream_job.video_id)
+    # video: Mapped[Optional["Video"]] = relationship(
+    #     "Video",
+    #     back_populates="stream_jobs",
+    #     foreign_keys=[video_id],
+    # )
     health_logs: Mapped[list["StreamJobHealth"]] = relationship(
         "StreamJobHealth",
         back_populates="stream_job",
