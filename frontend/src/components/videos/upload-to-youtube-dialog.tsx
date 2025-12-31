@@ -380,50 +380,61 @@ export function UploadToYouTubeDialog({
                             />
                         </div>
 
-                        {/* Visibility */}
-                        <div className="space-y-2">
-                            <Label>Visibility</Label>
-                            <RadioGroup
-                                value={formData.visibility}
-                                onValueChange={(value: any) =>
-                                    setFormData({ ...formData, visibility: value })
-                                }
-                                disabled={loading}
-                            >
-                                <div className="flex items-center space-x-2">
-                                    <RadioGroupItem value="public" id="public" />
-                                    <Label htmlFor="public" className="cursor-pointer">
-                                        Public - Anyone can see
-                                    </Label>
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                    <RadioGroupItem value="unlisted" id="unlisted" />
-                                    <Label htmlFor="unlisted" className="cursor-pointer">
-                                        Unlisted - Only people with the link
-                                    </Label>
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                    <RadioGroupItem value="private" id="private" />
-                                    <Label htmlFor="private" className="cursor-pointer">
-                                        Private - Only you can see
-                                    </Label>
-                                </div>
-                            </RadioGroup>
-                        </div>
+                        {/* Visibility - only show when not scheduling */}
+                        {!uploadScheduled && (
+                            <div className="space-y-2">
+                                <Label>Visibility</Label>
+                                <RadioGroup
+                                    value={formData.visibility}
+                                    onValueChange={(value: any) =>
+                                        setFormData({ ...formData, visibility: value })
+                                    }
+                                    disabled={loading}
+                                >
+                                    <div className="flex items-center space-x-2">
+                                        <RadioGroupItem value="public" id="public" />
+                                        <Label htmlFor="public" className="cursor-pointer">
+                                            Public - Anyone can see
+                                        </Label>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                        <RadioGroupItem value="unlisted" id="unlisted" />
+                                        <Label htmlFor="unlisted" className="cursor-pointer">
+                                            Unlisted - Only people with the link
+                                        </Label>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                        <RadioGroupItem value="private" id="private" />
+                                        <Label htmlFor="private" className="cursor-pointer">
+                                            Private - Only you can see
+                                        </Label>
+                                    </div>
+                                </RadioGroup>
+                            </div>
+                        )}
 
                         {/* Schedule Upload */}
                         <div className="space-y-2">
                             <div className="flex items-center justify-between">
-                                <Label htmlFor="schedule">Schedule Upload</Label>
+                                <Label htmlFor="schedule">Schedule for later</Label>
                                 <Switch
                                     id="schedule"
                                     checked={uploadScheduled}
-                                    onCheckedChange={setUploadScheduled}
+                                    onCheckedChange={(checked) => {
+                                        setUploadScheduled(checked)
+                                        // When scheduling, visibility will be set to private until publish time
+                                        if (checked) {
+                                            setFormData(prev => ({ ...prev, visibility: "public" }))
+                                        }
+                                    }}
                                     disabled={loading}
                                 />
                             </div>
                             {uploadScheduled && (
-                                <div className="space-y-2">
+                                <div className="space-y-3">
+                                    <div className="rounded-lg border border-blue-500/20 bg-blue-500/10 p-3 text-sm text-blue-600 dark:text-blue-400">
+                                        <p>Video will be uploaded as private and automatically published at the scheduled time.</p>
+                                    </div>
                                     <SchedulePicker
                                         value={formData.scheduledPublishAt}
                                         onChange={(value) =>

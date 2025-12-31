@@ -140,6 +140,9 @@ async def _upload_to_youtube(video_data: dict, access_token: str, progress_callb
         VideoVisibility.PRIVATE.value: "private",
     }
     privacy_status = privacy_map.get(video_data.get("visibility"), "private")
+    scheduled_at = video_data.get("scheduled_publish_at")
+    
+    logger.info(f"Uploading video: title={video_data['title']}, visibility={privacy_status}, scheduled_at={scheduled_at}")
 
     result = await client.upload_video(
         file_path=video_data["file_path"],
@@ -148,7 +151,7 @@ async def _upload_to_youtube(video_data: dict, access_token: str, progress_callb
         tags=video_data.get("tags") or [],
         category_id=video_data.get("category_id") or "22",
         privacy_status=privacy_status,
-        scheduled_publish_at=video_data.get("scheduled_publish_at"),
+        scheduled_publish_at=scheduled_at,
         progress_callback=progress_callback,
     )
 

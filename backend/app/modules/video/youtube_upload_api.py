@@ -156,8 +156,20 @@ class YouTubeUploadClient:
         }
 
         # Add scheduled publish time if provided
-        if scheduled_publish_at and privacy_status == "private":
-            video_metadata["status"]["publishAt"] = scheduled_publish_at.isoformat() + "Z"
+        # YouTube requires privacyStatus to be "private" for scheduled publishing
+        # The video will automatically become public/unlisted at the scheduled time
+        if scheduled_publish_at:
+            # Force privacy to private for scheduled videos
+            video_metadata["status"]["privacyStatus"] = "private"
+            # Format: ISO 8601 with timezone (YouTube expects UTC)
+            if isinstance(scheduled_publish_at, str):
+                # Already a string, ensure it ends with Z
+                publish_time = scheduled_publish_at if scheduled_publish_at.endswith("Z") else scheduled_publish_at + "Z"
+            else:
+                # datetime object - convert to ISO format
+                publish_time = scheduled_publish_at.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+            video_metadata["status"]["publishAt"] = publish_time
+            logger.info(f"Scheduling video publish at: {publish_time} (original visibility: {privacy_status})")
 
         # Step 1: Initialize resumable upload session
         upload_url = await self._init_resumable_upload(video_metadata, file_size)
