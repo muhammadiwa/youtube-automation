@@ -328,7 +328,6 @@ export default function ModerationSettingsPage() {
             try {
                 setAccountsLoading(true)
                 const data = await accountsApi.getAccounts()
-                console.log("[ModerationSettings] Accounts loaded:", data)
                 setAccounts(Array.isArray(data) ? data : [])
             } catch (error) {
                 console.error("[ModerationSettings] Failed to load accounts:", error)

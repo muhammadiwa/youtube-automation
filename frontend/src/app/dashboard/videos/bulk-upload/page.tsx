@@ -204,7 +204,6 @@ export default function BulkUploadPage() {
             }))
 
             // Note: This creates metadata entries. Video files need to be uploaded via the upload page
-            console.log("Creating video metadata:", videoData)
             addToast({
                 type: "success",
                 title: "Success",

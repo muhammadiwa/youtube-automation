@@ -172,8 +172,7 @@ export default function MonitoringPage() {
                 break
             case "start":
             case "stop":
-                // These would trigger stream start/stop via API
-                console.log(`${action} stream for channel ${accountId}`)
+                // TODO: Implement stream start/stop via API
                 break
         }
     }

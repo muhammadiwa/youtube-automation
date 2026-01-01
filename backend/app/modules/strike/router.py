@@ -43,6 +43,121 @@ router = APIRouter(prefix="/strikes", tags=["strikes"])
 
 
 # ============================================
+# Alert Endpoints (MUST be before /{strike_id} routes to avoid routing conflicts)
+# ============================================
+
+@router.get("/alerts")
+async def get_all_alerts(
+    unread_only: bool = False,
+    page: int = 1,
+    page_size: int = 10,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Get all strike alerts for the current user.
+
+    Requirements: 20.2
+    """
+    service = StrikeService(session)
+    # Get alerts - if unread_only, filter by acknowledged=False
+    acknowledged = False if unread_only else None
+    alerts = await service.alert_repository.get_all(
+        acknowledged=acknowledged,
+        limit=page_size,
+        offset=(page - 1) * page_size,
+    )
+    total = await service.alert_repository.count_all(acknowledged=acknowledged)
+    unread_count = await service.alert_repository.count_all(acknowledged=False)
+    
+    return {
+        "items": [StrikeAlertResponse.model_validate(a) for a in alerts],
+        "total": total,
+        "unread_count": unread_count,
+    }
+
+
+@router.post("/alerts/read-all")
+async def mark_all_alerts_as_read(
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Mark all strike alerts as read.
+
+    Requirements: 20.2
+    """
+    service = StrikeService(session)
+    await service.alert_repository.mark_all_as_read()
+    await service.session.commit()
+    return {"success": True}
+
+
+@router.post("/alerts/{alert_id}/read", response_model=StrikeAlertResponse)
+async def mark_alert_as_read(
+    alert_id: uuid.UUID,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Mark a strike alert as read.
+
+    Requirements: 20.2
+    """
+    from datetime import datetime
+    
+    service = StrikeService(session)
+    alert = await service.alert_repository.get_by_id(alert_id)
+    if not alert:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Alert {alert_id} not found",
+        )
+    alert.acknowledged = True
+    alert.acknowledged_at = datetime.utcnow()
+    await service.session.commit()
+    await service.session.refresh(alert)
+    return StrikeAlertResponse.model_validate(alert)
+
+
+@router.post("/alerts/{alert_id}/acknowledge", response_model=StrikeAlertResponse)
+async def acknowledge_alert(
+    alert_id: uuid.UUID,
+    request: StrikeAlertAcknowledge,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Acknowledge a strike alert.
+
+    Requirements: 20.2
+    """
+    service = StrikeService(session)
+    alert = await service.alert_repository.get_by_id(alert_id)
+    if not alert:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Alert {alert_id} not found",
+        )
+    alert = await service.alert_repository.acknowledge(alert, request.user_id)
+    await service.session.commit()
+    return StrikeAlertResponse.model_validate(alert)
+
+
+@router.delete("/alerts/{alert_id}")
+async def dismiss_alert(
+    alert_id: uuid.UUID,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Dismiss/delete a strike alert.
+
+    Requirements: 20.2
+    """
+    service = StrikeService(session)
+    alert = await service.alert_repository.get_by_id(alert_id)
+    if not alert:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Alert {alert_id} not found",
+        )
+    await service.alert_repository.delete(alert)
+    await service.session.commit()
+    return {"success": True}
+
+
+# ============================================
 # Strike Endpoints
 # ============================================
 
@@ -298,99 +413,6 @@ async def resume_all_paused_streams(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
-# ============================================
-# Alert Endpoints
-# ============================================
-
-@router.get("/alerts")
-async def get_all_alerts(
-    unread_only: bool = False,
-    page: int = 1,
-    page_size: int = 10,
-    session: AsyncSession = Depends(get_async_session),
-):
-    """Get all strike alerts for the current user.
-
-    Requirements: 20.2
-    """
-    service = StrikeService(session)
-    # Get alerts - if unread_only, filter by acknowledged=False
-    acknowledged = False if unread_only else None
-    alerts = await service.alert_repository.get_all(
-        acknowledged=acknowledged,
-        limit=page_size,
-        offset=(page - 1) * page_size,
-    )
-    total = await service.alert_repository.count_all(acknowledged=acknowledged)
-    unread_count = await service.alert_repository.count_all(acknowledged=False)
-    
-    return {
-        "items": [StrikeAlertResponse.model_validate(a) for a in alerts],
-        "total": total,
-        "unread_count": unread_count,
-    }
-
-
-@router.post("/alerts/{alert_id}/read", response_model=StrikeAlertResponse)
-async def mark_alert_as_read(
-    alert_id: uuid.UUID,
-    session: AsyncSession = Depends(get_async_session),
-):
-    """Mark a strike alert as read.
-
-    Requirements: 20.2
-    """
-    from datetime import datetime
-    
-    service = StrikeService(session)
-    alert = await service.alert_repository.get_by_id(alert_id)
-    if not alert:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Alert {alert_id} not found",
-        )
-    alert.acknowledged = True
-    alert.acknowledged_at = datetime.utcnow()
-    await service.session.commit()
-    await service.session.refresh(alert)
-    return StrikeAlertResponse.model_validate(alert)
-
-
-@router.post("/alerts/read-all")
-async def mark_all_alerts_as_read(
-    session: AsyncSession = Depends(get_async_session),
-):
-    """Mark all strike alerts as read.
-
-    Requirements: 20.2
-    """
-    service = StrikeService(session)
-    await service.alert_repository.mark_all_as_read()
-    await service.session.commit()
-    return {"success": True}
-
-
-@router.delete("/alerts/{alert_id}")
-async def dismiss_alert(
-    alert_id: uuid.UUID,
-    session: AsyncSession = Depends(get_async_session),
-):
-    """Dismiss/delete a strike alert.
-
-    Requirements: 20.2
-    """
-    service = StrikeService(session)
-    alert = await service.alert_repository.get_by_id(alert_id)
-    if not alert:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Alert {alert_id} not found",
-        )
-    await service.alert_repository.delete(alert)
-    await service.session.commit()
-    return {"success": True}
-
-
 @router.get("/account/{account_id}/alerts", response_model=list[StrikeAlertResponse])
 async def get_account_alerts(
     account_id: uuid.UUID,
@@ -406,25 +428,3 @@ async def get_account_alerts(
         account_id, acknowledged=acknowledged
     )
     return [StrikeAlertResponse.model_validate(a) for a in alerts]
-
-
-@router.post("/alerts/{alert_id}/acknowledge", response_model=StrikeAlertResponse)
-async def acknowledge_alert(
-    alert_id: uuid.UUID,
-    request: StrikeAlertAcknowledge,
-    session: AsyncSession = Depends(get_async_session),
-):
-    """Acknowledge a strike alert.
-
-    Requirements: 20.2
-    """
-    service = StrikeService(session)
-    alert = await service.alert_repository.get_by_id(alert_id)
-    if not alert:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Alert {alert_id} not found",
-        )
-    alert = await service.alert_repository.acknowledge(alert, request.user_id)
-    await service.session.commit()
-    return StrikeAlertResponse.model_validate(alert)

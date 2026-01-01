@@ -21,13 +21,11 @@ import {
     ListTodo,
     Monitor,
     Wallet,
-    ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useState } from "react";
-import { useAdmin } from "@/hooks/use-admin";
 
 const navigation = [
     { name: "Dashboard", href: "/dashboard", icon: Home },
@@ -86,7 +84,6 @@ function NavItem({
 
 export function Sidebar({ className }: SidebarProps) {
     const pathname = usePathname();
-    const { isAdmin, isLoading: isAdminLoading } = useAdmin();
 
     const isActiveRoute = (href: string) => {
         if (href === "/dashboard") {
@@ -160,23 +157,6 @@ export function Sidebar({ className }: SidebarProps) {
                         />
                     ))}
                 </div>
-
-                {/* Admin Panel Link - Only visible for admins */}
-                {!isAdminLoading && isAdmin && (
-                    <div className="mt-6 space-y-1.5">
-                        <p className="px-3 mb-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-                            Administration
-                        </p>
-                        <Link href="/admin">
-                            <div
-                                className="group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-300 ease-out bg-gradient-to-r from-blue-500/10 to-indigo-500/10 text-blue-600 dark:text-blue-400 hover:from-blue-500/20 hover:to-indigo-500/20 border border-blue-500/20"
-                            >
-                                <ShieldCheck className="h-5 w-5 transition-all duration-300 group-hover:scale-110" />
-                                <span className="flex-1">Admin Panel</span>
-                            </div>
-                        </Link>
-                    </div>
-                )}
             </ScrollArea>
 
             {/* Footer */}
@@ -205,7 +185,6 @@ export function Sidebar({ className }: SidebarProps) {
 export function MobileSidebar() {
     const [open, setOpen] = useState(false);
     const pathname = usePathname();
-    const { isAdmin, isLoading: isAdminLoading } = useAdmin();
 
     const isActiveRoute = (href: string) => {
         if (href === "/dashboard") {
@@ -256,23 +235,6 @@ export function MobileSidebar() {
                                 />
                             ))}
                         </div>
-
-                        {/* Admin Panel Link - Only visible for admins */}
-                        {!isAdminLoading && isAdmin && (
-                            <div className="mt-6 space-y-1.5">
-                                <p className="px-3 mb-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-                                    Administration
-                                </p>
-                                <Link href="/admin" onClick={() => setOpen(false)}>
-                                    <div
-                                        className="group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-300 ease-out bg-gradient-to-r from-blue-500/10 to-indigo-500/10 text-blue-600 dark:text-blue-400 hover:from-blue-500/20 hover:to-indigo-500/20 border border-blue-500/20"
-                                    >
-                                        <ShieldCheck className="h-5 w-5 transition-all duration-300 group-hover:scale-110" />
-                                        <span className="flex-1">Admin Panel</span>
-                                    </div>
-                                </Link>
-                            </div>
-                        )}
                     </ScrollArea>
 
                     {/* Footer */}

@@ -138,9 +138,6 @@ function CheckoutContent() {
                 billingApi.getEnabledGateways(), // Get all enabled gateways, no currency filter
             ])
 
-            console.log("Loaded plans:", plans)
-            console.log("Loaded gateways:", gatewayList)
-
             const selectedPlan = plans.find(p => p.slug === planSlug)
             if (selectedPlan) {
                 setPlan(selectedPlan)
@@ -280,16 +277,6 @@ function CheckoutContent() {
                 }
                 paymentCurrency = convertedPrice.currency
             }
-
-            // Debug logging
-            console.log("Creating payment:", {
-                amount: paymentAmount,
-                currency: paymentCurrency,
-                gateway: selectedGateway,
-                convertedPrice,
-                promoCode: promoCodeApplied?.code,
-                userId: user.id,
-            })
 
             // Note: For PayPal, the success_url will have additional params added by PayPal (token, PayerID)
             // We include plan and cycle for display purposes

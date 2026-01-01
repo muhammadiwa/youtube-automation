@@ -143,14 +143,8 @@ export function ApiErrorProvider({ children }: { children: React.ReactNode }) {
 
         apiClient.setGlobalErrorHandler(handleGlobalError)
 
-        // Set up request interceptor for logging
-        const removeRequestInterceptor = apiClient.addRequestInterceptor((config) => {
-            // Add request timestamp for debugging
-            if (process.env.NODE_ENV === "development") {
-                console.log(`[API Request] ${config.method || "GET"} ${config.url}`)
-            }
-            return config
-        })
+        // Note: Request interceptor runs before URL is built, so we skip request logging
+        // Response and error interceptors have the full URL available
 
         // Set up response interceptor for logging
         const removeResponseInterceptor = apiClient.addResponseInterceptor((response, config) => {
@@ -162,7 +156,12 @@ export function ApiErrorProvider({ children }: { children: React.ReactNode }) {
 
         // Set up error interceptor for additional processing
         const removeErrorInterceptor = apiClient.addErrorInterceptor((error, config) => {
-            if (process.env.NODE_ENV === "development") {
+            // Don't log errors for silent endpoints
+            const isSilent = SILENT_ENDPOINTS.some(endpoint =>
+                config.url?.includes(endpoint)
+            )
+
+            if (process.env.NODE_ENV === "development" && !isSilent) {
                 console.error(`[API Error] ${config.method || "GET"} ${config.url}`, error)
             }
             return error
@@ -170,7 +169,6 @@ export function ApiErrorProvider({ children }: { children: React.ReactNode }) {
 
         return () => {
             apiClient.setGlobalErrorHandler(null)
-            removeRequestInterceptor()
             removeResponseInterceptor()
             removeErrorInterceptor()
         }

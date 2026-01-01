@@ -327,7 +327,6 @@ export default function CustomCommandsPage() {
             try {
                 setAccountsLoading(true)
                 const data = await accountsApi.getAccounts()
-                console.log("[CustomCommands] Accounts loaded:", data)
                 setAccounts(Array.isArray(data) ? data : [])
             } catch (error) {
                 console.error("[CustomCommands] Failed to load accounts:", error)

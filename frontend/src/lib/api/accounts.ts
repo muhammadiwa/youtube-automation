@@ -53,11 +53,6 @@ interface BackendYouTubeAccount {
 
 // Transform backend response to frontend format
 function transformAccount(account: BackendYouTubeAccount): YouTubeAccount {
-    // Debug: log thumbnail URL
-    if (process.env.NODE_ENV === 'development' && account.thumbnail_url) {
-        console.log(`[Account ${account.channel_title}] Thumbnail URL:`, account.thumbnail_url)
-    }
-
     return {
         id: account.id,
         userId: account.user_id,
@@ -85,10 +80,8 @@ export const accountsApi = {
     async getAccounts(filters?: AccountFilters): Promise<YouTubeAccount[]> {
         try {
             const params = filters ? { ...filters } as Record<string, string | number | boolean | undefined> : undefined
-            console.log("[accountsApi.getAccounts] Fetching accounts with params:", params)
 
             const response = await apiClient.get<BackendYouTubeAccount[] | { items: BackendYouTubeAccount[] } | { accounts: BackendYouTubeAccount[] }>("/accounts", params)
-            console.log("[accountsApi.getAccounts] Raw response:", response)
 
             // Handle different response formats and transform
             let accounts: BackendYouTubeAccount[] = []
@@ -102,7 +95,6 @@ export const accountsApi = {
                 }
             }
 
-            console.log("[accountsApi.getAccounts] Parsed accounts:", accounts.length, "accounts found")
             return accounts.map(transformAccount)
         } catch (error) {
             console.error("[accountsApi.getAccounts] Failed to fetch accounts:", error)
