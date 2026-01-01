@@ -129,6 +129,8 @@ class YouTubeAccountService:
         )
 
         await self.session.commit()
+        # Refresh account to get updated data after commit
+        await self.session.refresh(account)
         return account
 
     async def get_account(self, account_id: uuid.UUID) -> Optional[YouTubeAccount]:
@@ -266,6 +268,8 @@ class YouTubeAccountService:
                 pass
 
         await self.session.commit()
+        # Refresh account to get updated data after commit
+        await self.session.refresh(account)
         return account
 
     async def sync_stream_key(
@@ -309,6 +313,8 @@ class YouTubeAccountService:
         )
 
         await self.session.commit()
+        # Refresh account to get updated data after commit
+        await self.session.refresh(account)
         return account
 
     async def get_stream_key_status(
@@ -379,6 +385,8 @@ class YouTubeAccountService:
 
         account = await self._refresh_account_token(account)
         await self.session.commit()
+        # Refresh account to get updated data after commit
+        await self.session.refresh(account)
         return account
 
     async def increment_quota_usage(
@@ -404,6 +412,8 @@ class YouTubeAccountService:
 
         account = await self.repository.increment_quota_usage(account, amount)
         await self.session.commit()
+        # Refresh account to get updated data after commit
+        await self.session.refresh(account)
         return account
 
     async def reset_quota(self, account_id: uuid.UUID) -> YouTubeAccount:
@@ -424,6 +434,8 @@ class YouTubeAccountService:
 
         account = await self.repository.reset_daily_quota(account)
         await self.session.commit()
+        # Refresh account to get updated data after commit
+        await self.session.refresh(account)
         return account
 
     async def get_accounts_approaching_quota_limit(
@@ -456,6 +468,8 @@ class YouTubeAccountService:
         if account.is_token_expired() or account.is_token_expiring_soon(hours=1):
             account = await self._refresh_account_token(account)
             await self.session.commit()
+            # Refresh account to get updated data after commit
+            await self.session.refresh(account)
         return account
 
     async def _refresh_account_token(self, account: YouTubeAccount) -> YouTubeAccount:

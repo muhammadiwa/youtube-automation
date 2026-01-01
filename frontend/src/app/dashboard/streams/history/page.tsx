@@ -35,6 +35,7 @@ import {
     TableRow,
 } from "@/components/ui/table"
 import { useToast } from "@/hooks/use-toast"
+import apiClient from "@/lib/api/client"
 
 // Types
 interface StreamHistoryItem {
@@ -62,46 +63,45 @@ interface StreamHistoryResponse {
 
 // API functions
 async function getStreamHistory(days: number, page: number, pageSize: number): Promise<StreamHistoryResponse> {
-    const params = new URLSearchParams({
-        days: days.toString(),
-        page: page.toString(),
-        page_size: pageSize.toString(),
-    })
-
-    const response = await fetch(`/api/v1/stream-jobs/history?${params}`, {
-        credentials: "include",
-    })
-
-    if (!response.ok) {
-        throw new Error("Failed to fetch history")
+    const params: Record<string, number> = {
+        days,
+        page,
+        page_size: pageSize,
     }
 
-    const data = await response.json()
+    const data = await apiClient.get<Record<string, unknown>>("/stream-jobs/history", params)
+
     return {
-        items: data.items.map((item: Record<string, unknown>) => ({
-            id: item.id,
-            title: item.title,
-            status: item.status,
-            loopMode: item.loop_mode,
-            resolution: item.resolution,
-            targetBitrate: item.target_bitrate,
-            actualStartAt: item.actual_start_at,
-            actualEndAt: item.actual_end_at,
-            totalDurationSeconds: item.total_duration_seconds,
-            totalLoops: item.total_loops,
-            avgBitrateKbps: item.avg_bitrate_kbps,
-            totalDroppedFrames: item.total_dropped_frames,
-            createdAt: item.created_at,
+        items: ((data.items as Record<string, unknown>[]) || []).map((item: Record<string, unknown>) => ({
+            id: item.id as string,
+            title: item.title as string,
+            status: item.status as string,
+            loopMode: item.loop_mode as string,
+            resolution: item.resolution as string,
+            targetBitrate: item.target_bitrate as number,
+            actualStartAt: item.actual_start_at as string | null,
+            actualEndAt: item.actual_end_at as string | null,
+            totalDurationSeconds: item.total_duration_seconds as number,
+            totalLoops: item.total_loops as number,
+            avgBitrateKbps: item.avg_bitrate_kbps as number | null,
+            totalDroppedFrames: item.total_dropped_frames as number,
+            createdAt: item.created_at as string,
         })),
-        total: data.total,
-        page: data.page,
-        pageSize: data.page_size,
+        total: data.total as number,
+        page: data.page as number,
+        pageSize: data.page_size as number,
     }
 }
 
 async function exportStreamData(days: number): Promise<void> {
-    const response = await fetch(`/api/v1/stream-jobs/export?days=${days}`, {
-        credentials: "include",
+    // For file download, we need to use fetch with auth token
+    const token = localStorage.getItem("auth_access_token")
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
+
+    const response = await fetch(`${baseUrl}/stream-jobs/export?days=${days}`, {
+        headers: {
+            Authorization: `Bearer ${token}`,
+        },
     })
 
     if (!response.ok) {

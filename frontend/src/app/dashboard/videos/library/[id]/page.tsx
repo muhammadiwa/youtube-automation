@@ -728,7 +728,7 @@ export default function VideoDetailPage() {
                         title: "Stream Created",
                         description: "Redirecting to stream control panel...",
                     })
-                    router.push(`/dashboard/streams/${streamJobId}`)
+                    router.push(`/dashboard/streams/${streamJobId}/control`)
                 }}
                 video={video}
                 accounts={youtubeAccounts}

@@ -347,11 +347,20 @@ class StreamJobService:
         """
         job = await self.get_stream_job(job_id, user_id)
         
-        # Cannot delete running jobs
-        if job.is_active():
+        # Cannot delete running or starting jobs (but allow stopping/stopped)
+        if job.status in [StreamJobStatus.RUNNING.value, StreamJobStatus.STARTING.value]:
             raise InvalidStatusTransitionError(
                 "Cannot delete a running stream job. Stop it first."
             )
+        
+        # If job is in "stopping" status, try to kill the process first
+        if job.status == StreamJobStatus.STOPPING.value and job.pid:
+            try:
+                import psutil
+                process = psutil.Process(job.pid)
+                process.kill()
+            except Exception:
+                pass  # Process may already be dead
         
         return await self.job_repo.delete(job_id)
 

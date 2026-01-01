@@ -664,13 +664,7 @@ async def create_stream_from_video(
     usage_tracker = VideoUsageTracker(db)
     await usage_tracker.log_streaming_start(
         video_id=video_id,
-        stream_job_id=stream_job.id,
-        metadata={
-            "resolution": request.resolution,
-            "bitrate": request.target_bitrate,
-            "fps": request.target_fps,
-            "loop_mode": request.loop_mode
-        }
+        stream_job_id=stream_job.id
     )
     
     return {

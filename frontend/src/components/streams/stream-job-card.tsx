@@ -238,7 +238,8 @@ export function StreamJobCard({ job, onUpdate }: StreamJobCardProps) {
 
     const canStart = ["pending", "scheduled", "stopped", "failed"].includes(job.status)
     const canStop = ["starting", "running"].includes(job.status)
-    const isActive = ["starting", "running", "stopping"].includes(job.status)
+    // Only starting and running are truly "active" - stopping can be deleted
+    const isActive = ["starting", "running"].includes(job.status)
 
     return (
         <>

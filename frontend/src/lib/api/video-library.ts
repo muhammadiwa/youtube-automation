@@ -358,7 +358,13 @@ export const videoLibraryApi = {
         title: string
         message: string
     }> {
-        return apiClient.post(`/videos/library/${videoId}/create-stream`, {
+        const response = await apiClient.post<{
+            stream_job_id: string
+            video_id: string
+            status: string
+            title: string
+            message: string
+        }>(`/videos/library/${videoId}/create-stream`, {
             account_id: data.accountId,
             title: data.title,
             loop_mode: data.loopMode || "infinite",
@@ -368,6 +374,15 @@ export const videoLibraryApi = {
             target_fps: data.targetFps || 30,
             scheduled_start_at: data.scheduledStartAt,
         })
+
+        // Transform snake_case to camelCase
+        return {
+            streamJobId: response.stream_job_id,
+            videoId: response.video_id,
+            status: response.status,
+            title: response.title,
+            message: response.message,
+        }
     },
 
     /**

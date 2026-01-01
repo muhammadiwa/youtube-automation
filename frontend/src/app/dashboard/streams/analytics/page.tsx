@@ -21,6 +21,7 @@ import {
     SelectValue,
 } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
+import apiClient from "@/lib/api/client"
 
 // Types
 interface StreamAnalytics {
@@ -36,24 +37,17 @@ interface StreamAnalytics {
 
 // API function
 async function getStreamAnalytics(days: number): Promise<StreamAnalytics> {
-    const response = await fetch(`/api/v1/stream-jobs/analytics?days=${days}`, {
-        credentials: "include",
-    })
+    const data = await apiClient.get<Record<string, unknown>>("/stream-jobs/analytics", { days })
 
-    if (!response.ok) {
-        throw new Error("Failed to fetch analytics")
-    }
-
-    const data = await response.json()
     return {
-        totalStreams: data.total_streams,
-        totalDurationHours: data.total_duration_hours,
-        totalLoopsCompleted: data.total_loops_completed,
-        avgStreamDurationMinutes: data.avg_stream_duration_minutes,
-        avgBitrateKbps: data.avg_bitrate_kbps,
-        totalDataTransferredGb: data.total_data_transferred_gb,
-        streamsByDay: data.streams_by_day,
-        durationByDay: data.duration_by_day,
+        totalStreams: data.total_streams as number,
+        totalDurationHours: data.total_duration_hours as number,
+        totalLoopsCompleted: data.total_loops_completed as number,
+        avgStreamDurationMinutes: data.avg_stream_duration_minutes as number,
+        avgBitrateKbps: data.avg_bitrate_kbps as number,
+        totalDataTransferredGb: data.total_data_transferred_gb as number,
+        streamsByDay: data.streams_by_day as { date: string; count: number }[],
+        durationByDay: data.duration_by_day as { date: string; hours: number }[],
     }
 }
 

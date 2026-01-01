@@ -271,7 +271,7 @@ export default function VideoLibraryPage() {
             description: "Redirecting to stream control panel...",
         })
         // Redirect to stream control page
-        router.push(`/dashboard/streams/${streamJobId}`)
+        router.push(`/dashboard/streams/${streamJobId}/control`)
     }
 
     // Bulk selection handlers
