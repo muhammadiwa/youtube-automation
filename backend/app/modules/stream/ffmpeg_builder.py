@@ -1,16 +1,21 @@
 """FFmpeg Command Builder and Output Parser for Video-to-Live Streaming.
 
 Implements FFmpeg command generation and stderr output parsing for
-real-time metrics extraction.
+real-time metrics extraction. Supports hardware encoding (NVENC, QSV, AMF)
+with automatic detection and fallback to software encoding.
 
 Requirements: 3.1, 3.4, 3.5, 10.1, 10.2, 10.3, 10.4, 11.1, 11.2, 11.3
 """
 
 import os
 import re
+import subprocess
 import tempfile
+import logging
 from dataclasses import dataclass
-from typing import Optional, List
+from enum import Enum
+from typing import Optional, List, Tuple
+from functools import lru_cache
 
 from app.modules.stream.stream_job_models import (
     StreamJob,
@@ -19,6 +24,8 @@ from app.modules.stream.stream_job_models import (
     Resolution,
     RESOLUTION_DIMENSIONS,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================
@@ -36,6 +43,212 @@ RESOLUTION_SCALE = {
     "1440p": "2560:1440",
     "4k": "3840:2160",
 }
+
+
+# ============================================
+# Hardware Encoder Types
+# ============================================
+
+
+class HardwareEncoder(Enum):
+    """Available hardware encoders."""
+    NVENC = "h264_nvenc"      # NVIDIA GPU
+    QSV = "h264_qsv"          # Intel Quick Sync
+    AMF = "h264_amf"          # AMD AMF
+    VIDEOTOOLBOX = "h264_videotoolbox"  # macOS
+    SOFTWARE = "libx264"      # CPU fallback
+
+
+# Hardware encoder configurations
+HARDWARE_ENCODER_CONFIG = {
+    HardwareEncoder.NVENC: {
+        "codec": "h264_nvenc",
+        "preset": "p4",  # Balanced quality/speed (p1=fastest, p7=slowest)
+        "extra_args": ["-rc", "cbr", "-tune", "ll"],  # Low latency
+        "profile": "high",
+    },
+    HardwareEncoder.QSV: {
+        "codec": "h264_qsv",
+        "preset": "faster",
+        "extra_args": ["-look_ahead", "0"],  # Disable lookahead for low latency
+        "profile": "high",
+    },
+    HardwareEncoder.AMF: {
+        "codec": "h264_amf",
+        "preset": "speed",  # speed, balanced, quality
+        "extra_args": ["-rc", "cbr"],
+        "profile": "high",
+    },
+    HardwareEncoder.VIDEOTOOLBOX: {
+        "codec": "h264_videotoolbox",
+        "preset": None,  # VideoToolbox doesn't use preset
+        "extra_args": ["-realtime", "1"],
+        "profile": "high",
+    },
+    HardwareEncoder.SOFTWARE: {
+        "codec": "libx264",
+        "preset": "ultrafast",
+        "extra_args": [],
+        "profile": "high",
+    },
+}
+
+
+# ============================================
+# Hardware Detection
+# ============================================
+
+
+@lru_cache(maxsize=1)
+def detect_available_encoders(ffmpeg_path: str = "ffmpeg") -> List[HardwareEncoder]:
+    """Detect available hardware encoders on the system.
+    
+    Uses FFmpeg to check which encoders are available.
+    Results are cached for performance.
+    
+    Args:
+        ffmpeg_path: Path to FFmpeg binary
+        
+    Returns:
+        List[HardwareEncoder]: Available encoders in priority order
+    """
+    available = []
+    
+    # Check each hardware encoder
+    encoder_checks = [
+        (HardwareEncoder.NVENC, "h264_nvenc"),
+        (HardwareEncoder.QSV, "h264_qsv"),
+        (HardwareEncoder.AMF, "h264_amf"),
+        (HardwareEncoder.VIDEOTOOLBOX, "h264_videotoolbox"),
+    ]
+    
+    for encoder, codec_name in encoder_checks:
+        if _check_encoder_available(ffmpeg_path, codec_name):
+            available.append(encoder)
+            logger.info(f"Hardware encoder detected: {encoder.value}")
+    
+    # Software encoder is always available as fallback
+    available.append(HardwareEncoder.SOFTWARE)
+    
+    return available
+
+
+def _check_encoder_available(ffmpeg_path: str, encoder_name: str) -> bool:
+    """Check if a specific encoder is available in FFmpeg.
+    
+    Args:
+        ffmpeg_path: Path to FFmpeg binary
+        encoder_name: Name of encoder to check
+        
+    Returns:
+        bool: True if encoder is available
+    """
+    try:
+        # Run FFmpeg with encoder to check if it's available
+        result = subprocess.run(
+            [ffmpeg_path, "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return encoder_name in result.stdout
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
+        logger.debug(f"Error checking encoder {encoder_name}: {e}")
+        return False
+
+
+def _test_encoder_works(ffmpeg_path: str, encoder: HardwareEncoder) -> bool:
+    """Test if encoder actually works (not just listed).
+    
+    Some systems list encoders but they don't work due to driver issues.
+    
+    Args:
+        ffmpeg_path: Path to FFmpeg binary
+        encoder: Encoder to test
+        
+    Returns:
+        bool: True if encoder works
+    """
+    config = HARDWARE_ENCODER_CONFIG[encoder]
+    
+    try:
+        # Try to initialize encoder with a null output
+        cmd = [
+            ffmpeg_path,
+            "-hide_banner",
+            "-f", "lavfi",
+            "-i", "nullsrc=s=256x256:d=0.1",
+            "-c:v", config["codec"],
+            "-f", "null",
+            "-"
+        ]
+        
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        
+        # Check if encoding succeeded (no error about encoder)
+        if result.returncode == 0:
+            return True
+        
+        # Check stderr for common hardware encoder errors
+        stderr = result.stderr.lower()
+        hardware_errors = [
+            "no capable devices found",
+            "device not found",
+            "failed to initialize",
+            "cannot load",
+            "driver",
+        ]
+        
+        return not any(err in stderr for err in hardware_errors)
+        
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
+        logger.debug(f"Error testing encoder {encoder.value}: {e}")
+        return False
+
+
+def get_best_encoder(ffmpeg_path: str = "ffmpeg", test_encoder: bool = True) -> HardwareEncoder:
+    """Get the best available encoder for the system.
+    
+    Priority: NVENC > QSV > AMF > VideoToolbox > Software
+    
+    Args:
+        ffmpeg_path: Path to FFmpeg binary
+        test_encoder: Whether to test if encoder actually works
+        
+    Returns:
+        HardwareEncoder: Best available encoder
+    """
+    available = detect_available_encoders(ffmpeg_path)
+    
+    if not test_encoder:
+        return available[0]
+    
+    # Test each encoder to make sure it actually works
+    for encoder in available:
+        if encoder == HardwareEncoder.SOFTWARE:
+            return encoder  # Software always works
+        
+        if _test_encoder_works(ffmpeg_path, encoder):
+            logger.info(f"Using hardware encoder: {encoder.value}")
+            return encoder
+        else:
+            logger.warning(f"Encoder {encoder.value} listed but not working, trying next...")
+    
+    logger.info("No working hardware encoder found, using software encoding")
+    return HardwareEncoder.SOFTWARE
+
+
+def clear_encoder_cache():
+    """Clear the encoder detection cache.
+    
+    Call this if hardware configuration changes.
+    """
+    detect_available_encoders.cache_clear()
 
 
 # ============================================
@@ -81,17 +294,52 @@ class FFmpegCommandBuilder:
     
     Generates FFmpeg commands with proper encoding parameters for
     streaming pre-recorded videos to RTMP endpoints.
+    Supports hardware encoding with automatic detection and fallback.
     
     Requirements: 3.1, 10.1, 10.2, 10.3, 10.4
     """
 
-    def __init__(self, ffmpeg_path: str = "ffmpeg"):
+    def __init__(
+        self,
+        ffmpeg_path: str = "ffmpeg",
+        force_encoder: Optional[HardwareEncoder] = None,
+    ):
         """Initialize command builder.
         
         Args:
             ffmpeg_path: Path to FFmpeg binary
+            force_encoder: Force specific encoder (None = auto-detect)
         """
         self.ffmpeg_path = ffmpeg_path
+        self._force_encoder = force_encoder
+        self._detected_encoder: Optional[HardwareEncoder] = None
+
+    @property
+    def encoder(self) -> HardwareEncoder:
+        """Get the encoder to use (cached after first detection)."""
+        if self._force_encoder:
+            return self._force_encoder
+        
+        if self._detected_encoder is None:
+            self._detected_encoder = get_best_encoder(self.ffmpeg_path)
+        
+        return self._detected_encoder
+
+    def get_encoder_info(self) -> dict:
+        """Get information about the current encoder.
+        
+        Returns:
+            dict: Encoder information
+        """
+        encoder = self.encoder
+        config = HARDWARE_ENCODER_CONFIG[encoder]
+        
+        return {
+            "encoder": encoder.value,
+            "is_hardware": encoder != HardwareEncoder.SOFTWARE,
+            "codec": config["codec"],
+            "preset": config["preset"],
+        }
 
     def build_streaming_command(self, job: StreamJob) -> List[str]:
         """Build FFmpeg command for streaming.
@@ -174,35 +422,78 @@ class FFmpegCommandBuilder:
         """
         args = []
         
-        # Video codec - H.264 for maximum compatibility
-        args.extend(["-c:v", "libx264"])
+        # Get encoder configuration
+        encoder = self.encoder
+        config = HARDWARE_ENCODER_CONFIG[encoder]
         
-        # Preset - ultrafast for real-time streaming with lower CPU usage
-        # This ensures consistent bitrate output even on slower systems
-        args.extend(["-preset", "ultrafast"])
+        # Video codec
+        args.extend(["-c:v", config["codec"]])
+        
+        # Preset (if applicable)
+        if config["preset"]:
+            if encoder == HardwareEncoder.NVENC:
+                args.extend(["-preset", config["preset"]])
+            elif encoder == HardwareEncoder.QSV:
+                args.extend(["-preset", config["preset"]])
+            elif encoder == HardwareEncoder.AMF:
+                args.extend(["-quality", config["preset"]])
+            else:
+                args.extend(["-preset", config["preset"]])
         
         # Profile and level for YouTube compatibility
-        args.extend(["-profile:v", "high"])
+        args.extend(["-profile:v", config["profile"]])
         args.extend(["-level:v", "4.1"])
+        
+        # Extra encoder-specific args
+        args.extend(config["extra_args"])
         
         # Bitrate configuration (Requirements: 10.2, 10.3)
         bitrate_k = job.target_bitrate  # Already in kbps
         
-        if job.encoding_mode == EncodingMode.CBR.value:
-            # CBR mode - constant bitrate
+        if encoder == HardwareEncoder.NVENC:
+            # NVENC specific bitrate control
+            if job.encoding_mode == EncodingMode.CBR.value:
+                args.extend(["-b:v", f"{bitrate_k}k"])
+                args.extend(["-maxrate", f"{bitrate_k}k"])
+                args.extend(["-bufsize", f"{bitrate_k * 2}k"])
+            else:
+                args.extend(["-b:v", f"{bitrate_k}k"])
+                args.extend(["-maxrate", f"{int(bitrate_k * 1.5)}k"])
+                args.extend(["-bufsize", f"{bitrate_k * 2}k"])
+        elif encoder == HardwareEncoder.QSV:
+            # QSV specific bitrate control
             args.extend(["-b:v", f"{bitrate_k}k"])
-            args.extend(["-minrate", f"{bitrate_k}k"])
+            args.extend(["-maxrate", f"{bitrate_k}k"])
+            args.extend(["-bufsize", f"{bitrate_k * 2}k"])
+        elif encoder == HardwareEncoder.AMF:
+            # AMF specific bitrate control
+            args.extend(["-b:v", f"{bitrate_k}k"])
             args.extend(["-maxrate", f"{bitrate_k}k"])
             args.extend(["-bufsize", f"{bitrate_k * 2}k"])
         else:
-            # VBR mode - variable bitrate
-            args.extend(["-b:v", f"{bitrate_k}k"])
-            args.extend(["-maxrate", f"{int(bitrate_k * 1.5)}k"])
-            args.extend(["-bufsize", f"{bitrate_k * 2}k"])
+            # Software encoding (libx264)
+            if job.encoding_mode == EncodingMode.CBR.value:
+                args.extend(["-b:v", f"{bitrate_k}k"])
+                args.extend(["-minrate", f"{bitrate_k}k"])
+                args.extend(["-maxrate", f"{bitrate_k}k"])
+                args.extend(["-bufsize", f"{bitrate_k * 2}k"])
+            else:
+                args.extend(["-b:v", f"{bitrate_k}k"])
+                args.extend(["-maxrate", f"{int(bitrate_k * 1.5)}k"])
+                args.extend(["-bufsize", f"{bitrate_k * 2}k"])
         
         # Resolution scaling (Requirements: 10.1)
         scale = self._get_scale_filter(job.resolution)
-        args.extend(["-vf", f"scale={scale}:force_original_aspect_ratio=decrease,pad={scale.replace(':', ':')}:(ow-iw)/2:(oh-ih)/2,format=yuv420p"])
+        
+        # Use appropriate scale filter for hardware encoders
+        if encoder == HardwareEncoder.NVENC:
+            # NVENC can use scale_cuda if available, fallback to scale
+            args.extend(["-vf", f"scale={scale}:force_original_aspect_ratio=decrease,pad={scale.replace(':', ':')}:(ow-iw)/2:(oh-ih)/2,format=yuv420p"])
+        elif encoder == HardwareEncoder.QSV:
+            # QSV uses vpp_qsv for scaling, but scale works too
+            args.extend(["-vf", f"scale={scale}:force_original_aspect_ratio=decrease,pad={scale.replace(':', ':')}:(ow-iw)/2:(oh-ih)/2,format=nv12"])
+        else:
+            args.extend(["-vf", f"scale={scale}:force_original_aspect_ratio=decrease,pad={scale.replace(':', ':')}:(ow-iw)/2:(oh-ih)/2,format=yuv420p"])
         
         # Frame rate (Requirements: 10.4)
         args.extend(["-r", str(job.target_fps)])
@@ -210,13 +501,15 @@ class FFmpegCommandBuilder:
         # Keyframe interval - every 2 seconds for streaming
         gop_size = job.target_fps * 2
         args.extend(["-g", str(gop_size)])
-        args.extend(["-keyint_min", str(gop_size)])
         
-        # B-frames for compression efficiency
-        args.extend(["-bf", "2"])
+        # Software encoding specific options
+        if encoder == HardwareEncoder.SOFTWARE:
+            args.extend(["-keyint_min", str(gop_size)])
+            args.extend(["-bf", "2"])  # B-frames
         
-        # Pixel format
-        args.extend(["-pix_fmt", "yuv420p"])
+        # Pixel format (hardware encoders may need different format)
+        if encoder not in [HardwareEncoder.QSV]:
+            args.extend(["-pix_fmt", "yuv420p"])
         
         return args
 
@@ -268,7 +561,11 @@ class FFmpegCommandBuilder:
             masked_key = job.get_masked_stream_key() or "****"
             cmd_str = cmd_str.replace(job.stream_key, masked_key)
         
-        return cmd_str
+        # Add encoder info
+        encoder_info = self.get_encoder_info()
+        encoder_note = f"[Encoder: {encoder_info['encoder']}]"
+        
+        return f"{encoder_note} {cmd_str}"
 
 
 # ============================================
@@ -679,7 +976,7 @@ class FFmpegPlaylistCommandBuilder(FFmpegCommandBuilder):
         self.concat_builder.cleanup_concat_file(job_id)
 
 
-def validate_ffmpeg_command(cmd: List[str]) -> tuple[bool, Optional[str]]:
+def validate_ffmpeg_command(cmd: List[str]) -> Tuple[bool, Optional[str]]:
     """Validate FFmpeg command has required parameters.
     
     Requirements: 3.1
@@ -688,24 +985,28 @@ def validate_ffmpeg_command(cmd: List[str]) -> tuple[bool, Optional[str]]:
         cmd: FFmpeg command arguments
         
     Returns:
-        tuple[bool, Optional[str]]: (is_valid, error_message)
+        Tuple[bool, Optional[str]]: (is_valid, error_message)
     """
-    # Required parameters with their expected values (None means any value is OK)
-    required_params = {
-        "-c:v": "libx264",  # Video codec
-        "-preset": None,  # Preset (any valid preset is OK: ultrafast, veryfast, etc.)
-        "-c:a": "aac",  # Audio codec
-        "-b:a": "128k",  # Audio bitrate
-        "-ar": "44100",  # Sample rate
-        "-f": "flv",  # Output format
-    }
-    
     cmd_str = " ".join(cmd)
     
-    for param, value in required_params.items():
+    # Check for video codec (any supported encoder)
+    valid_video_codecs = ["libx264", "h264_nvenc", "h264_qsv", "h264_amf", "h264_videotoolbox"]
+    has_video_codec = any(codec in cmd_str for codec in valid_video_codecs)
+    if not has_video_codec:
+        return False, f"Missing video codec. Expected one of: {valid_video_codecs}"
+    
+    # Required parameters (codec-agnostic)
+    required_params = [
+        ("-c:a", "aac"),      # Audio codec
+        ("-b:a", "128k"),     # Audio bitrate
+        ("-ar", "44100"),     # Sample rate
+        ("-f", "flv"),        # Output format
+    ]
+    
+    for param, value in required_params:
         if param not in cmd_str:
             return False, f"Missing required parameter: {param}"
-        if value is not None and value not in cmd_str:
+        if value and value not in cmd_str:
             return False, f"Missing required value for {param}: {value}"
     
     return True, None

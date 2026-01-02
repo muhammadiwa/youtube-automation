@@ -221,6 +221,25 @@ export interface StreamJobFilters {
     pageSize?: number
 }
 
+export interface EncoderInfo {
+    encoder: string
+    isHardware: boolean
+    codec: string
+    preset: string | null
+}
+
+export interface AvailableEncoder {
+    name: string
+    type: "hardware" | "software"
+    description: string
+}
+
+export interface EncoderInfoResponse {
+    currentEncoder: EncoderInfo
+    availableEncoders: AvailableEncoder[]
+    hardwareAcceleration: boolean
+}
+
 // ============================================
 // API Response Transformers
 // ============================================
@@ -505,6 +524,32 @@ export const streamJobsApi = {
     },
 
     /**
+     * Get encoder information
+     * Returns info about available hardware encoders and current encoder
+     */
+    async getEncoderInfo(): Promise<EncoderInfoResponse> {
+        const response = await apiClient.get<Record<string, unknown>>("/stream-jobs/encoder/info")
+
+        const currentEncoder = response.current_encoder as Record<string, unknown>
+        const availableEncoders = response.available_encoders as Record<string, unknown>[]
+
+        return {
+            currentEncoder: {
+                encoder: currentEncoder.encoder as string,
+                isHardware: currentEncoder.is_hardware as boolean,
+                codec: currentEncoder.codec as string,
+                preset: currentEncoder.preset as string | null,
+            },
+            availableEncoders: availableEncoders.map((e) => ({
+                name: e.name as string,
+                type: e.type as "hardware" | "software",
+                description: e.description as string,
+            })),
+            hardwareAcceleration: response.hardware_acceleration as boolean,
+        }
+    },
+
+    /**
      * Connect to WebSocket for real-time health updates
      * Requirements: 4.6
      */
@@ -517,35 +562,48 @@ export const streamJobsApi = {
             onClose?: () => void
         }
     ): WebSocket {
-        const wsUrl = (process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/api/v1")
+        // Convert HTTP URL to WebSocket URL
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
+        const wsUrl = apiUrl
             .replace("http://", "ws://")
             .replace("https://", "wss://")
 
-        const ws = new WebSocket(`${wsUrl}/stream-jobs/${jobId}/health/ws`)
+        const fullUrl = `${wsUrl}/stream-jobs/${jobId}/health/ws`
+        console.log("[WebSocket] Connecting to:", fullUrl)
+
+        const ws = new WebSocket(fullUrl)
+
+        ws.onopen = () => {
+            console.log("[WebSocket] Connected successfully")
+        }
 
         ws.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data)
+                console.log("[WebSocket] Received:", data)
                 if (data.type === "stream_ended") {
                     callbacks.onStreamEnded?.(data.status)
                 } else {
                     callbacks.onMessage(transformStreamJobHealth(data))
                 }
             } catch (error) {
-                console.error("Failed to parse WebSocket message:", error)
+                console.error("[WebSocket] Failed to parse message:", error)
             }
         }
 
         ws.onerror = (error) => {
+            console.error("[WebSocket] Error:", error)
             callbacks.onError?.(error)
         }
 
-        ws.onclose = () => {
+        ws.onclose = (event) => {
+            console.log("[WebSocket] Closed:", event.code, event.reason)
             callbacks.onClose?.()
         }
 
         return ws
     },
 }
+
 
 export default streamJobsApi

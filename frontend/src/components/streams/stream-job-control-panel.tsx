@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
-import { useRouter } from "next/navigation"
 import {
     Play,
     Square,
@@ -108,7 +107,6 @@ function ConnectionStatus({ connected }: { connected: boolean }) {
 }
 
 export function StreamJobControlPanel({ job, onUpdate }: StreamJobControlPanelProps) {
-    const router = useRouter()
     const { addToast } = useToast()
     const wsRef = useRef<WebSocket | null>(null)
     const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -158,6 +156,11 @@ export function StreamJobControlPanel({ job, onUpdate }: StreamJobControlPanelPr
             return
         }
 
+        // Don't reconnect if already connected
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            return
+        }
+
         // Clean up existing connection
         if (wsRef.current) {
             wsRef.current.close()
@@ -182,9 +185,11 @@ export function StreamJobControlPanel({ job, onUpdate }: StreamJobControlPanelPr
             onClose: () => {
                 setWsConnected(false)
                 // Attempt reconnect after 5 seconds if still running
-                if (currentJob.status === "running") {
-                    reconnectTimeoutRef.current = setTimeout(connectWebSocket, 5000)
-                }
+                reconnectTimeoutRef.current = setTimeout(() => {
+                    if (currentJob.status === "running") {
+                        connectWebSocket()
+                    }
+                }, 5000)
             },
         })
 
@@ -193,11 +198,31 @@ export function StreamJobControlPanel({ job, onUpdate }: StreamJobControlPanelPr
         }
 
         wsRef.current = ws
-    }, [currentJob.id, currentJob.status, addToast, onUpdate])
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [currentJob.id, addToast, onUpdate])
 
+    // Connect WebSocket when job starts running
     useEffect(() => {
-        connectWebSocket()
+        if (currentJob.status === "running" || currentJob.status === "starting") {
+            connectWebSocket()
+        } else {
+            // Close WebSocket when not running
+            if (wsRef.current) {
+                wsRef.current.close()
+                wsRef.current = null
+            }
+            setWsConnected(false)
+        }
 
+        return () => {
+            if (reconnectTimeoutRef.current) {
+                clearTimeout(reconnectTimeoutRef.current)
+            }
+        }
+    }, [currentJob.status, connectWebSocket])
+
+    // Cleanup on unmount
+    useEffect(() => {
         return () => {
             if (wsRef.current) {
                 wsRef.current.close()
@@ -206,11 +231,14 @@ export function StreamJobControlPanel({ job, onUpdate }: StreamJobControlPanelPr
                 clearTimeout(reconnectTimeoutRef.current)
             }
         }
-    }, [connectWebSocket])
+    }, [])
 
-    // Load initial health data and poll periodically
+    // Fallback: Poll health data only if WebSocket is not connected
     useEffect(() => {
         if (currentJob.status !== "running") return
+
+        // If WebSocket is connected, no need to poll
+        if (wsConnected) return
 
         const loadHealth = async () => {
             try {
@@ -221,15 +249,11 @@ export function StreamJobControlPanel({ job, onUpdate }: StreamJobControlPanelPr
             }
         }
 
-        // Load immediately
+        // Load immediately as fallback
         loadHealth()
 
-        // Poll every 10 seconds as fallback if WebSocket is not connected
-        const interval = setInterval(() => {
-            if (!wsConnected) {
-                loadHealth()
-            }
-        }, 10000)
+        // Poll every 30 seconds as fallback (WebSocket should handle realtime)
+        const interval = setInterval(loadHealth, 30000)
 
         return () => clearInterval(interval)
     }, [currentJob.id, currentJob.status, wsConnected])

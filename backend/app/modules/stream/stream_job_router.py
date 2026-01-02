@@ -263,6 +263,63 @@ async def get_analytics_summary(
 
 
 @router.get(
+    "/encoder/info",
+    summary="Get encoder information",
+    description="Get information about available video encoders.",
+)
+async def get_encoder_info(
+    current_user=Depends(get_current_user),
+) -> dict:
+    """Get encoder information.
+    
+    Returns information about available hardware encoders and
+    which encoder will be used for streaming.
+    
+    Args:
+        current_user: Current authenticated user
+        
+    Returns:
+        dict: Encoder information
+    """
+    from app.modules.stream.ffmpeg_builder import (
+        FFmpegCommandBuilder,
+        detect_available_encoders,
+        HardwareEncoder,
+        HARDWARE_ENCODER_CONFIG,
+    )
+    
+    builder = FFmpegCommandBuilder()
+    available = detect_available_encoders()
+    
+    return {
+        "current_encoder": builder.get_encoder_info(),
+        "available_encoders": [
+            {
+                "name": enc.value,
+                "type": "hardware" if enc != HardwareEncoder.SOFTWARE else "software",
+                "description": _get_encoder_description(enc),
+            }
+            for enc in available
+        ],
+        "hardware_acceleration": builder.encoder != HardwareEncoder.SOFTWARE,
+    }
+
+
+def _get_encoder_description(encoder) -> str:
+    """Get human-readable description for encoder."""
+    from app.modules.stream.ffmpeg_builder import HardwareEncoder
+    
+    descriptions = {
+        HardwareEncoder.NVENC: "NVIDIA GPU (NVENC) - Very low CPU usage",
+        HardwareEncoder.QSV: "Intel Quick Sync Video - Low CPU usage",
+        HardwareEncoder.AMF: "AMD GPU (AMF) - Very low CPU usage",
+        HardwareEncoder.VIDEOTOOLBOX: "Apple VideoToolbox - Low CPU usage (macOS)",
+        HardwareEncoder.SOFTWARE: "CPU Software Encoding (libx264) - High CPU usage",
+    }
+    return descriptions.get(encoder, "Unknown encoder")
+
+
+@router.get(
     "/export",
     summary="Export stream data",
     description="Export stream job data as CSV.",

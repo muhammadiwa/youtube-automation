@@ -73,6 +73,7 @@ dmypy.json
 
 # Celery
 celerybeat-schedule
+celerybeat-schedule.*
 celerybeat.pid
 
 # Database
@@ -89,4 +90,6 @@ logs/
 
 # Storage (uploaded files)
 storage/
-tests/
+
+# Backups
+backups/

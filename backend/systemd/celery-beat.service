@@ -1,0 +1,35 @@
+[Unit]
+Description=Celery Beat Scheduler Service
+After=network.target redis.service postgresql.service
+Requires=redis.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/app
+
+# Environment
+Environment="PYTHONPATH=/app"
+EnvironmentFile=/app/.env
+
+# Celery Beat - ONLY ONE INSTANCE!
+ExecStart=/app/venv/bin/celery -A app.core.celery_app beat \
+    --loglevel=INFO \
+    --schedule=/var/lib/celery/beat-schedule \
+    --pidfile=/var/run/celery/beat.pid
+
+# Restart policy
+Restart=always
+RestartSec=10
+
+# Runtime directory
+RuntimeDirectory=celery
+RuntimeDirectoryMode=0755
+
+# State directory for schedule file
+StateDirectory=celery
+StateDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target

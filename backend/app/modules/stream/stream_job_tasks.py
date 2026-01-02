@@ -111,11 +111,18 @@ async def _start_ffmpeg_worker_async(job_id: str) -> dict:
             job.total_playlist_items = len(video_paths)
             job.concat_file_path = concat_path
             
+            # Log encoder info
+            encoder_info = playlist_builder.get_encoder_info()
+            logger.info(f"Using encoder: {encoder_info['encoder']} (hardware: {encoder_info['is_hardware']})")
             logger.info(f"FFmpeg playlist command for {len(video_paths)} videos")
         else:
             # Build single video command
             builder = FFmpegCommandBuilder()
             cmd = builder.build_streaming_command(job)
+            
+            # Log encoder info
+            encoder_info = builder.get_encoder_info()
+            logger.info(f"Using encoder: {encoder_info['encoder']} (hardware: {encoder_info['is_hardware']})")
         
         logger.info(f"FFmpeg command: {' '.join(cmd[:10])}...")
         
