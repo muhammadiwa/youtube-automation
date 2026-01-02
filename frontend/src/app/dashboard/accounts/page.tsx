@@ -58,6 +58,7 @@ export default function AccountsPage() {
     const [currentPage, setCurrentPage] = useState(1)
     const [itemsPerPage, setItemsPerPage] = useState(12)
     const [refreshing, setRefreshing] = useState(false)
+    const [syncingAll, setSyncingAll] = useState(false)
     const [disconnectConfirm, setDisconnectConfirm] = useState<{ open: boolean; accountId: string; channelTitle: string }>({ open: false, accountId: "", channelTitle: "" })
 
     const { addToast } = useToast()
@@ -93,6 +94,22 @@ export default function AccountsPage() {
         setRefreshing(true)
         await loadAccounts()
         setRefreshing(false)
+    }
+
+    const handleSyncAll = async () => {
+        if (accounts.length === 0) return
+        setSyncingAll(true)
+        try {
+            // Sync all accounts in parallel
+            await Promise.all(accounts.map(account => accountsApi.syncAccount(account.id)))
+            addToast({ type: "success", title: "All Synced", description: `${accounts.length} account(s) synced with YouTube` })
+            await loadAccounts()
+        } catch (e) {
+            console.error("Failed to sync all accounts:", e)
+            addToast({ type: "error", title: "Sync Failed", description: "Some accounts failed to sync" })
+        } finally {
+            setSyncingAll(false)
+        }
     }
 
     // Filter and paginate accounts
@@ -155,6 +172,15 @@ export default function AccountsPage() {
                         </p>
                     </div>
                     <div className="flex items-center gap-3">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleSyncAll}
+                            disabled={syncingAll || accounts.length === 0}
+                        >
+                            <RefreshCw className={`h-4 w-4 mr-2 ${syncingAll ? "animate-spin" : ""}`} />
+                            {syncingAll ? "Syncing..." : "Sync All"}
+                        </Button>
                         <Button
                             variant="outline"
                             size="icon"
@@ -428,9 +454,11 @@ export default function AccountsPage() {
                                     onSync={async (id) => {
                                         try {
                                             await accountsApi.syncAccount(id)
+                                            addToast({ type: "success", title: "Synced", description: "Account data updated from YouTube" })
                                             await loadAccounts()
                                         } catch (e) {
                                             console.error("Failed to sync account:", e)
+                                            addToast({ type: "error", title: "Sync Failed", description: "Failed to sync account data" })
                                         }
                                     }}
                                     onDisconnect={(id) => {

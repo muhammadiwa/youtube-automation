@@ -749,26 +749,130 @@ async def get_video_usage_stats(
         for log in stats.usage_logs:
             usage_logs.append({
                 "id": str(log.id),
-                "usage_type": log.usage_type,
-                "started_at": log.started_at.isoformat() if log.started_at else None,
-                "ended_at": log.ended_at.isoformat() if log.ended_at else None,
-                "usage_metadata": log.usage_metadata or {}
+                "usageType": log.usage_type,
+                "startedAt": log.started_at.isoformat() if log.started_at else None,
+                "endedAt": log.ended_at.isoformat() if log.ended_at else None,
+                "usageMetadata": log.usage_metadata or {}
             })
     
     return {
-        "video_id": str(video_id),
+        "videoId": str(video_id),
         "title": video.title,
-        "usage_stats": {
-            "youtube_uploads": stats.youtube_uploads,
-            "streaming_sessions": stats.streaming_sessions,
-            "total_streaming_duration": stats.total_streaming_duration,
-            "last_used_at": stats.last_used_at.isoformat() if stats.last_used_at else None
+        "usageStats": {
+            "youtubeUploads": stats.youtube_uploads,
+            "streamingSessions": stats.streaming_sessions,
+            "totalStreamingDuration": stats.total_streaming_duration,
+            "lastUsedAt": stats.last_used_at.isoformat() if stats.last_used_at else None
         },
-        "usage_logs": usage_logs,
-        "is_currently_in_use": is_in_use,
-        "youtube_id": video.youtube_id,
-        "is_used_for_streaming": video.is_used_for_streaming,
-        "streaming_count": video.streaming_count,
-        "total_streaming_duration": video.total_streaming_duration
+        "usageLogs": usage_logs,
+        "isCurrentlyInUse": is_in_use,
+        "youtubeId": video.youtube_id,
+        "isUsedForStreaming": video.is_used_for_streaming,
+        "streamingCount": video.streaming_count,
+        "totalStreamingDuration": video.total_streaming_duration
     }
 
+
+
+@router.post("/{video_id}/fix-usage-logs")
+async def fix_video_usage_logs(
+    video_id: uuid.UUID,
+    current_user = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Fix unclosed usage logs for a video.
+    
+    Closes any streaming usage logs that don't have an ended_at timestamp
+    by looking up the corresponding stream job's actual_end_at.
+    """
+    from sqlalchemy import select, update
+    from app.modules.video.models import VideoUsageLog, Video
+    from app.modules.stream.stream_job_models import StreamJob
+    from datetime import datetime
+    
+    user_id = current_user.id
+    
+    # Verify video ownership
+    library_service = VideoLibraryService(db)
+    video = await library_service.get_video_by_id(
+        video_id=video_id,
+        user_id=user_id
+    )
+    
+    # Find unclosed usage logs for this video
+    query = select(VideoUsageLog).where(
+        VideoUsageLog.video_id == video_id,
+        VideoUsageLog.usage_type == "live_stream",
+        VideoUsageLog.ended_at.is_(None)
+    )
+    result = await db.execute(query)
+    unclosed_logs = result.scalars().all()
+    
+    fixed_count = 0
+    total_duration_added = 0
+    
+    for log in unclosed_logs:
+        # Try to find the stream job from metadata
+        stream_job_id = None
+        if log.usage_metadata and "stream_job_id" in log.usage_metadata:
+            stream_job_id = log.usage_metadata["stream_job_id"]
+        
+        if stream_job_id:
+            # Get stream job to find actual end time
+            job_query = select(StreamJob).where(StreamJob.id == uuid.UUID(stream_job_id))
+            job_result = await db.execute(job_query)
+            stream_job = job_result.scalar_one_or_none()
+            
+            if stream_job and stream_job.actual_end_at:
+                # Calculate duration
+                start = log.started_at.replace(tzinfo=None) if log.started_at.tzinfo else log.started_at
+                end = stream_job.actual_end_at.replace(tzinfo=None) if stream_job.actual_end_at.tzinfo else stream_job.actual_end_at
+                duration = int((end - start).total_seconds())
+                
+                # Update usage log
+                log.ended_at = stream_job.actual_end_at
+                if log.usage_metadata is None:
+                    log.usage_metadata = {}
+                log.usage_metadata["stream_duration"] = duration
+                log.usage_metadata["fixed_at"] = datetime.utcnow().isoformat()
+                
+                total_duration_added += duration
+                fixed_count += 1
+            elif stream_job and stream_job.status in ["stopped", "failed", "error"]:
+                # Stream job ended but no actual_end_at, use now
+                duration = int((datetime.utcnow() - log.started_at.replace(tzinfo=None)).total_seconds())
+                log.ended_at = datetime.utcnow()
+                if log.usage_metadata is None:
+                    log.usage_metadata = {}
+                log.usage_metadata["stream_duration"] = duration
+                log.usage_metadata["fixed_at"] = datetime.utcnow().isoformat()
+                log.usage_metadata["estimated"] = True
+                
+                total_duration_added += duration
+                fixed_count += 1
+        else:
+            # No stream job ID, close with estimated duration
+            duration = int((datetime.utcnow() - log.started_at.replace(tzinfo=None)).total_seconds())
+            log.ended_at = datetime.utcnow()
+            if log.usage_metadata is None:
+                log.usage_metadata = {}
+            log.usage_metadata["stream_duration"] = duration
+            log.usage_metadata["fixed_at"] = datetime.utcnow().isoformat()
+            log.usage_metadata["estimated"] = True
+            
+            total_duration_added += duration
+            fixed_count += 1
+    
+    # Update video total streaming duration
+    if total_duration_added > 0:
+        video.total_streaming_duration += total_duration_added
+        video.is_used_for_streaming = False  # No longer actively streaming
+    
+    await db.commit()
+    
+    return {
+        "videoId": str(video_id),
+        "fixedLogs": fixed_count,
+        "totalDurationAdded": total_duration_added,
+        "message": f"Fixed {fixed_count} unclosed usage logs, added {total_duration_added} seconds to total duration"
+    }

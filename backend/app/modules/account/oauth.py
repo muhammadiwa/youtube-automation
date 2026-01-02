@@ -245,7 +245,11 @@ class YouTubeOAuthClient:
             return {
                 "channel_id": channel["id"],
                 "channel_title": snippet.get("title", "Unknown"),
-                "thumbnail_url": snippet.get("thumbnails", {}).get("default", {}).get("url"),
+                "thumbnail_url": (
+                    snippet.get("thumbnails", {}).get("high", {}).get("url") or
+                    snippet.get("thumbnails", {}).get("medium", {}).get("url") or
+                    snippet.get("thumbnails", {}).get("default", {}).get("url")
+                ),
                 "subscriber_count": int(statistics.get("subscriberCount", 0)),
                 "video_count": int(statistics.get("videoCount", 0)),
                 "view_count": int(statistics.get("viewCount", 0)),

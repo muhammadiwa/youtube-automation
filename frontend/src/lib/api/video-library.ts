@@ -427,6 +427,18 @@ export const videoLibraryApi = {
     }> {
         return apiClient.get(`/videos/library/${videoId}/usage`)
     },
+
+    /**
+     * Fix unclosed usage logs for a video
+     */
+    async fixUsageLogs(videoId: string): Promise<{
+        videoId: string
+        fixedLogs: number
+        totalDurationAdded: number
+        message: string
+    }> {
+        return apiClient.post(`/videos/library/${videoId}/fix-usage-logs`, {})
+    },
 }
 
 export default videoLibraryApi

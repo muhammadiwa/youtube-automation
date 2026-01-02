@@ -220,6 +220,26 @@ async def _stop_ffmpeg_worker_async(job_id: str) -> dict:
         job.concat_file_path = None
         await repo.update(job)
         
+        # Update video usage tracking if this job has a video_id
+        if job.video_id:
+            try:
+                from app.modules.video.video_usage_tracker import VideoUsageTracker
+                usage_tracker = VideoUsageTracker(session)
+                
+                # Calculate duration
+                duration = job.get_duration_seconds()
+                
+                # Log streaming end
+                await usage_tracker.log_streaming_end(
+                    video_id=job.video_id,
+                    stream_job_id=job.id,
+                    duration=duration,
+                    viewer_count=0
+                )
+                logger.info(f"Updated video usage tracking for job {job_id}, duration: {duration}s")
+            except Exception as e:
+                logger.error(f"Failed to update video usage tracking for job {job_id}: {e}")
+        
         return {
             "status": "stopped",
             "job_id": job_id,

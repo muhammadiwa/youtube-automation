@@ -8,9 +8,10 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Youtube, Radio, Clock, Eye, Loader2 } from "lucide-react"
+import { Youtube, Radio, Clock, Eye, Loader2, RefreshCw } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { videoLibraryApi } from "@/lib/api/video-library"
 
@@ -30,11 +31,13 @@ interface UsageLog {
 
 interface VideoUsageHistoryProps {
     videoId: string
+    onUpdate?: () => void
 }
 
-export function VideoUsageHistory({ videoId }: VideoUsageHistoryProps) {
+export function VideoUsageHistory({ videoId, onUpdate }: VideoUsageHistoryProps) {
     const [logs, setLogs] = useState<UsageLog[]>([])
     const [loading, setLoading] = useState(true)
+    const [fixing, setFixing] = useState(false)
     const [error, setError] = useState<string | null>(null)
 
     useEffect(() => {
@@ -55,6 +58,20 @@ export function VideoUsageHistory({ videoId }: VideoUsageHistoryProps) {
         }
     }
 
+    const handleFixLogs = async () => {
+        try {
+            setFixing(true)
+            await videoLibraryApi.fixUsageLogs(videoId)
+            await loadUsageHistory()
+            onUpdate?.()
+        } catch (err: any) {
+            console.error("Failed to fix usage logs:", err)
+            setError(err.message || "Failed to fix usage logs")
+        } finally {
+            setFixing(false)
+        }
+    }
+
     const formatDate = (date: string) => {
         return new Date(date).toLocaleString()
     }
@@ -71,6 +88,9 @@ export function VideoUsageHistory({ videoId }: VideoUsageHistoryProps) {
         }
         return `${secs}s`
     }
+
+    // Check if there are unclosed logs
+    const hasUnclosedLogs = logs.some(log => log.usageType === "live_stream" && !log.endedAt)
 
     if (loading) {
         return (
@@ -120,7 +140,24 @@ export function VideoUsageHistory({ videoId }: VideoUsageHistoryProps) {
     return (
         <Card>
             <CardHeader>
-                <CardTitle>Usage History</CardTitle>
+                <div className="flex items-center justify-between">
+                    <CardTitle>Usage History</CardTitle>
+                    {hasUnclosedLogs && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleFixLogs}
+                            disabled={fixing}
+                        >
+                            {fixing ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                                <RefreshCw className="mr-2 h-4 w-4" />
+                            )}
+                            Fix Logs
+                        </Button>
+                    )}
+                </div>
             </CardHeader>
             <CardContent>
                 <div className="space-y-4">
@@ -167,7 +204,7 @@ export function VideoUsageHistory({ videoId }: VideoUsageHistoryProps) {
 
                                     {log.usageType === "live_stream" && (
                                         <>
-                                            {log.usageMetadata.stream_duration !== undefined && (
+                                            {log.endedAt && log.usageMetadata.stream_duration !== undefined && (
                                                 <div className="flex items-center gap-1">
                                                     <Clock className="h-3 w-3" />
                                                     <span>
@@ -175,16 +212,21 @@ export function VideoUsageHistory({ videoId }: VideoUsageHistoryProps) {
                                                     </span>
                                                 </div>
                                             )}
-                                            {log.usageMetadata.viewer_count !== undefined && (
+                                            {log.usageMetadata.viewer_count !== undefined && log.usageMetadata.viewer_count > 0 && (
                                                 <div className="flex items-center gap-1">
                                                     <Eye className="h-3 w-3" />
                                                     <span>Viewers: {log.usageMetadata.viewer_count}</span>
                                                 </div>
                                             )}
                                             {!log.endedAt && (
-                                                <Badge variant="default" className="text-xs">
+                                                <Badge variant="destructive" className="text-xs">
                                                     <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                                                    Streaming
+                                                    Unclosed
+                                                </Badge>
+                                            )}
+                                            {log.endedAt && (
+                                                <Badge variant="outline" className="text-xs">
+                                                    Completed
                                                 </Badge>
                                             )}
                                         </>

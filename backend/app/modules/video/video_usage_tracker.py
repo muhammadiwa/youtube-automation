@@ -141,27 +141,59 @@ class VideoUsageTracker:
 
     async def log_streaming_end(
         self,
-        log_id: UUID,
-        duration: int,
+        log_id: UUID = None,
+        video_id: UUID = None,
+        stream_job_id: UUID = None,
+        duration: int = 0,
         viewer_count: int = 0
     ) -> VideoUsageLog:
         """Log streaming session end.
         
         Args:
-            log_id: Usage log identifier
+            log_id: Usage log identifier (optional if video_id and stream_job_id provided)
+            video_id: Video identifier (used with stream_job_id to find log)
+            stream_job_id: Stream job identifier (used with video_id to find log)
             duration: Stream duration in seconds
             viewer_count: Total viewer count
             
         Returns:
             VideoUsageLog: Updated usage log
         """
-        # Get usage log
-        query = select(VideoUsageLog).where(VideoUsageLog.id == log_id)
+        # Get usage log - either by log_id or by video_id + stream_job_id
+        if log_id:
+            query = select(VideoUsageLog).where(VideoUsageLog.id == log_id)
+        elif video_id and stream_job_id:
+            # Find the usage log by video_id and stream_job_id in metadata
+            query = select(VideoUsageLog).where(
+                VideoUsageLog.video_id == video_id,
+                VideoUsageLog.usage_type == "live_stream",
+                VideoUsageLog.ended_at.is_(None)
+            ).order_by(VideoUsageLog.started_at.desc())
+        else:
+            raise ValueError("Either log_id or both video_id and stream_job_id must be provided")
+        
         result = await self.db.execute(query)
         usage_log = result.scalar_one_or_none()
         
         if not usage_log:
-            raise ValueError(f"Usage log {log_id} not found")
+            # If no active log found, create a completed one
+            if video_id:
+                usage_log = VideoUsageLog(
+                    video_id=video_id,
+                    usage_type="live_stream",
+                    started_at=datetime.utcnow(),
+                    ended_at=datetime.utcnow(),
+                    usage_metadata={
+                        "stream_job_id": str(stream_job_id) if stream_job_id else None,
+                        "stream_duration": duration,
+                        "viewer_count": viewer_count
+                    }
+                )
+                self.db.add(usage_log)
+                await self.db.commit()
+                await self.db.refresh(usage_log)
+                return usage_log
+            raise ValueError(f"Usage log not found")
         
         # Update usage log
         usage_log.ended_at = datetime.utcnow()
@@ -169,6 +201,8 @@ class VideoUsageTracker:
             usage_log.usage_metadata = {}
         usage_log.usage_metadata["stream_duration"] = duration
         usage_log.usage_metadata["viewer_count"] = viewer_count
+        if stream_job_id:
+            usage_log.usage_metadata["stream_job_id"] = str(stream_job_id)
         
         # Update video statistics
         query = select(Video).where(Video.id == usage_log.video_id)
@@ -185,7 +219,7 @@ class VideoUsageTracker:
                 VideoUsageLog.video_id == video.id,
                 VideoUsageLog.usage_type == "live_stream",
                 VideoUsageLog.ended_at.is_(None),
-                VideoUsageLog.id != log_id
+                VideoUsageLog.id != usage_log.id
             )
             active_result = await self.db.execute(active_query)
             active_count = active_result.scalar() or 0
@@ -262,21 +296,24 @@ class VideoUsageTracker:
     async def get_streaming_history(
         self,
         video_id: UUID,
+        page: int = 1,
         limit: int = 10
     ) -> list[VideoUsageLog]:
         """Get streaming history for video.
         
         Args:
             video_id: Video identifier
+            page: Page number (1-indexed)
             limit: Maximum number of logs to return
             
         Returns:
             list[VideoUsageLog]: Streaming usage logs
         """
+        offset = (page - 1) * limit
         query = select(VideoUsageLog).where(
             VideoUsageLog.video_id == video_id,
             VideoUsageLog.usage_type == "live_stream"
-        ).order_by(VideoUsageLog.started_at.desc()).limit(limit)
+        ).order_by(VideoUsageLog.started_at.desc()).offset(offset).limit(limit)
         
         result = await self.db.execute(query)
         logs = result.scalars().all()

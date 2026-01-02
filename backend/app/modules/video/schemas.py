@@ -124,6 +124,7 @@ class VideoResponse(BaseModel):
     # Streaming usage
     is_used_for_streaming: bool = Field(alias="isUsedForStreaming", serialization_alias="isUsedForStreaming", default=False)
     streaming_count: int = Field(alias="streamingCount", serialization_alias="streamingCount", default=0)
+    total_streaming_duration: int = Field(alias="totalStreamingDuration", serialization_alias="totalStreamingDuration", default=0)
     # Timestamps
     created_at: datetime = Field(alias="createdAt", serialization_alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt", serialization_alias="updatedAt")

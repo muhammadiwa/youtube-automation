@@ -706,7 +706,7 @@ export default function VideoDetailPage() {
                         )}
 
                         {/* Usage History */}
-                        <VideoUsageHistory videoId={videoId} />
+                        <VideoUsageHistory videoId={videoId} onUpdate={loadVideo} />
                     </div>
                 </div>
             </div>
