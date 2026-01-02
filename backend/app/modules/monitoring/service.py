@@ -394,14 +394,19 @@ class MonitoringService:
         return issues
 
     async def get_channel_details(
-        self, account_id: uuid.UUID
+        self, account_id: uuid.UUID, user_id: uuid.UUID
     ) -> Optional[ChannelDetailMetrics]:
         """Get detailed metrics for a channel.
         
         Requirements: 16.4
         """
-        # Get account
-        query = select(YouTubeAccount).where(YouTubeAccount.id == account_id)
+        # Get account and verify ownership
+        query = select(YouTubeAccount).where(
+            and_(
+                YouTubeAccount.id == account_id,
+                YouTubeAccount.user_id == user_id,
+            )
+        )
         result = await self.session.execute(query)
         account = result.scalar_one_or_none()
         

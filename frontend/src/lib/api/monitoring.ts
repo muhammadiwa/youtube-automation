@@ -2,6 +2,50 @@ import apiClient from "./client"
 import type { YouTubeAccount } from "@/types"
 
 // ============ Monitoring Types ============
+
+// Backend response types (snake_case)
+interface BackendChannelGridItem {
+    account_id: string
+    channel_id: string
+    channel_title: string
+    thumbnail_url?: string | null
+    subscriber_count: number
+    video_count: number
+    view_count: number
+    status: "live" | "scheduled" | "offline" | "error" | "token_expired"
+    is_monetized: boolean
+    has_live_streaming_enabled: boolean
+    strike_count: number
+    token_expires_at?: string | null
+    is_token_expired: boolean
+    is_token_expiring_soon: boolean
+    daily_quota_used: number
+    quota_usage_percent: number
+    current_stream_id?: string | null
+    current_stream_title?: string | null
+    current_viewer_count?: number | null
+    stream_started_at?: string | null
+    next_scheduled_stream_id?: string | null
+    next_scheduled_stream_title?: string | null
+    next_scheduled_at?: string | null
+    has_critical_issue: boolean
+    issues: Array<{
+        severity: "critical" | "warning" | "info"
+        message: string
+        detected_at: string
+    }>
+    last_sync_at?: string | null
+    last_error?: string | null
+}
+
+interface BackendChannelGridResponse {
+    channels: BackendChannelGridItem[]
+    total: number
+    filtered_count: number
+    filters_applied: string[]
+}
+
+// Frontend types (camelCase)
 export interface ChannelStatus {
     accountId: string
     account: YouTubeAccount
@@ -54,6 +98,63 @@ export interface LayoutPreferences {
     displayed_metrics: string[]
 }
 
+// Transform backend channel to frontend format
+function transformChannel(channel: BackendChannelGridItem): ChannelStatus {
+    // Determine health status based on issues
+    let healthStatus: "healthy" | "warning" | "critical" | "offline" = "healthy"
+    if (channel.has_critical_issue || channel.is_token_expired || channel.status === "error") {
+        healthStatus = "critical"
+    } else if (channel.is_token_expiring_soon || channel.quota_usage_percent >= 80) {
+        healthStatus = "warning"
+    } else if (channel.status === "offline") {
+        healthStatus = "offline"
+    }
+
+    // Determine token status
+    let tokenStatus: "valid" | "expiring" | "expired" = "valid"
+    if (channel.is_token_expired) {
+        tokenStatus = "expired"
+    } else if (channel.is_token_expiring_soon) {
+        tokenStatus = "expiring"
+    }
+
+    // Map status (token_expired -> error for frontend)
+    const streamStatus = channel.status === "token_expired" ? "error" : channel.status
+
+    return {
+        accountId: channel.account_id,
+        account: {
+            id: channel.account_id,
+            userId: "",
+            channelId: channel.channel_id,
+            channelTitle: channel.channel_title,
+            thumbnailUrl: channel.thumbnail_url || "",
+            subscriberCount: channel.subscriber_count,
+            videoCount: channel.video_count,
+            isMonetized: channel.is_monetized,
+            hasLiveStreamingEnabled: channel.has_live_streaming_enabled,
+            strikeCount: channel.strike_count,
+            tokenExpiresAt: channel.token_expires_at || "",
+            lastSyncAt: channel.last_sync_at || "",
+            status: channel.is_token_expired ? "expired" : (channel.status === "error" ? "error" : "active"),
+            hasStreamKey: false,
+            streamKeyMasked: null,
+            rtmpUrl: null,
+        },
+        streamStatus,
+        currentViewers: channel.current_viewer_count || undefined,
+        currentStreamId: channel.current_stream_id || undefined,
+        currentStreamTitle: channel.current_stream_title || undefined,
+        healthStatus,
+        lastActivity: channel.last_sync_at || undefined,
+        tokenStatus,
+        quotaUsage: channel.daily_quota_used,
+        quotaLimit: 10000,
+        hasActiveAlerts: channel.has_critical_issue || channel.issues.length > 0,
+        alertCount: channel.issues.length,
+    }
+}
+
 export const monitoringApi = {
     /**
      * Get all channel statuses for monitoring grid
@@ -67,13 +168,10 @@ export const monitoringApi = {
                 page: 1,
                 page_size: 50,
             }
-            const response = await apiClient.get<ChannelGridResponse>("/monitoring/channels", params)
+            const response = await apiClient.get<BackendChannelGridResponse>("/monitoring/channels", params)
 
-            if (response && typeof response === 'object' && 'items' in response) {
-                return response.items
-            }
-            if (Array.isArray(response)) {
-                return response
+            if (response && typeof response === 'object' && 'channels' in response) {
+                return response.channels.map(transformChannel)
             }
             return []
         } catch (error) {

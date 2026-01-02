@@ -11,6 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.modules.auth.jwt import get_current_user
+from app.modules.auth.models import User
 from app.modules.monitoring.service import MonitoringService
 from app.modules.monitoring.schemas import (
     ChannelStatusFilter,
@@ -44,6 +46,7 @@ async def get_channel_grid(
     ),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(12, ge=1, le=50, description="Items per page"),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get channel grid with filtering and status indicators.
@@ -55,11 +58,8 @@ async def get_channel_grid(
     """
     service = MonitoringService(db)
     
-    # In production, user_id would come from auth dependency
-    user_id = uuid.uuid4()  # Placeholder
-    
     return await service.get_channel_grid(
-        user_id=user_id,
+        user_id=current_user.id,
         status_filter=status_filter,
         search=search,
         sort_by=sort_by,
@@ -72,6 +72,7 @@ async def get_channel_grid(
 @router.get("/channels/{account_id}", response_model=ChannelDetailMetrics)
 async def get_channel_details(
     account_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get detailed metrics for a specific channel.
@@ -83,7 +84,7 @@ async def get_channel_details(
     """
     service = MonitoringService(db)
     
-    details = await service.get_channel_details(account_id)
+    details = await service.get_channel_details(account_id, current_user.id)
     
     if not details:
         raise HTTPException(
@@ -96,6 +97,7 @@ async def get_channel_details(
 
 @router.get("/preferences", response_model=LayoutPreferencesResponse)
 async def get_layout_preferences(
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get user's monitoring layout preferences.
@@ -106,15 +108,13 @@ async def get_layout_preferences(
     """
     service = MonitoringService(db)
     
-    # In production, user_id would come from auth dependency
-    user_id = uuid.uuid4()  # Placeholder
-    
-    return await service.get_layout_preferences(user_id)
+    return await service.get_layout_preferences(current_user.id)
 
 
 @router.put("/preferences", response_model=LayoutPreferencesResponse)
 async def update_layout_preferences(
     request: LayoutPreferencesUpdate,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Update user's monitoring layout preferences.
@@ -125,9 +125,6 @@ async def update_layout_preferences(
     """
     service = MonitoringService(db)
     
-    # In production, user_id would come from auth dependency
-    user_id = uuid.uuid4()  # Placeholder
-    
     updates = request.model_dump(exclude_unset=True)
     
-    return await service.update_layout_preferences(user_id, updates)
+    return await service.update_layout_preferences(current_user.id, updates)

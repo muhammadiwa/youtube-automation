@@ -55,6 +55,9 @@ const SILENT_ENDPOINTS = [
     "/moderation/commands",
     "/moderation/chatbot",
     "/moderation/logs",
+    // Monitoring endpoints - handled gracefully with empty arrays
+    "/monitoring/channels",
+    "/monitoring/preferences",
     // Jobs endpoints - handled gracefully
     "/jobs",
     "/jobs/queue-stats",
@@ -143,27 +146,13 @@ export function ApiErrorProvider({ children }: { children: React.ReactNode }) {
 
         apiClient.setGlobalErrorHandler(handleGlobalError)
 
-        // Note: Request interceptor runs before URL is built, so we skip request logging
-        // Response and error interceptors have the full URL available
-
-        // Set up response interceptor for logging
-        const removeResponseInterceptor = apiClient.addResponseInterceptor((response, config) => {
-            if (process.env.NODE_ENV === "development") {
-                console.log(`[API Response] ${config.method || "GET"} ${config.url} - ${response.status}`)
-            }
+        // Set up response interceptor (no logging in production)
+        const removeResponseInterceptor = apiClient.addResponseInterceptor((response) => {
             return response
         })
 
         // Set up error interceptor for additional processing
-        const removeErrorInterceptor = apiClient.addErrorInterceptor((error, config) => {
-            // Don't log errors for silent endpoints
-            const isSilent = SILENT_ENDPOINTS.some(endpoint =>
-                config.url?.includes(endpoint)
-            )
-
-            if (process.env.NODE_ENV === "development" && !isSilent) {
-                console.error(`[API Error] ${config.method || "GET"} ${config.url}`, error)
-            }
+        const removeErrorInterceptor = apiClient.addErrorInterceptor((error) => {
             return error
         })
 
