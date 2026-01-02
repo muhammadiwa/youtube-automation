@@ -17,7 +17,6 @@ import {
     Users,
     Settings,
     Zap,
-    Activity,
     Video,
     BarChart3,
     History,
@@ -591,12 +590,6 @@ export default function StreamsPage() {
                                                         >
                                                             <Radio className="mr-2 h-4 w-4" />
                                                             Simulcast
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem
-                                                            onClick={() => router.push(`/dashboard/streams/${event.id}/health`)}
-                                                        >
-                                                            <Activity className="mr-2 h-4 w-4" />
-                                                            Health Monitor
                                                         </DropdownMenuItem>
                                                         <DropdownMenuSeparator />
                                                         <DropdownMenuItem

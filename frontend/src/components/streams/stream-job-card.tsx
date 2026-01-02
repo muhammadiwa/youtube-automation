@@ -10,7 +10,6 @@ import {
     Trash2,
     Edit,
     Settings,
-    Activity,
     Radio,
     Clock,
     RefreshCw,
@@ -357,12 +356,6 @@ export function StreamJobCard({ job, onUpdate }: StreamJobCardProps) {
                                 >
                                     <Settings className="mr-2 h-4 w-4" />
                                     Control Panel
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                    onClick={() => router.push(`/dashboard/streams/${job.id}/health`)}
-                                >
-                                    <Activity className="mr-2 h-4 w-4" />
-                                    Health Monitor
                                 </DropdownMenuItem>
                                 {!isActive && (
                                     <>
