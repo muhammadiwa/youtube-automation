@@ -1,8 +1,8 @@
 @echo off
-REM Script untuk menjalankan Celery worker
+REM Script untuk menjalankan Celery Beat scheduler
 
 echo ========================================
-echo Starting Celery Worker
+echo Starting Celery Beat Scheduler
 echo ========================================
 echo.
 
@@ -16,9 +16,7 @@ if not exist venv (
 REM Activate virtual environment
 call venv\Scripts\activate.bat
 
-echo Starting Celery worker...
+echo Starting Celery Beat...
 echo.
 
-REM Use threads pool for concurrent task execution
-REM solo pool blocks all tasks when one is running
-celery -A app.core.celery_app worker --loglevel=info --pool=threads --concurrency=4
+celery -A app.core.celery_app beat --loglevel=info

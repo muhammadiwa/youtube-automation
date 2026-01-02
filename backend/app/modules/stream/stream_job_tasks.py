@@ -37,6 +37,9 @@ from app.modules.stream.ffmpeg_builder import (
 
 logger = logging.getLogger(__name__)
 
+# Global storage for log file paths (in-memory, per worker)
+log_file_paths: dict[str, str] = {}
+
 
 # ============================================
 # FFmpeg Worker Management Tasks
@@ -116,21 +119,32 @@ async def _start_ffmpeg_worker_async(job_id: str) -> dict:
         
         logger.info(f"FFmpeg command: {' '.join(cmd[:10])}...")
         
-        # Start FFmpeg process
+        # Create log file for FFmpeg output
+        log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "storage", "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file_path = os.path.join(log_dir, f"ffmpeg_{job_id}.log")
+        
+        # Open log file for writing
+        log_file = open(log_file_path, "w")
+        
+        # Start FFmpeg process with stderr redirected to log file
         process = subprocess.Popen(
             cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=log_file,
             stdin=subprocess.DEVNULL,
             # Don't create new process group on Windows
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0,
         )
         
-        # Update job with PID and status
+        # Update job with PID, status
         job.pid = process.pid
         job.status = StreamJobStatus.RUNNING.value
         job.actual_start_at = datetime.utcnow()
         await repo.update(job)
+        
+        # Store log file path for monitoring
+        log_file_paths[str(job.id)] = log_file_path
         
         logger.info(f"FFmpeg process started with PID {process.pid} for job {job_id}")
         
@@ -187,18 +201,22 @@ async def _stop_ffmpeg_worker_async(job_id: str) -> dict:
         
         if job.pid:
             try:
-                # Try graceful termination first (SIGTERM)
                 process = psutil.Process(job.pid)
+                
+                # Try graceful termination first (SIGTERM)
                 process.terminate()
                 
-                # Wait up to 10 seconds for graceful shutdown
+                # Wait up to 3 seconds for graceful shutdown
                 try:
-                    process.wait(timeout=10)
+                    process.wait(timeout=3)
                 except psutil.TimeoutExpired:
                     # Force kill if still running
                     logger.warning(f"FFmpeg process {job.pid} did not terminate gracefully, killing")
                     process.kill()
-                    process.wait(timeout=5)
+                    try:
+                        process.wait(timeout=2)
+                    except psutil.TimeoutExpired:
+                        logger.error(f"FFmpeg process {job.pid} could not be killed")
                 
                 logger.info(f"FFmpeg process {job.pid} terminated for job {job_id}")
                 
@@ -253,7 +271,10 @@ async def _stop_ffmpeg_worker_async(job_id: str) -> dict:
 
 @celery_app.task(bind=True)
 def monitor_ffmpeg_worker(self, job_id: str, pid: int) -> dict:
-    """Monitor FFmpeg worker process and collect metrics.
+    """Initial setup for FFmpeg worker monitoring.
+    
+    This task only does initial setup. Actual monitoring is done by
+    collect_health_metrics periodic task to avoid blocking the worker.
     
     Requirements: 3.4, 3.5, 3.6, 4.1
     
@@ -262,138 +283,35 @@ def monitor_ffmpeg_worker(self, job_id: str, pid: int) -> dict:
         pid: FFmpeg process PID
         
     Returns:
-        dict: Final status
+        dict: Setup status
     """
-    logger.info(f"Starting monitoring for FFmpeg worker {pid} (job {job_id})")
+    logger.info(f"Setting up monitoring for FFmpeg worker {pid} (job {job_id})")
     
-    parser = FFmpegOutputParser()
-    last_metrics: Optional[FFmpegMetrics] = None
-    last_dropped_frames = 0
-    last_time = ""
-    
+    # Just verify the process exists and return
+    # Actual monitoring is done by collect_health_metrics periodic task
     try:
         process = psutil.Process(pid)
-        
-        while True:
-            # Check if process is still running
-            if not process.is_running():
-                logger.info(f"FFmpeg process {pid} has terminated")
-                break
-            
-            # Get process resource usage
-            try:
-                cpu_percent = process.cpu_percent(interval=1)
-                memory_info = process.memory_info()
-                memory_mb = memory_info.rss / (1024 * 1024)
-            except psutil.NoSuchProcess:
-                break
-            
-            # Read stderr for metrics (non-blocking)
-            # Note: In production, use async I/O for better performance
-            try:
-                # Get FFmpeg stderr output
-                # This is a simplified version - in production, use async readers
-                stderr_line = _read_ffmpeg_stderr(pid)
-                if stderr_line:
-                    metrics = parser.parse_line(stderr_line)
-                    if metrics:
-                        last_metrics = metrics
-                        
-                        # Check for loop completion
-                        if last_time and metrics.time:
-                            loop = asyncio.new_event_loop()
-                            asyncio.set_event_loop(loop)
-                            job = loop.run_until_complete(_get_job(job_id))
-                            loop.close()
-                            
-                            if job and parser.detect_loop_completion(
-                                metrics.time, last_time, 0  # TODO: Get video duration
-                            ):
-                                # Increment loop counter
-                                loop = asyncio.new_event_loop()
-                                asyncio.set_event_loop(loop)
-                                loop.run_until_complete(_increment_loop(job_id))
-                                loop.close()
-                        
-                        last_time = metrics.time or last_time
-            except Exception as e:
-                logger.debug(f"Error reading FFmpeg stderr: {e}")
-            
-            # Save health metrics
-            if last_metrics:
-                dropped_delta = last_metrics.frame_count - last_dropped_frames if last_dropped_frames else 0
-                
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(_save_health_metrics(
-                    job_id=job_id,
-                    bitrate=last_metrics.bitrate,
-                    fps=last_metrics.fps,
-                    speed=last_metrics.speed,
-                    dropped_frames=0,  # FFmpeg doesn't report this directly
-                    dropped_frames_delta=max(0, dropped_delta),
-                    frame_count=last_metrics.frame_count,
-                    cpu_percent=cpu_percent,
-                    memory_mb=memory_mb,
-                ))
-                loop.close()
-                
-                # Update job metrics
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(_update_job_metrics(
-                    job_id=job_id,
-                    bitrate=last_metrics.bitrate,
-                    fps=last_metrics.fps,
-                    speed=last_metrics.speed,
-                    frame_count=last_metrics.frame_count,
-                ))
-                loop.close()
-            
-            # Wait before next check
-            time.sleep(10)
-        
-        # Process ended - check exit status
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        job = loop.run_until_complete(_get_job(job_id))
-        loop.close()
-        
-        if job and job.status == StreamJobStatus.RUNNING.value:
-            # Unexpected termination
-            logger.warning(f"FFmpeg process {pid} terminated unexpectedly for job {job_id}")
-            
-            # Check if should auto-restart
-            if job.can_restart():
-                logger.info(f"Auto-restarting job {job_id} (attempt {job.restart_count + 1}/{job.max_restarts})")
-                
-                # Calculate backoff delay
-                delay = min(300, 5 * (2 ** job.restart_count))
-                
-                # Schedule restart
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(_increment_restart_count(job_id))
-                loop.close()
-                
-                restart_ffmpeg_worker.apply_async(args=[job_id], countdown=delay)
-            else:
-                # Mark as failed
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(_update_job_status(
-                    job_id, StreamJobStatus.FAILED, "FFmpeg process terminated unexpectedly"
-                ))
-                loop.close()
-        
-        return {"status": "monitoring_ended", "job_id": job_id}
-        
+        if process.is_running():
+            logger.info(f"FFmpeg process {pid} is running, monitoring via periodic task")
+            return {
+                "status": "monitoring_setup",
+                "pid": pid,
+                "job_id": job_id,
+            }
+        else:
+            logger.warning(f"FFmpeg process {pid} is not running")
+            return {
+                "status": "process_not_running",
+                "pid": pid,
+                "job_id": job_id,
+            }
     except psutil.NoSuchProcess:
-        logger.info(f"FFmpeg process {pid} no longer exists")
-        return {"status": "process_not_found", "job_id": job_id}
-    except Exception as e:
-        logger.error(f"Error monitoring FFmpeg worker {pid}: {e}")
-        raise
+        logger.warning(f"FFmpeg process {pid} not found")
+        return {
+            "status": "process_not_found",
+            "pid": pid,
+            "job_id": job_id,
+        }
 
 
 @celery_app.task(bind=True, max_retries=3)
@@ -522,6 +440,8 @@ def collect_health_metrics() -> dict:
 async def _collect_health_metrics_async() -> dict:
     """Async implementation of health metrics collection.
     
+    Also handles process termination detection and auto-restart.
+    
     Returns:
         dict: Number of streams checked
     """
@@ -533,37 +453,77 @@ async def _collect_health_metrics_async() -> dict:
         
         # Get all active jobs
         active_jobs = await repo.get_active_jobs()
+        logger.info(f"Found {len(active_jobs)} active stream jobs to check")
         
         for job in active_jobs:
-            if job.pid:
-                try:
-                    process = psutil.Process(job.pid)
+            try:
+                cpu_percent = 0.0
+                memory_mb = 0.0
+                process_running = False
+                
+                if job.pid:
+                    try:
+                        process = psutil.Process(job.pid)
+                        
+                        if process.is_running():
+                            process_running = True
+                            cpu_percent = process.cpu_percent(interval=0.1)
+                            memory_info = process.memory_info()
+                            memory_mb = memory_info.rss / (1024 * 1024)
+                        else:
+                            logger.warning(f"Process {job.pid} for job {job.id} is not running")
+                            
+                    except psutil.NoSuchProcess:
+                        logger.warning(f"Process {job.pid} not found for job {job.id}")
+                else:
+                    logger.warning(f"Job {job.id} has no PID but status is {job.status}")
+                
+                # Handle process termination for running jobs
+                if job.status == StreamJobStatus.RUNNING.value and not process_running:
+                    logger.warning(f"FFmpeg process terminated unexpectedly for job {job.id}")
                     
-                    if process.is_running():
-                        cpu_percent = process.cpu_percent(interval=0.1)
-                        memory_info = process.memory_info()
-                        memory_mb = memory_info.rss / (1024 * 1024)
+                    # Check if should auto-restart
+                    if job.can_restart():
+                        logger.info(f"Auto-restarting job {job.id} (attempt {job.restart_count + 1}/{job.max_restarts})")
                         
-                        # Create health record
-                        health = StreamJobHealth(
-                            stream_job_id=job.id,
-                            bitrate=job.current_bitrate or 0,
-                            fps=job.current_fps,
-                            speed=job.current_speed,
-                            dropped_frames=job.dropped_frames,
-                            dropped_frames_delta=0,
-                            frame_count=job.frame_count,
-                            cpu_percent=cpu_percent,
-                            memory_mb=memory_mb,
-                        )
+                        # Calculate backoff delay
+                        delay = min(300, 5 * (2 ** job.restart_count))
                         
-                        await health_repo.create(health)
-                        checked_count += 1
+                        # Increment restart count
+                        await repo.increment_restart_count(str(job.id))
                         
-                except psutil.NoSuchProcess:
-                    logger.warning(f"Process {job.pid} not found for job {job.id}")
-                except Exception as e:
-                    logger.error(f"Error collecting metrics for job {job.id}: {e}")
+                        # Schedule restart
+                        restart_ffmpeg_worker.apply_async(args=[str(job.id)], countdown=delay)
+                    else:
+                        # Mark as failed
+                        await repo.update_status(str(job.id), StreamJobStatus.FAILED, "FFmpeg process terminated unexpectedly")
+                    
+                    continue  # Skip health record for terminated process
+                
+                # Create health record for running processes
+                if process_running:
+                    health = StreamJobHealth(
+                        stream_job_id=job.id,
+                        bitrate=job.current_bitrate or 0,
+                        fps=job.current_fps,
+                        speed=job.current_speed,
+                        dropped_frames=job.dropped_frames,
+                        dropped_frames_delta=0,
+                        frame_count=job.frame_count,
+                        cpu_percent=cpu_percent,
+                        memory_mb=memory_mb,
+                    )
+                    
+                    await health_repo.create(health)
+                    checked_count += 1
+                    logger.debug(f"Saved health metrics for job {job.id}: CPU={cpu_percent:.1f}%, Memory={memory_mb:.1f}MB")
+                        
+            except Exception as e:
+                logger.error(f"Error collecting metrics for job {job.id}: {e}")
+    
+    return {"checked": checked_count}
+    
+    return {"checked": checked_count}
     
     return {"checked": checked_count}
 
@@ -573,20 +533,17 @@ async def _collect_health_metrics_async() -> dict:
 # ============================================
 
 
-def _read_ffmpeg_stderr(pid: int) -> Optional[str]:
-    """Read FFmpeg stderr output (simplified version).
-    
-    In production, use async I/O with proper buffering.
+def _get_ffmpeg_log_path(job_id: str) -> str:
+    """Get FFmpeg log file path for a job.
     
     Args:
-        pid: FFmpeg process PID
+        job_id: Stream job UUID string
         
     Returns:
-        Optional[str]: Latest stderr line or None
+        str: Path to log file
     """
-    # This is a placeholder - in production, implement proper stderr reading
-    # using async subprocess or file-based logging
-    return None
+    log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "storage", "logs")
+    return os.path.join(log_dir, f"ffmpeg_{job_id}.log")
 
 
 async def _get_job(job_id: str) -> Optional[StreamJob]:

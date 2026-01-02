@@ -208,10 +208,11 @@ export function StreamJobControlPanel({ job, onUpdate }: StreamJobControlPanelPr
         }
     }, [connectWebSocket])
 
-    // Load initial health data
+    // Load initial health data and poll periodically
     useEffect(() => {
+        if (currentJob.status !== "running") return
+
         const loadHealth = async () => {
-            if (currentJob.status !== "running") return
             try {
                 const latestHealth = await streamJobsApi.getHealthLatest(currentJob.id)
                 setHealth(latestHealth)
@@ -219,8 +220,53 @@ export function StreamJobControlPanel({ job, onUpdate }: StreamJobControlPanelPr
                 // Health data may not exist yet
             }
         }
+
+        // Load immediately
         loadHealth()
-    }, [currentJob.id, currentJob.status])
+
+        // Poll every 10 seconds as fallback if WebSocket is not connected
+        const interval = setInterval(() => {
+            if (!wsConnected) {
+                loadHealth()
+            }
+        }, 10000)
+
+        return () => clearInterval(interval)
+    }, [currentJob.id, currentJob.status, wsConnected])
+
+    // Poll for status updates when stopping or starting
+    useEffect(() => {
+        if (currentJob.status !== "stopping" && currentJob.status !== "starting") {
+            return
+        }
+
+        const pollStatus = async () => {
+            try {
+                const updated = await streamJobsApi.getStreamJob(currentJob.id)
+                if (updated.status !== currentJob.status) {
+                    setCurrentJob(updated)
+                    setLoading(false)
+
+                    // Show toast based on new status
+                    if (updated.status === "stopped") {
+                        addToast({ type: "success", title: "Stopped", description: "Stream stopped successfully" })
+                    } else if (updated.status === "running") {
+                        addToast({ type: "success", title: "Started", description: "Stream is now live" })
+                    } else if (updated.status === "failed") {
+                        addToast({ type: "error", title: "Failed", description: updated.lastError || "Stream failed to start" })
+                    }
+
+                    onUpdate?.()
+                }
+            } catch {
+                // Ignore errors during polling
+            }
+        }
+
+        // Poll every 1 second for faster feedback
+        const interval = setInterval(pollStatus, 1000)
+        return () => clearInterval(interval)
+    }, [currentJob.id, currentJob.status, onUpdate, addToast])
 
     // Actions
     const handleStart = async () => {
@@ -247,8 +293,8 @@ export function StreamJobControlPanel({ job, onUpdate }: StreamJobControlPanelPr
             setLoading(true)
             const updated = await streamJobsApi.stopStreamJob(currentJob.id)
             setCurrentJob(updated)
-            addToast({ type: "success", title: "Stopped", description: "Stream stopped successfully" })
-            onUpdate?.()
+            // Don't show success toast yet - wait for polling to confirm stopped status
+            // Toast will be shown when status changes from "stopping" to "stopped"
         } catch (error: unknown) {
             const err = error as { message?: string; detail?: string }
             addToast({
@@ -256,9 +302,9 @@ export function StreamJobControlPanel({ job, onUpdate }: StreamJobControlPanelPr
                 title: "Error",
                 description: err.detail || err.message || "Failed to stop stream",
             })
-        } finally {
             setLoading(false)
         }
+        // Don't set loading to false here - let polling handle it
     }
 
     const handleRestart = async () => {
@@ -747,9 +793,9 @@ export function StreamJobControlPanel({ job, onUpdate }: StreamJobControlPanelPr
                                     <p className="font-medium capitalize">{currentJob.loopMode}</p>
                                 </div>
                                 <div>
-                                    <p className="text-sm text-muted-foreground">Video Path</p>
-                                    <p className="font-medium truncate text-sm" title={currentJob.videoPath}>
-                                        {currentJob.videoPath.split("/").pop()}
+                                    <p className="text-sm text-muted-foreground">Auto-Restart</p>
+                                    <p className="font-medium">
+                                        {currentJob.enableAutoRestart ? "Enabled" : "Disabled"}
                                     </p>
                                 </div>
                             </div>
