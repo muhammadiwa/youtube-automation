@@ -58,6 +58,10 @@ const SILENT_ENDPOINTS = [
     // Monitoring endpoints - handled gracefully with empty arrays
     "/monitoring/channels",
     "/monitoring/preferences",
+    // Stream job endpoints - handled gracefully with fallback data
+    "/stream-jobs/history",
+    "/stream-jobs/analytics",
+    "/stream-jobs/export",
     // Jobs endpoints - handled gracefully
     "/jobs",
     "/jobs/queue-stats",

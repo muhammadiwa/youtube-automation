@@ -11,12 +11,14 @@ import {
     AlertTriangle,
     CheckCircle,
     XCircle,
-    Filter,
     Calendar,
+    Play,
+    ExternalLink,
+    Loader2,
 } from "lucide-react"
 import { DashboardLayout } from "@/components/dashboard"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -94,7 +96,6 @@ async function getStreamHistory(days: number, page: number, pageSize: number): P
 }
 
 async function exportStreamData(days: number): Promise<void> {
-    // For file download, we need to use fetch with auth token
     const token = localStorage.getItem("auth_access_token")
     const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
 
@@ -120,13 +121,18 @@ async function exportStreamData(days: number): Promise<void> {
 }
 
 function formatDuration(seconds: number): string {
+    if (!seconds || seconds === 0) return "0m"
     const hours = Math.floor(seconds / 3600)
     const minutes = Math.floor((seconds % 3600) / 60)
+    const secs = seconds % 60
 
     if (hours > 0) {
         return `${hours}h ${minutes}m`
     }
-    return `${minutes}m`
+    if (minutes > 0) {
+        return `${minutes}m ${secs}s`
+    }
+    return `${secs}s`
 }
 
 function formatDate(dateString: string): string {
@@ -144,27 +150,63 @@ function StatusBadge({ status }: { status: string }) {
     switch (status) {
         case "completed":
             return (
-                <Badge variant="outline" className="text-green-600 border-green-600">
+                <Badge className="bg-green-500/10 text-green-600 border-green-500/20 hover:bg-green-500/20">
                     <CheckCircle className="mr-1 h-3 w-3" />
                     Completed
                 </Badge>
             )
         case "stopped":
             return (
-                <Badge variant="secondary">
+                <Badge variant="secondary" className="bg-gray-500/10 text-gray-600 border-gray-500/20">
+                    <XCircle className="mr-1 h-3 w-3" />
                     Stopped
                 </Badge>
             )
         case "failed":
             return (
-                <Badge variant="destructive">
-                    <XCircle className="mr-1 h-3 w-3" />
+                <Badge className="bg-red-500/10 text-red-600 border-red-500/20 hover:bg-red-500/20">
+                    <AlertTriangle className="mr-1 h-3 w-3" />
                     Failed
                 </Badge>
             )
         default:
             return <Badge variant="outline">{status}</Badge>
     }
+}
+
+function StatCard({
+    title,
+    value,
+    icon: Icon,
+    color = "primary",
+}: {
+    title: string
+    value: string | number
+    icon: React.ElementType
+    color?: "primary" | "green" | "blue" | "orange"
+}) {
+    const colorClasses = {
+        primary: "bg-primary/10 text-primary",
+        green: "bg-green-500/10 text-green-500",
+        blue: "bg-blue-500/10 text-blue-500",
+        orange: "bg-orange-500/10 text-orange-500",
+    }
+
+    return (
+        <Card className="border-0 shadow-lg hover:shadow-xl transition-shadow">
+            <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <p className="text-sm text-muted-foreground">{title}</p>
+                        <p className="text-2xl font-bold mt-1">{value}</p>
+                    </div>
+                    <div className={`h-12 w-12 rounded-full flex items-center justify-center ${colorClasses[color]}`}>
+                        <Icon className="h-6 w-6" />
+                    </div>
+                </div>
+            </CardContent>
+        </Card>
+    )
 }
 
 export default function StreamHistoryPage() {
@@ -223,6 +265,9 @@ export default function StreamHistoryPage() {
     }
 
     const totalPages = Math.ceil(total / pageSize)
+    const totalDuration = history.reduce((sum, h) => sum + h.totalDurationSeconds, 0)
+    const totalLoops = history.reduce((sum, h) => sum + h.totalLoops, 0)
+    const totalDroppedFrames = history.reduce((sum, h) => sum + h.totalDroppedFrames, 0)
 
     return (
         <DashboardLayout
@@ -245,7 +290,7 @@ export default function StreamHistoryPage() {
                         </p>
                     </div>
                     <div className="flex items-center gap-4">
-                        <Select value={days.toString()} onValueChange={(v) => setDays(parseInt(v))}>
+                        <Select value={days.toString()} onValueChange={(v) => { setDays(parseInt(v)); setPage(1); }}>
                             <SelectTrigger className="w-[150px]">
                                 <Calendar className="mr-2 h-4 w-4" />
                                 <SelectValue />
@@ -258,7 +303,11 @@ export default function StreamHistoryPage() {
                             </SelectContent>
                         </Select>
                         <Button onClick={handleExport} disabled={exporting} variant="outline">
-                            <Download className="mr-2 h-4 w-4" />
+                            {exporting ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                                <Download className="mr-2 h-4 w-4" />
+                            )}
                             {exporting ? "Exporting..." : "Export CSV"}
                         </Button>
                     </div>
@@ -266,111 +315,125 @@ export default function StreamHistoryPage() {
 
                 {/* Summary Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <Card className="border-0 shadow-lg">
-                        <CardContent className="pt-6">
-                            <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                                <Activity className="h-4 w-4" />
-                                Total Streams
-                            </div>
-                            <p className="text-2xl font-bold">{total}</p>
-                        </CardContent>
-                    </Card>
-                    <Card className="border-0 shadow-lg">
-                        <CardContent className="pt-6">
-                            <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                                <Clock className="h-4 w-4" />
-                                Total Duration
-                            </div>
-                            <p className="text-2xl font-bold">
-                                {formatDuration(history.reduce((sum, h) => sum + h.totalDurationSeconds, 0))}
-                            </p>
-                        </CardContent>
-                    </Card>
-                    <Card className="border-0 shadow-lg">
-                        <CardContent className="pt-6">
-                            <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                                <Repeat className="h-4 w-4" />
-                                Total Loops
-                            </div>
-                            <p className="text-2xl font-bold">
-                                {history.reduce((sum, h) => sum + h.totalLoops, 0)}
-                            </p>
-                        </CardContent>
-                    </Card>
-                    <Card className="border-0 shadow-lg">
-                        <CardContent className="pt-6">
-                            <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                                <AlertTriangle className="h-4 w-4" />
-                                Dropped Frames
-                            </div>
-                            <p className="text-2xl font-bold">
-                                {history.reduce((sum, h) => sum + h.totalDroppedFrames, 0).toLocaleString()}
-                            </p>
-                        </CardContent>
-                    </Card>
+                    <StatCard
+                        title="Total Streams"
+                        value={total}
+                        icon={Activity}
+                        color="primary"
+                    />
+                    <StatCard
+                        title="Total Duration"
+                        value={formatDuration(totalDuration)}
+                        icon={Clock}
+                        color="blue"
+                    />
+                    <StatCard
+                        title="Total Loops"
+                        value={totalLoops.toLocaleString()}
+                        icon={Repeat}
+                        color="green"
+                    />
+                    <StatCard
+                        title="Dropped Frames"
+                        value={totalDroppedFrames.toLocaleString()}
+                        icon={AlertTriangle}
+                        color="orange"
+                    />
                 </div>
 
                 {/* History Table */}
                 <Card className="border-0 shadow-lg">
                     <CardHeader>
                         <CardTitle>Stream Sessions</CardTitle>
+                        <CardDescription>
+                            Click on a row to view stream details
+                        </CardDescription>
                     </CardHeader>
                     <CardContent>
                         {loading ? (
                             <div className="space-y-4">
                                 {[...Array(5)].map((_, i) => (
-                                    <Skeleton key={i} className="h-12 w-full" />
+                                    <Skeleton key={i} className="h-14 w-full" />
                                 ))}
                             </div>
                         ) : history.length === 0 ? (
-                            <div className="text-center py-12 text-muted-foreground">
-                                <History className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                                <p>No stream history found</p>
+                            <div className="text-center py-16 text-muted-foreground">
+                                <History className="h-16 w-16 mx-auto mb-4 opacity-30" />
+                                <p className="text-lg font-medium">No stream history found</p>
+                                <p className="text-sm mt-2">
+                                    Start streaming to see your history here
+                                </p>
+                                <Button
+                                    className="mt-4"
+                                    onClick={() => router.push("/dashboard/streams/create-video-live")}
+                                >
+                                    <Play className="mr-2 h-4 w-4" />
+                                    Create Stream
+                                </Button>
                             </div>
                         ) : (
                             <>
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead>Title</TableHead>
-                                            <TableHead>Status</TableHead>
-                                            <TableHead>Duration</TableHead>
-                                            <TableHead>Loops</TableHead>
-                                            <TableHead>Resolution</TableHead>
-                                            <TableHead>Avg Bitrate</TableHead>
-                                            <TableHead>Started</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {history.map((item) => (
-                                            <TableRow
-                                                key={item.id}
-                                                className="cursor-pointer hover:bg-muted/50"
-                                                onClick={() => router.push(`/dashboard/streams/${item.id}/control`)}
-                                            >
-                                                <TableCell className="font-medium">{item.title}</TableCell>
-                                                <TableCell>
-                                                    <StatusBadge status={item.status} />
-                                                </TableCell>
-                                                <TableCell>{formatDuration(item.totalDurationSeconds)}</TableCell>
-                                                <TableCell>{item.totalLoops}</TableCell>
-                                                <TableCell>{item.resolution}</TableCell>
-                                                <TableCell>
-                                                    {item.avgBitrateKbps
-                                                        ? `${item.avgBitrateKbps.toFixed(0)} kbps`
-                                                        : "—"}
-                                                </TableCell>
-                                                <TableCell>
-                                                    {item.actualStartAt ? formatDate(item.actualStartAt) : "—"}
-                                                </TableCell>
+                                <div className="rounded-lg border overflow-hidden">
+                                    <Table>
+                                        <TableHeader>
+                                            <TableRow className="bg-muted/50">
+                                                <TableHead className="font-semibold">Title</TableHead>
+                                                <TableHead className="font-semibold">Status</TableHead>
+                                                <TableHead className="font-semibold">Duration</TableHead>
+                                                <TableHead className="font-semibold">Loops</TableHead>
+                                                <TableHead className="font-semibold">Resolution</TableHead>
+                                                <TableHead className="font-semibold">Avg Bitrate</TableHead>
+                                                <TableHead className="font-semibold">Started</TableHead>
+                                                <TableHead className="font-semibold w-[50px]"></TableHead>
                                             </TableRow>
-                                        ))}
-                                    </TableBody>
-                                </Table>
+                                        </TableHeader>
+                                        <TableBody>
+                                            {history.map((item) => (
+                                                <TableRow
+                                                    key={item.id}
+                                                    className="cursor-pointer hover:bg-muted/50 transition-colors"
+                                                    onClick={() => router.push(`/dashboard/streams/${item.id}/control`)}
+                                                >
+                                                    <TableCell className="font-medium max-w-[200px] truncate">
+                                                        {item.title}
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <StatusBadge status={item.status} />
+                                                    </TableCell>
+                                                    <TableCell className="font-mono text-sm">
+                                                        {formatDuration(item.totalDurationSeconds)}
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <span className="inline-flex items-center gap-1">
+                                                            <Repeat className="h-3 w-3 text-muted-foreground" />
+                                                            {item.totalLoops}
+                                                        </span>
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <Badge variant="outline" className="font-mono">
+                                                            {item.resolution}
+                                                        </Badge>
+                                                    </TableCell>
+                                                    <TableCell className="font-mono text-sm">
+                                                        {item.avgBitrateKbps
+                                                            ? `${item.avgBitrateKbps.toFixed(0)} kbps`
+                                                            : "—"}
+                                                    </TableCell>
+                                                    <TableCell className="text-sm text-muted-foreground">
+                                                        {item.actualStartAt ? formatDate(item.actualStartAt) : "—"}
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <ExternalLink className="h-4 w-4 text-muted-foreground" />
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))}
+                                        </TableBody>
+                                    </Table>
+                                </div>
 
                                 {/* Pagination */}
                                 {totalPages > 1 && (
-                                    <div className="flex items-center justify-between mt-4">
+                                    <div className="flex items-center justify-between mt-6">
                                         <p className="text-sm text-muted-foreground">
                                             Showing {(page - 1) * pageSize + 1} to{" "}
                                             {Math.min(page * pageSize, total)} of {total} streams
@@ -384,6 +447,31 @@ export default function StreamHistoryPage() {
                                             >
                                                 Previous
                                             </Button>
+                                            <div className="flex items-center gap-1">
+                                                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                                                    let pageNum: number
+                                                    if (totalPages <= 5) {
+                                                        pageNum = i + 1
+                                                    } else if (page <= 3) {
+                                                        pageNum = i + 1
+                                                    } else if (page >= totalPages - 2) {
+                                                        pageNum = totalPages - 4 + i
+                                                    } else {
+                                                        pageNum = page - 2 + i
+                                                    }
+                                                    return (
+                                                        <Button
+                                                            key={pageNum}
+                                                            variant={page === pageNum ? "default" : "outline"}
+                                                            size="sm"
+                                                            className="w-8 h-8 p-0"
+                                                            onClick={() => setPage(pageNum)}
+                                                        >
+                                                            {pageNum}
+                                                        </Button>
+                                                    )
+                                                })}
+                                            </div>
                                             <Button
                                                 variant="outline"
                                                 size="sm"
