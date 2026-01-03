@@ -454,11 +454,13 @@ async def _collect_health_metrics_async() -> dict:
     """Async implementation of health metrics collection.
     
     Also handles process termination detection and auto-restart.
+    Parses FFmpeg log files to extract real-time metrics.
     
     Returns:
         dict: Number of streams checked
     """
     checked_count = 0
+    parser = FFmpegOutputParser()
     
     async with celery_session_maker() as session:
         repo = StreamJobRepository(session)
@@ -466,13 +468,19 @@ async def _collect_health_metrics_async() -> dict:
         
         # Get all active jobs
         active_jobs = await repo.get_active_jobs()
-        logger.info(f"Found {len(active_jobs)} active stream jobs to check")
+        logger.debug(f"Found {len(active_jobs)} active stream jobs to check")
         
         for job in active_jobs:
             try:
                 cpu_percent = 0.0
                 memory_mb = 0.0
                 process_running = False
+                
+                # Parse FFmpeg metrics from log file
+                bitrate = 0
+                fps = None
+                speed = None
+                frame_count = 0
                 
                 if job.pid:
                     try:
@@ -483,6 +491,24 @@ async def _collect_health_metrics_async() -> dict:
                             cpu_percent = process.cpu_percent(interval=0.1)
                             memory_info = process.memory_info()
                             memory_mb = memory_info.rss / (1024 * 1024)
+                            
+                            # Parse FFmpeg log for metrics
+                            log_path = _get_ffmpeg_log_path(str(job.id))
+                            metrics = _parse_ffmpeg_log_tail(log_path, parser)
+                            if metrics:
+                                bitrate = metrics.bitrate
+                                fps = metrics.fps
+                                speed = metrics.speed
+                                frame_count = metrics.frame_count
+                                
+                                # Update job with latest metrics
+                                await repo.update_metrics(
+                                    job_id=str(job.id),
+                                    bitrate=bitrate,
+                                    fps=fps,
+                                    speed=speed,
+                                    frame_count=frame_count,
+                                )
                         else:
                             logger.warning(f"Process {job.pid} for job {job.id} is not running")
                             
@@ -517,24 +543,66 @@ async def _collect_health_metrics_async() -> dict:
                 if process_running:
                     health = StreamJobHealth(
                         stream_job_id=job.id,
-                        bitrate=job.current_bitrate or 0,
-                        fps=job.current_fps,
-                        speed=job.current_speed,
+                        bitrate=bitrate,
+                        fps=fps,
+                        speed=speed,
                         dropped_frames=job.dropped_frames,
                         dropped_frames_delta=0,
-                        frame_count=job.frame_count,
+                        frame_count=frame_count,
                         cpu_percent=cpu_percent,
                         memory_mb=memory_mb,
                     )
                     
                     await health_repo.create(health)
                     checked_count += 1
-                    logger.debug(f"Saved health metrics for job {job.id}: CPU={cpu_percent:.1f}%, Memory={memory_mb:.1f}MB")
+                    logger.debug(f"Saved health metrics for job {job.id}: bitrate={bitrate}, fps={fps}, CPU={cpu_percent:.1f}%")
                         
             except Exception as e:
                 logger.error(f"Error collecting metrics for job {job.id}: {e}")
     
     return {"checked": checked_count}
+
+
+def _parse_ffmpeg_log_tail(log_path: str, parser: FFmpegOutputParser, lines: int = 50) -> Optional[FFmpegMetrics]:
+    """Parse the last N lines of FFmpeg log file for metrics.
+    
+    Args:
+        log_path: Path to FFmpeg log file
+        parser: FFmpegOutputParser instance
+        lines: Number of lines to read from end
+        
+    Returns:
+        Optional[FFmpegMetrics]: Latest metrics or None
+    """
+    try:
+        if not os.path.exists(log_path):
+            return None
+        
+        # Read last N lines efficiently
+        with open(log_path, 'rb') as f:
+            # Seek to end
+            f.seek(0, 2)
+            file_size = f.tell()
+            
+            # Read last chunk (estimate ~200 bytes per line)
+            chunk_size = min(file_size, lines * 200)
+            f.seek(max(0, file_size - chunk_size))
+            
+            content = f.read().decode('utf-8', errors='ignore')
+        
+        # Parse lines from end to find latest metrics
+        log_lines = content.split('\n')
+        
+        for line in reversed(log_lines):
+            metrics = parser.parse_line(line)
+            if metrics:
+                return metrics
+        
+        return None
+        
+    except Exception as e:
+        logger.debug(f"Error parsing FFmpeg log {log_path}: {e}")
+        return None
 
 
 # ============================================

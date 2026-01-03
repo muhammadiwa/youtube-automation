@@ -143,8 +143,11 @@ class StreamJobService:
             VideoNotFoundError: If video file doesn't exist
             AccountNotFoundError: If YouTube account not found
         """
+        # Convert relative path to absolute if needed
+        video_path = self._resolve_video_path(request.video_path)
+        
         # Validate video file exists
-        if not os.path.exists(request.video_path):
+        if not os.path.exists(video_path):
             raise VideoNotFoundError(f"Video file not found: {request.video_path}")
         
         # Validate YouTube account exists
@@ -160,7 +163,7 @@ class StreamJobService:
             user_id=user_id,
             account_id=request.account_id,
             video_id=request.video_id,
-            video_path=request.video_path,
+            video_path=video_path,  # Use resolved absolute path
             playlist_id=request.playlist_id,
             rtmp_url=request.rtmp_url,
             title=request.title,
@@ -479,10 +482,23 @@ class StreamJobService:
         """
         job = await self.get_stream_job(job_id, user_id)
         
-        # If running, stop first
-        if job.is_active():
-            await self.stop_stream_job(job_id, user_id)
-            # Wait for stop to complete (handled by task)
+        # If running or stopping, force stop first
+        if job.is_active() or job.status == StreamJobStatus.STOPPING.value:
+            # Kill process directly if PID exists
+            if job.pid:
+                try:
+                    import psutil
+                    process = psutil.Process(job.pid)
+                    process.kill()
+                    process.wait(timeout=5)
+                except Exception:
+                    pass  # Process may already be dead
+            
+            # Force status to stopped
+            job.status = StreamJobStatus.STOPPED.value
+            job.pid = None
+            job.is_stream_key_locked = False
+            await self.job_repo.update(job)
         
         # Reset restart count for manual restart
         job.restart_count = 0
@@ -730,6 +746,29 @@ class StreamJobService:
             pass
         
         return DEFAULT_PLAN
+
+    def _resolve_video_path(self, video_path: str) -> str:
+        """Resolve video path to absolute path.
+        
+        Converts relative storage paths (like 'videos/xxx/yyy.mp4') to 
+        absolute paths using LOCAL_STORAGE_PATH setting.
+        
+        Args:
+            video_path: Video path (can be relative or absolute)
+            
+        Returns:
+            str: Absolute path to video file
+        """
+        from pathlib import Path
+        from app.core.config import settings
+        
+        # If already absolute, return as-is
+        if os.path.isabs(video_path):
+            return video_path
+        
+        # Convert relative path to absolute using storage base path
+        base_path = Path(settings.LOCAL_STORAGE_PATH)
+        return str((base_path / video_path).resolve())
 
     # ============================================
     # History & Analytics Operations (Requirements: 12.1, 12.2, 12.4, 12.5)
