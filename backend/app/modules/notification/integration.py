@@ -562,36 +562,6 @@ class NotificationIntegrationService:
         except Exception as e:
             logger.error(f"Failed to send comment notification: {e}")
     
-    # ==================== Competitor Notifications ====================
-    
-    async def notify_competitor_update(
-        self,
-        user_id: uuid.UUID,
-        competitor_name: str,
-        update_type: str,
-        details: str,
-    ) -> None:
-        """Notify about competitor activity."""
-        try:
-            await self.notification_service.send_notification(
-                NotificationSendRequest(
-                    user_id=user_id,
-                    event_type="competitor.update",
-                    title="Competitor Update",
-                    message=f"{competitor_name}: {update_type} - {details}",
-                    priority=NotificationPriority.LOW,
-                    payload={
-                        "competitor_name": competitor_name,
-                        "update_type": update_type,
-                        "details": details,
-                        "action_url": "/dashboard/competitors",
-                    },
-                )
-            )
-            logger.info(f"Competitor update notification sent to user {user_id}")
-        except Exception as e:
-            logger.error(f"Failed to send competitor update notification: {e}")
-    
     # ==================== Milestone Notifications ====================
     
     async def notify_subscriber_milestone(

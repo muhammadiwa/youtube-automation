@@ -53,14 +53,6 @@ const defaultFlags: FeatureFlag[] = [
         enabled_for_users: [],
         rollout_percentage: 100,
     },
-    {
-        flag_name: "competitor_analysis",
-        description: "Competitor channel analysis feature",
-        is_enabled: false,
-        enabled_for_plans: ["enterprise"],
-        enabled_for_users: [],
-        rollout_percentage: 0,
-    },
 ]
 
 export default function FeatureFlagsPage() {
@@ -382,8 +374,8 @@ export default function FeatureFlagsPage() {
                                             <div
                                                 key={plan.id}
                                                 className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${editingFlag.enabled_for_plans.includes(plan.id)
-                                                        ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
-                                                        : "border-slate-200 dark:border-slate-700 hover:border-slate-300"
+                                                    ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                                                    : "border-slate-200 dark:border-slate-700 hover:border-slate-300"
                                                     }`}
                                                 onClick={() => togglePlanForFlag(plan.id)}
                                             >

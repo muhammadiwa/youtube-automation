@@ -32,7 +32,6 @@ export type NotificationType =
     | "strike_detected"
     | "strike_resolved"
     | "revenue_alert"
-    | "competitor_update"
     | "comment_received"
     | "subscriber_milestone"
     // System events
@@ -133,7 +132,6 @@ export const notificationsApi = {
                 "strike_detected",
                 "strike_resolved",
                 "revenue_alert",
-                "competitor_update",
                 "comment_received",
                 "subscriber_milestone",
                 // System events

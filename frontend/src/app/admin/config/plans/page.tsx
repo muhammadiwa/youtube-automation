@@ -71,7 +71,6 @@ const AVAILABLE_FEATURES = [
     { slug: "live_streaming", name: "Live Streaming", description: "Stream live to YouTube" },
     { slug: "simulcast", name: "Simulcast", description: "Stream to multiple platforms" },
     { slug: "chat_moderation", name: "Chat Moderation", description: "Moderate live chat" },
-    { slug: "competitor_analysis", name: "Competitor Analysis", description: "Analyze competitor channels" },
     { slug: "api_access", name: "API Access", description: "Access to REST API" },
     { slug: "webhooks", name: "Webhooks", description: "Webhook notifications" },
     { slug: "priority_support", name: "Priority Support", description: "Priority customer support" },
@@ -922,8 +921,8 @@ export default function PlansConfigPage() {
                                                     type="button"
                                                     onClick={() => setNewPlan({ ...newPlan, icon: iconOption.name })}
                                                     className={`p-2 rounded-md border-2 transition-colors ${newPlan.icon === iconOption.name
-                                                            ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
-                                                            : "border-slate-200 dark:border-slate-700 hover:border-slate-300"
+                                                        ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                                                        : "border-slate-200 dark:border-slate-700 hover:border-slate-300"
                                                         }`}
                                                 >
                                                     <IconComp className="h-5 w-5" />
@@ -942,8 +941,8 @@ export default function PlansConfigPage() {
                                                 type="button"
                                                 onClick={() => setNewPlan({ ...newPlan, color: colorOption.name })}
                                                 className={`w-8 h-8 rounded-full ${colorOption.bg} transition-all ${newPlan.color === colorOption.name
-                                                        ? "ring-2 ring-offset-2 ring-blue-500"
-                                                        : "hover:scale-110"
+                                                    ? "ring-2 ring-offset-2 ring-blue-500"
+                                                    : "hover:scale-110"
                                                     }`}
                                                 title={colorOption.label}
                                             />

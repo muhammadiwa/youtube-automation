@@ -1,7 +1,7 @@
 """Strike models migration.
 
 Revision ID: 016
-Revises: 015
+Revises: 014
 Create Date: 2024-01-01 00:00:00.000000
 
 Creates Strike, StrikeAlert, and PausedStream tables.
@@ -14,7 +14,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = "016"
-down_revision = "015"
+down_revision = "014"
 branch_labels = None
 depends_on = None
 
