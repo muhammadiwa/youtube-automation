@@ -229,6 +229,45 @@ export interface StreamJobFilters {
     pageSize?: number
 }
 
+export interface ScheduleItem {
+    date: string  // YYYY-MM-DD
+    startTime: string  // HH:MM
+    endTime?: string  // HH:MM (optional)
+}
+
+export interface BulkCreateStreamJobRequest {
+    accountId: string
+    videoId?: string
+    videoPath: string
+    title: string
+    description?: string
+    rtmpUrl?: string
+    streamKey: string
+    loopMode?: LoopMode
+    loopCount?: number
+    resolution?: Resolution
+    targetBitrate?: number
+    encodingMode?: EncodingMode
+    targetFps?: number
+    enableAutoRestart?: boolean
+    maxRestarts?: number
+    enableChatModeration?: boolean
+    schedules: ScheduleItem[]
+}
+
+export interface BulkCreateStreamJobResponse {
+    totalRequested: number
+    totalCreated: number
+    createdJobs: Array<{
+        id: string
+        title: string
+        scheduledStartAt: string
+        scheduledEndAt: string | null
+        status: string
+    }>
+    errors: string[]
+}
+
 export interface EncoderInfo {
     encoder: string
     isHardware: boolean
@@ -390,6 +429,50 @@ export const streamJobsApi = {
 
         const response = await apiClient.post<Record<string, unknown>>("/stream-jobs", backendData)
         return transformStreamJob(response)
+    },
+
+    /**
+     * Bulk create stream jobs with multiple schedules
+     */
+    async bulkCreateStreamJobs(request: BulkCreateStreamJobRequest): Promise<BulkCreateStreamJobResponse> {
+        const backendData = {
+            account_id: request.accountId,
+            video_id: request.videoId,
+            video_path: request.videoPath,
+            title: request.title,
+            description: request.description,
+            rtmp_url: request.rtmpUrl || "rtmp://a.rtmp.youtube.com/live2",
+            stream_key: request.streamKey,
+            loop_mode: request.loopMode || "infinite",
+            loop_count: request.loopCount,
+            resolution: request.resolution || "1080p",
+            target_bitrate: request.targetBitrate || 6000,
+            encoding_mode: request.encodingMode || "cbr",
+            target_fps: request.targetFps || 30,
+            enable_auto_restart: request.enableAutoRestart ?? true,
+            max_restarts: request.maxRestarts ?? 5,
+            enable_chat_moderation: request.enableChatModeration ?? true,
+            schedules: request.schedules.map(s => ({
+                date: s.date,
+                start_time: s.startTime,
+                end_time: s.endTime,
+            })),
+        }
+
+        const response = await apiClient.post<Record<string, unknown>>("/stream-jobs/bulk", backendData)
+
+        return {
+            totalRequested: response.total_requested as number,
+            totalCreated: response.total_created as number,
+            createdJobs: (response.created_jobs as Array<Record<string, unknown>>).map(job => ({
+                id: job.id as string,
+                title: job.title as string,
+                scheduledStartAt: job.scheduled_start_at as string,
+                scheduledEndAt: job.scheduled_end_at as string | null,
+                status: job.status as string,
+            })),
+            errors: response.errors as string[],
+        }
     },
 
     /**

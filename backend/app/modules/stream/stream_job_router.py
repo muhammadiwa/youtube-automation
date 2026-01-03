@@ -25,6 +25,8 @@ from app.modules.stream.stream_job_schemas import (
     StreamJobHistoryItem,
     StreamJobHistoryResponse,
     StreamAnalyticsSummary,
+    BulkCreateStreamJobRequest,
+    BulkCreateStreamJobResponse,
 )
 from app.modules.stream.stream_job_service import (
     StreamJobService,
@@ -92,6 +94,107 @@ async def create_stream_job(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e),
         )
+
+
+@router.post(
+    "/bulk",
+    response_model=BulkCreateStreamJobResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Bulk create stream jobs",
+    description="Create multiple stream jobs with different schedules at once.",
+)
+async def bulk_create_stream_jobs(
+    request: BulkCreateStreamJobRequest,
+    current_user=Depends(get_current_user),
+    service: StreamJobService = Depends(get_stream_job_service),
+) -> BulkCreateStreamJobResponse:
+    """Bulk create stream jobs with multiple schedules.
+    
+    Creates multiple stream jobs from a single video with different
+    scheduled start/end times. Useful for recurring streams.
+    
+    Args:
+        request: Bulk create request with schedules
+        current_user: Current authenticated user
+        service: Stream job service instance
+        
+    Returns:
+        BulkCreateStreamJobResponse: Results of bulk creation
+    """
+    from datetime import datetime, timezone
+    
+    created_jobs = []
+    errors = []
+    
+    for schedule in request.schedules:
+        try:
+            # Parse date and times
+            date_str = schedule.date
+            start_time_str = schedule.start_time
+            end_time_str = schedule.end_time
+            
+            # Create datetime objects
+            scheduled_start = datetime.strptime(
+                f"{date_str} {start_time_str}", 
+                "%Y-%m-%d %H:%M"
+            ).replace(tzinfo=timezone.utc)
+            
+            scheduled_end = None
+            if end_time_str:
+                scheduled_end = datetime.strptime(
+                    f"{date_str} {end_time_str}",
+                    "%Y-%m-%d %H:%M"
+                ).replace(tzinfo=timezone.utc)
+                
+                # Handle overnight streams (end time is next day)
+                if scheduled_end <= scheduled_start:
+                    from datetime import timedelta
+                    scheduled_end += timedelta(days=1)
+            
+            # Create stream job request
+            job_request = CreateStreamJobRequest(
+                account_id=request.account_id,
+                video_id=request.video_id,
+                video_path=request.video_path,
+                title=f"{request.title} - {date_str}",
+                description=request.description,
+                rtmp_url=request.rtmp_url,
+                stream_key=request.stream_key,
+                loop_mode=request.loop_mode,
+                loop_count=request.loop_count,
+                resolution=request.resolution,
+                target_bitrate=request.target_bitrate,
+                encoding_mode=request.encoding_mode,
+                target_fps=request.target_fps,
+                enable_auto_restart=request.enable_auto_restart,
+                max_restarts=request.max_restarts,
+                enable_chat_moderation=request.enable_chat_moderation,
+                scheduled_start_at=scheduled_start,
+                scheduled_end_at=scheduled_end,
+            )
+            
+            job = await service.create_stream_job(
+                user_id=current_user.id,
+                request=job_request,
+            )
+            
+            created_jobs.append({
+                "id": str(job.id),
+                "title": job.title,
+                "scheduled_start_at": scheduled_start.isoformat(),
+                "scheduled_end_at": scheduled_end.isoformat() if scheduled_end else None,
+                "status": job.status,
+            })
+            
+        except Exception as e:
+            errors.append(f"Failed to create job for {schedule.date}: {str(e)}")
+    
+    return BulkCreateStreamJobResponse(
+        total_requested=len(request.schedules),
+        total_created=len(created_jobs),
+        created_jobs=created_jobs,
+        errors=errors,
+    )
 
 
 @router.get(

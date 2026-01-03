@@ -110,6 +110,57 @@ class CreateStreamJobRequest(StreamJobBase):
     enable_chat_moderation: bool = Field(default=True)
 
 
+class ScheduleItem(BaseModel):
+    """Single schedule item for bulk create."""
+    date: str = Field(..., description="Date in YYYY-MM-DD format")
+    start_time: str = Field(..., description="Start time in HH:MM format")
+    end_time: Optional[str] = Field(None, description="End time in HH:MM format (optional)")
+
+
+class BulkCreateStreamJobRequest(BaseModel):
+    """Schema for bulk creating stream jobs with multiple schedules."""
+    
+    account_id: uuid.UUID
+    video_id: Optional[uuid.UUID] = None
+    video_path: str = Field(..., min_length=1, max_length=1024)
+    
+    # Stream settings
+    title: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    
+    # RTMP settings
+    rtmp_url: str = Field(default="rtmp://a.rtmp.youtube.com/live2", max_length=512)
+    stream_key: str = Field(..., min_length=1)
+    
+    # Loop configuration
+    loop_mode: str = Field(default="infinite")
+    loop_count: Optional[int] = Field(default=None, ge=1)
+    
+    # Output settings
+    resolution: str = Field(default="1080p")
+    target_bitrate: int = Field(default=6000, ge=1000, le=10000)
+    encoding_mode: str = Field(default="cbr")
+    target_fps: int = Field(default=30)
+    
+    # Auto-restart
+    enable_auto_restart: bool = True
+    max_restarts: int = Field(default=5, ge=0, le=10)
+    
+    # Chat moderation
+    enable_chat_moderation: bool = Field(default=True)
+    
+    # Schedules - list of date/time combinations
+    schedules: List[ScheduleItem] = Field(..., min_length=1, max_length=30)
+
+
+class BulkCreateStreamJobResponse(BaseModel):
+    """Response for bulk create stream jobs."""
+    total_requested: int
+    total_created: int
+    created_jobs: List[dict]
+    errors: List[str]
+
+
 class UpdateStreamJobRequest(BaseModel):
     """Schema for updating a stream job."""
     

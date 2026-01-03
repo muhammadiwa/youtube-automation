@@ -14,6 +14,8 @@ import {
     Info,
     Eye,
     EyeOff,
+    Calendar,
+    Trash2,
 } from "lucide-react"
 import { DashboardLayout } from "@/components/dashboard"
 import { Button } from "@/components/ui/button"
@@ -39,10 +41,13 @@ import {
     TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { useToast } from "@/components/ui/toast"
+import { MultiDatePicker } from "@/components/ui/multi-date-picker"
 import { accountsApi } from "@/lib/api/accounts"
 import { videosApi } from "@/lib/api/videos"
-import { streamJobsApi, type CreateStreamJobRequest, type LoopMode, type Resolution, type EncodingMode } from "@/lib/api/stream-jobs"
+import { streamJobsApi, type CreateStreamJobRequest, type LoopMode, type Resolution, type EncodingMode, type ScheduleItem } from "@/lib/api/stream-jobs"
 import type { YouTubeAccount, Video as VideoType } from "@/types"
+
+type ScheduleType = "once" | "multi"
 
 export default function CreateVideoToLivePage() {
     const router = useRouter()
@@ -52,6 +57,11 @@ export default function CreateVideoToLivePage() {
     const [videos, setVideos] = useState<VideoType[]>([])
     const [loadingVideos, setLoadingVideos] = useState(false)
     const [showStreamKey, setShowStreamKey] = useState(false)
+
+    // Multi-schedule state
+    const [scheduleType, setScheduleType] = useState<ScheduleType>("once")
+    const [selectedDates, setSelectedDates] = useState<Date[]>([])
+    const [streamTime, setStreamTime] = useState({ start: "19:00", end: "21:00" })
 
     // Form state
     const [formData, setFormData] = useState({
@@ -179,6 +189,15 @@ export default function CreateVideoToLivePage() {
     // Get selected video details
     const selectedVideo = videos.find((v) => v.id === formData.videoId)
 
+    // Format date for display
+    const formatDateForPreview = (date: Date) => {
+        return date.toLocaleDateString("en-US", {
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+        })
+    }
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
 
@@ -202,9 +221,68 @@ export default function CreateVideoToLivePage() {
             return
         }
 
+        // Validate multi-schedule
+        if (formData.scheduleEnabled && scheduleType === "multi") {
+            if (selectedDates.length === 0) {
+                addToast({ type: "error", title: "Error", description: "Please select at least one date for scheduling" })
+                return
+            }
+            if (!streamTime.start) {
+                addToast({ type: "error", title: "Error", description: "Please set a start time for the streams" })
+                return
+            }
+        }
+
         try {
             setLoading(true)
 
+            // Handle multi-schedule (bulk create)
+            if (formData.scheduleEnabled && scheduleType === "multi" && selectedDates.length > 0) {
+                const schedules: ScheduleItem[] = selectedDates.map(date => ({
+                    date: date.toISOString().split("T")[0], // YYYY-MM-DD
+                    startTime: streamTime.start,
+                    endTime: streamTime.end || undefined,
+                }))
+
+                const result = await streamJobsApi.bulkCreateStreamJobs({
+                    accountId: formData.accountId,
+                    videoId: formData.videoId || undefined,
+                    videoPath: formData.videoPath,
+                    title: formData.title,
+                    description: formData.description || undefined,
+                    rtmpUrl: formData.rtmpUrl,
+                    streamKey: formData.streamKey,
+                    loopMode: formData.loopMode,
+                    loopCount: formData.loopMode === "count" ? formData.loopCount : undefined,
+                    resolution: formData.resolution,
+                    targetBitrate: formData.targetBitrate,
+                    encodingMode: formData.encodingMode,
+                    targetFps: formData.targetFps,
+                    enableAutoRestart: formData.enableAutoRestart,
+                    maxRestarts: formData.maxRestarts,
+                    enableChatModeration: formData.enableChatModeration,
+                    schedules,
+                })
+
+                if (result.errors.length > 0) {
+                    addToast({
+                        type: "warning",
+                        title: "Partial Success",
+                        description: `Created ${result.totalCreated}/${result.totalRequested} streams. Some failed.`,
+                    })
+                } else {
+                    addToast({
+                        type: "success",
+                        title: "Created",
+                        description: `${result.totalCreated} scheduled streams created successfully`,
+                    })
+                }
+
+                router.push("/dashboard/streams")
+                return
+            }
+
+            // Single stream creation
             const request: CreateStreamJobRequest = {
                 accountId: formData.accountId,
                 videoId: formData.videoId || undefined,
@@ -601,48 +679,157 @@ export default function CreateVideoToLivePage() {
                                 Schedule (Optional)
                             </CardTitle>
                             <CardDescription>
-                                Schedule when the stream should start and end
+                                Schedule when the stream should start. Create multiple scheduled streams at once.
                             </CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-4">
                             <div className="flex items-center space-x-2">
                                 <Switch
                                     checked={formData.scheduleEnabled}
-                                    onCheckedChange={(checked) =>
+                                    onCheckedChange={(checked) => {
                                         setFormData((prev) => ({ ...prev, scheduleEnabled: checked }))
-                                    }
+                                        if (!checked) {
+                                            setScheduleType("once")
+                                            setSelectedDates([])
+                                        }
+                                    }}
                                 />
                                 <Label>Enable scheduling</Label>
                             </div>
 
                             {formData.scheduleEnabled && (
-                                <div className="grid gap-4 md:grid-cols-2">
+                                <div className="space-y-4">
+                                    {/* Schedule Type Selection */}
                                     <div className="space-y-2">
-                                        <Label>Start Time</Label>
-                                        <Input
-                                            type="datetime-local"
-                                            value={formData.scheduledStartAt}
-                                            onChange={(e) =>
-                                                setFormData((prev) => ({
-                                                    ...prev,
-                                                    scheduledStartAt: e.target.value,
-                                                }))
-                                            }
-                                        />
+                                        <Label>Schedule Type</Label>
+                                        <RadioGroup
+                                            value={scheduleType}
+                                            onValueChange={(value) => setScheduleType(value as ScheduleType)}
+                                            className="flex gap-4"
+                                        >
+                                            <div className="flex items-center space-x-2">
+                                                <RadioGroupItem value="once" id="once" />
+                                                <Label htmlFor="once">Single Schedule</Label>
+                                            </div>
+                                            <div className="flex items-center space-x-2">
+                                                <RadioGroupItem value="multi" id="multi" />
+                                                <Label htmlFor="multi">Multiple Dates</Label>
+                                            </div>
+                                        </RadioGroup>
                                     </div>
-                                    <div className="space-y-2">
-                                        <Label>End Time (optional)</Label>
-                                        <Input
-                                            type="datetime-local"
-                                            value={formData.scheduledEndAt}
-                                            onChange={(e) =>
-                                                setFormData((prev) => ({
-                                                    ...prev,
-                                                    scheduledEndAt: e.target.value,
-                                                }))
-                                            }
-                                        />
-                                    </div>
+
+                                    {/* Single Schedule */}
+                                    {scheduleType === "once" && (
+                                        <div className="grid gap-4 md:grid-cols-2">
+                                            <div className="space-y-2">
+                                                <Label>Start Time</Label>
+                                                <Input
+                                                    type="datetime-local"
+                                                    value={formData.scheduledStartAt}
+                                                    onChange={(e) =>
+                                                        setFormData((prev) => ({
+                                                            ...prev,
+                                                            scheduledStartAt: e.target.value,
+                                                        }))
+                                                    }
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label>End Time (optional)</Label>
+                                                <Input
+                                                    type="datetime-local"
+                                                    value={formData.scheduledEndAt}
+                                                    onChange={(e) =>
+                                                        setFormData((prev) => ({
+                                                            ...prev,
+                                                            scheduledEndAt: e.target.value,
+                                                        }))
+                                                    }
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Multi-Date Schedule */}
+                                    {scheduleType === "multi" && (
+                                        <div className="space-y-4">
+                                            <div className="grid gap-4 md:grid-cols-2">
+                                                {/* Date Picker */}
+                                                <div className="space-y-2">
+                                                    <Label>Select Dates</Label>
+                                                    <MultiDatePicker
+                                                        selectedDates={selectedDates}
+                                                        onDatesChange={setSelectedDates}
+                                                        minDate={new Date()}
+                                                    />
+                                                </div>
+
+                                                {/* Time Settings */}
+                                                <div className="space-y-4">
+                                                    <div className="space-y-2">
+                                                        <Label>Stream Time (same for all dates)</Label>
+                                                        <div className="grid grid-cols-2 gap-2">
+                                                            <div>
+                                                                <Label className="text-xs text-muted-foreground">Start</Label>
+                                                                <Input
+                                                                    type="time"
+                                                                    value={streamTime.start}
+                                                                    onChange={(e) =>
+                                                                        setStreamTime((prev) => ({ ...prev, start: e.target.value }))
+                                                                    }
+                                                                />
+                                                            </div>
+                                                            <div>
+                                                                <Label className="text-xs text-muted-foreground">End (optional)</Label>
+                                                                <Input
+                                                                    type="time"
+                                                                    value={streamTime.end}
+                                                                    onChange={(e) =>
+                                                                        setStreamTime((prev) => ({ ...prev, end: e.target.value }))
+                                                                    }
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Preview */}
+                                                    {selectedDates.length > 0 && (
+                                                        <div className="space-y-2">
+                                                            <Label>Preview ({selectedDates.length} streams)</Label>
+                                                            <div className="max-h-48 overflow-y-auto rounded-lg border p-3 space-y-2">
+                                                                {selectedDates.map((date, index) => (
+                                                                    <div
+                                                                        key={index}
+                                                                        className="flex items-center justify-between text-sm bg-muted/50 rounded px-2 py-1"
+                                                                    >
+                                                                        <div className="flex items-center gap-2">
+                                                                            <Calendar className="h-3 w-3 text-muted-foreground" />
+                                                                            <span>{formatDateForPreview(date)}</span>
+                                                                            <span className="text-muted-foreground">
+                                                                                {streamTime.start}
+                                                                                {streamTime.end && ` - ${streamTime.end}`}
+                                                                            </span>
+                                                                        </div>
+                                                                        <Button
+                                                                            type="button"
+                                                                            variant="ghost"
+                                                                            size="icon"
+                                                                            className="h-6 w-6"
+                                                                            onClick={() => {
+                                                                                setSelectedDates(selectedDates.filter((_, i) => i !== index))
+                                                                            }}
+                                                                        >
+                                                                            <Trash2 className="h-3 w-3" />
+                                                                        </Button>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </CardContent>
