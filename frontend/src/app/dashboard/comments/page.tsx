@@ -38,7 +38,7 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
-import { moderationApi, type Comment, type CommentsResponse } from "@/lib/api/moderation"
+import { moderationApi, type Comment, type CommentsResponseLegacy } from "@/lib/api/moderation"
 import { accountsApi } from "@/lib/api/accounts"
 import { SentimentBadge, AttentionIndicator } from "@/components/dashboard/sentiment-indicator"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
@@ -47,14 +47,16 @@ import type { YouTubeAccount } from "@/types"
 
 // Status badge component
 function StatusBadge({ status }: { status: Comment["status"] }) {
-    const config = {
-        published: { label: "Published", variant: "default" as const },
-        held: { label: "Held", variant: "secondary" as const },
-        deleted: { label: "Deleted", variant: "destructive" as const },
-        spam: { label: "Spam", variant: "outline" as const },
+    const config: Record<Comment["status"], { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+        pending: { label: "Pending", variant: "secondary" },
+        approved: { label: "Approved", variant: "default" },
+        hidden: { label: "Hidden", variant: "outline" },
+        deleted: { label: "Deleted", variant: "destructive" },
+        replied: { label: "Replied", variant: "default" },
+        spam: { label: "Spam", variant: "outline" },
     }
 
-    const { label, variant } = config[status]
+    const { label, variant } = config[status] || { label: status, variant: "outline" as const }
     return <Badge variant={variant}>{label}</Badge>
 }
 
@@ -117,7 +119,7 @@ export default function CommentsPage() {
             if (sentimentFilter !== "all") params.sentiment = sentimentFilter
             if (statusFilter !== "all") params.status = statusFilter
 
-            const response: CommentsResponse = await moderationApi.getComments(params)
+            const response: CommentsResponseLegacy = await moderationApi.getComments(params)
             setComments(response.items)
             setTotal(response.total)
         } catch (error) {

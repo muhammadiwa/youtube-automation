@@ -419,6 +419,115 @@ class YouTubeLiveStreamingClient:
                     details=error_data,
                 )
 
+    async def list_active_broadcasts(
+        self,
+        broadcast_status: str = "active",
+    ) -> list[dict[str, Any]]:
+        """List broadcasts by status.
+
+        Args:
+            broadcast_status: Filter by status (active, all, completed, upcoming)
+                - active: Currently live broadcasts
+                - upcoming: Scheduled but not started
+                - all: All broadcasts
+                - completed: Finished broadcasts
+
+        Returns:
+            list: List of broadcast resources
+
+        Raises:
+            YouTubeAPIError: If API call fails
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.BASE_URL}/liveBroadcasts",
+                params={
+                    "broadcastStatus": broadcast_status,
+                    "part": "id,snippet,contentDetails,status",
+                    "maxResults": 50,
+                },
+                headers=self.headers,
+                timeout=30.0,
+            )
+
+            if response.status_code != 200:
+                error_data = response.json() if response.content else {}
+                raise YouTubeAPIError(
+                    f"Failed to list broadcasts: {response.status_code}",
+                    status_code=response.status_code,
+                    details=error_data,
+                )
+
+            data = response.json()
+            return data.get("items", [])
+
+    async def find_active_broadcast_by_stream_key(
+        self,
+        stream_key: str,
+    ) -> Optional[dict[str, Any]]:
+        """Find an active broadcast that matches the given stream key.
+
+        This is useful for auto-detecting the broadcast ID when user
+        starts streaming with a stream key.
+
+        Args:
+            stream_key: The RTMP stream key being used
+
+        Returns:
+            dict or None: Broadcast resource if found, None otherwise
+        """
+        try:
+            # First check active (live) broadcasts
+            active_broadcasts = await self.list_active_broadcasts("active")
+            
+            for broadcast in active_broadcasts:
+                # Get the bound stream for this broadcast
+                bound_stream_id = broadcast.get("contentDetails", {}).get("boundStreamId")
+                if bound_stream_id:
+                    try:
+                        stream = await self.get_stream(bound_stream_id)
+                        stream_name = stream.get("cdn", {}).get("ingestionInfo", {}).get("streamName", "")
+                        if stream_name == stream_key:
+                            return broadcast
+                    except YouTubeAPIError:
+                        continue
+            
+            # Also check upcoming broadcasts (might be in testing/preview)
+            upcoming_broadcasts = await self.list_active_broadcasts("upcoming")
+            
+            for broadcast in upcoming_broadcasts:
+                bound_stream_id = broadcast.get("contentDetails", {}).get("boundStreamId")
+                if bound_stream_id:
+                    try:
+                        stream = await self.get_stream(bound_stream_id)
+                        stream_name = stream.get("cdn", {}).get("ingestionInfo", {}).get("streamName", "")
+                        if stream_name == stream_key:
+                            return broadcast
+                    except YouTubeAPIError:
+                        continue
+            
+            return None
+            
+        except YouTubeAPIError:
+            return None
+
+    async def get_any_active_broadcast(self) -> Optional[dict[str, Any]]:
+        """Get any active (live) broadcast for this channel.
+
+        Useful when we just need to find if there's an active broadcast
+        without knowing the specific stream key.
+
+        Returns:
+            dict or None: First active broadcast if found, None otherwise
+        """
+        try:
+            active_broadcasts = await self.list_active_broadcasts("active")
+            if active_broadcasts:
+                return active_broadcasts[0]
+            return None
+        except YouTubeAPIError:
+            return None
+
     @staticmethod
     def extract_rtmp_info(stream_resource: dict) -> tuple[str, str]:
         """Extract RTMP URL and key from stream resource.

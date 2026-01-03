@@ -104,6 +104,10 @@ class CreateStreamJobRequest(StreamJobBase):
     # RTMP settings
     rtmp_url: str = Field(default="rtmp://a.rtmp.youtube.com/live2", max_length=512)
     stream_key: str = Field(..., min_length=1)
+    
+    # YouTube Live Event settings (for chat moderation)
+    youtube_broadcast_id: Optional[str] = Field(default=None, max_length=255)
+    enable_chat_moderation: bool = Field(default=True)
 
 
 class UpdateStreamJobRequest(BaseModel):
@@ -191,6 +195,10 @@ class StreamJobResponse(BaseModel):
     stream_key_masked: Optional[str] = None
     is_stream_key_locked: bool
     
+    # YouTube Live Event settings
+    youtube_broadcast_id: Optional[str] = None
+    enable_chat_moderation: bool = True
+    
     # Metadata
     title: str
     description: Optional[str] = None
@@ -260,6 +268,8 @@ class StreamJobResponse(BaseModel):
             rtmp_url=job.rtmp_url,
             stream_key_masked=job.get_masked_stream_key(),
             is_stream_key_locked=job.is_stream_key_locked,
+            youtube_broadcast_id=job.youtube_broadcast_id,
+            enable_chat_moderation=job.enable_chat_moderation,
             title=job.title,
             description=job.description,
             loop_mode=job.loop_mode,

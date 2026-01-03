@@ -103,19 +103,75 @@ export interface ChatMessage {
 // ============ Comment Types ============
 export interface Comment {
     id: string
-    video_id: string
     account_id: string
-    author_id: string
-    author_name: string
-    author_avatar?: string
-    text: string
+    video_id?: string
+    youtube_comment_id: string
+    youtube_video_id: string
+    youtube_parent_id?: string
+    author_channel_id: string
+    author_display_name: string
+    author_profile_image_url?: string
+    text_original: string
+    text_display: string
     like_count: number
     reply_count: number
-    sentiment: "positive" | "neutral" | "negative"
-    is_reply: boolean
-    parent_id?: string
-    status: "published" | "held" | "deleted" | "spam"
+    status: "pending" | "approved" | "hidden" | "deleted" | "replied" | "spam"
+    is_public: boolean
+    can_reply: boolean
+    sentiment?: "positive" | "neutral" | "negative" | "attention_required"
+    sentiment_score?: number
+    requires_attention: boolean
+    sentiment_analyzed_at?: string
+    auto_replied: boolean
+    auto_reply_rule_id?: string
+    published_at: string
+    updated_at_youtube?: string
+    synced_at: string
     created_at: string
+    updated_at: string
+    // Aliases for frontend compatibility
+    author_name: string  // alias for author_display_name
+    author_avatar?: string  // alias for author_profile_image_url
+    text: string  // alias for text_display
+    is_reply: boolean  // computed from youtube_parent_id
+}
+
+// Transform backend comment to frontend format
+export function transformComment(data: Record<string, unknown>): Comment {
+    return {
+        id: data.id as string,
+        account_id: data.account_id as string,
+        video_id: data.video_id as string | undefined,
+        youtube_comment_id: data.youtube_comment_id as string,
+        youtube_video_id: data.youtube_video_id as string,
+        youtube_parent_id: data.youtube_parent_id as string | undefined,
+        author_channel_id: data.author_channel_id as string,
+        author_display_name: data.author_display_name as string,
+        author_profile_image_url: data.author_profile_image_url as string | undefined,
+        text_original: data.text_original as string,
+        text_display: data.text_display as string,
+        like_count: data.like_count as number,
+        reply_count: data.reply_count as number,
+        status: data.status as Comment["status"],
+        is_public: data.is_public as boolean,
+        can_reply: data.can_reply as boolean,
+        sentiment: data.sentiment as Comment["sentiment"],
+        sentiment_score: data.sentiment_score as number | undefined,
+        requires_attention: data.requires_attention as boolean,
+        sentiment_analyzed_at: data.sentiment_analyzed_at as string | undefined,
+        auto_replied: data.auto_replied as boolean,
+        auto_reply_rule_id: data.auto_reply_rule_id as string | undefined,
+        published_at: data.published_at as string,
+        updated_at_youtube: data.updated_at_youtube as string | undefined,
+        synced_at: data.synced_at as string,
+        created_at: data.created_at as string,
+        updated_at: data.updated_at as string,
+        // Aliases
+        author_name: data.author_display_name as string,
+        author_avatar: data.author_profile_image_url as string | undefined,
+        text: data.text_display as string,
+        is_reply: !!(data.youtube_parent_id),
+    }
 }
 
 export interface CommentReply {
@@ -300,6 +356,15 @@ export interface ModerationLogsResponse {
 }
 
 export interface CommentsResponse {
+    comments: Comment[]
+    total: number
+    page: number
+    page_size: number
+    has_more: boolean
+}
+
+// For backward compatibility
+export interface CommentsResponseLegacy {
     items: Comment[]
     total: number
     page: number
@@ -402,11 +467,20 @@ export const moderationApi = {
         status?: string
         page?: number
         page_size?: number
-    }): Promise<CommentsResponse> {
+    }): Promise<CommentsResponseLegacy> {
         try {
-            // Try moderation endpoint first, fallback to empty response
-            const response = await apiClient.get<CommentsResponse>("/moderation/comments", params)
-            return response
+            // Call the actual comments endpoint
+            const response = await apiClient.get<CommentsResponse>("/comments/inbox", {
+                ...params,
+                // Note: The backend expects user_id but we'll handle auth on backend
+            })
+            // Transform to legacy format for frontend compatibility
+            return {
+                items: response.comments.map(c => transformComment(c as unknown as Record<string, unknown>)),
+                total: response.total,
+                page: response.page,
+                page_size: response.page_size,
+            }
         } catch {
             // Return empty response on error - this is expected if no data
             return { items: [], total: 0, page: 1, page_size: 10 }
@@ -414,23 +488,38 @@ export const moderationApi = {
     },
 
     async replyToComment(commentId: string, text: string): Promise<Comment> {
-        return await apiClient.post(`/moderation/comments/${commentId}/reply`, { text })
+        return await apiClient.post(`/comments/${commentId}/reply`, { text })
     },
 
     async deleteComment(commentId: string): Promise<void> {
-        return await apiClient.delete(`/moderation/comments/${commentId}`)
+        // Use bulk moderation with delete action
+        await apiClient.post("/comments/bulk-moderate", {
+            actions: [{ comment_id: commentId, action: "delete" }]
+        })
     },
 
     async markAsSpam(commentId: string): Promise<Comment> {
-        return await apiClient.post(`/moderation/comments/${commentId}/spam`)
+        // Use bulk moderation with spam action
+        const response = await apiClient.post<{ results: Array<{ comment_id: string }> }>("/comments/bulk-moderate", {
+            actions: [{ comment_id: commentId, action: "spam" }]
+        })
+        // Return the comment (fetch it again)
+        return await apiClient.get(`/comments/${commentId}`)
     },
 
     async approveComment(commentId: string): Promise<Comment> {
-        return await apiClient.post(`/moderation/comments/${commentId}/approve`)
+        // Use bulk moderation with approve action
+        await apiClient.post("/comments/bulk-moderate", {
+            actions: [{ comment_id: commentId, action: "approve" }]
+        })
+        return await apiClient.get(`/comments/${commentId}`)
     },
 
     async bulkModerateComments(commentIds: string[], action: "delete" | "spam" | "approve"): Promise<{ success_count: number }> {
-        return await apiClient.post("/moderation/comments/bulk", { comment_ids: commentIds, action })
+        const response = await apiClient.post<{ successful_count: number }>("/comments/bulk-moderate", {
+            actions: commentIds.map(id => ({ comment_id: id, action }))
+        })
+        return { success_count: response.successful_count }
     },
 
     // ============ Auto Reply Rules ============

@@ -142,6 +142,12 @@ class StreamJob(Base):
         "stream_key", Text, nullable=True
     )  # Encrypted stream key
     is_stream_key_locked: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    # YouTube Live Event ID (for live chat moderation)
+    youtube_broadcast_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, index=True
+    )
+    enable_chat_moderation: Mapped[bool] = mapped_column(Boolean, default=True)
 
     # Job metadata
     title: Mapped[str] = mapped_column(String(255), nullable=False)

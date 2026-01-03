@@ -176,6 +176,8 @@ class StreamJobService:
             enable_auto_restart=request.enable_auto_restart,
             max_restarts=request.max_restarts,
             status=initial_status,
+            youtube_broadcast_id=getattr(request, 'youtube_broadcast_id', None),
+            enable_chat_moderation=getattr(request, 'enable_chat_moderation', True),
         )
         
         # Set encrypted stream key

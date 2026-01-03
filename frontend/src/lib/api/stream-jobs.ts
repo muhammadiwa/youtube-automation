@@ -41,6 +41,10 @@ export interface StreamJob {
     streamKeyMasked: string | null
     isStreamKeyLocked: boolean
 
+    // YouTube Live Event settings (for chat moderation)
+    youtubeBroadcastId: string | null
+    enableChatModeration: boolean
+
     // Metadata
     title: string
     description: string | null
@@ -131,6 +135,10 @@ export interface CreateStreamJobRequest {
     // RTMP settings
     rtmpUrl?: string
     streamKey: string
+
+    // YouTube Live Event settings (for chat moderation)
+    youtubeBroadcastId?: string
+    enableChatModeration?: boolean
 
     // Metadata
     title: string
@@ -255,6 +263,8 @@ function transformStreamJob(data: Record<string, unknown>): StreamJob {
         rtmpUrl: data.rtmp_url as string,
         streamKeyMasked: data.stream_key_masked as string | null,
         isStreamKeyLocked: data.is_stream_key_locked as boolean,
+        youtubeBroadcastId: data.youtube_broadcast_id as string | null,
+        enableChatModeration: (data.enable_chat_moderation as boolean) ?? true,
         title: data.title as string,
         description: data.description as string | null,
         loopMode: data.loop_mode as LoopMode,
@@ -362,6 +372,8 @@ export const streamJobsApi = {
             playlist_id: request.playlistId,
             rtmp_url: request.rtmpUrl || "rtmp://a.rtmp.youtube.com/live2",
             stream_key: request.streamKey,
+            youtube_broadcast_id: request.youtubeBroadcastId,
+            enable_chat_moderation: request.enableChatModeration ?? true,
             title: request.title,
             description: request.description,
             loop_mode: request.loopMode || "none",

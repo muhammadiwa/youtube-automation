@@ -12,6 +12,8 @@ import {
     Repeat,
     Infinity,
     Info,
+    Eye,
+    EyeOff,
 } from "lucide-react"
 import { DashboardLayout } from "@/components/dashboard"
 import { Button } from "@/components/ui/button"
@@ -49,6 +51,7 @@ export default function CreateVideoToLivePage() {
     const [accounts, setAccounts] = useState<YouTubeAccount[]>([])
     const [videos, setVideos] = useState<VideoType[]>([])
     const [loadingVideos, setLoadingVideos] = useState(false)
+    const [showStreamKey, setShowStreamKey] = useState(false)
 
     // Form state
     const [formData, setFormData] = useState({
@@ -72,6 +75,8 @@ export default function CreateVideoToLivePage() {
         // Stream key
         rtmpUrl: "rtmp://a.rtmp.youtube.com/live2",
         streamKey: "",
+        // Chat moderation
+        enableChatModeration: true,
         // Auto-restart
         enableAutoRestart: true,
         maxRestarts: 5,
@@ -84,6 +89,7 @@ export default function CreateVideoToLivePage() {
     useEffect(() => {
         if (formData.accountId) {
             loadVideos(formData.accountId)
+            loadStreamKey(formData.accountId)
         }
     }, [formData.accountId])
 
@@ -107,6 +113,52 @@ export default function CreateVideoToLivePage() {
             console.error("Failed to load videos:", error)
         } finally {
             setLoadingVideos(false)
+        }
+    }
+
+    const loadStreamKey = async (accountId: string) => {
+        try {
+            // First check if account already has stream key info
+            const account = accounts.find((a) => a.id === accountId)
+            if (account?.rtmpUrl) {
+                setFormData((prev) => ({
+                    ...prev,
+                    rtmpUrl: account.rtmpUrl || "rtmp://a.rtmp.youtube.com/live2",
+                }))
+            }
+
+            // Get full stream key status (includes actual key if synced)
+            const status = await accountsApi.getStreamKeyStatus(accountId)
+
+            // Auto-fill RTMP URL
+            if (status.rtmpUrl) {
+                setFormData((prev) => ({
+                    ...prev,
+                    rtmpUrl: status.rtmpUrl || prev.rtmpUrl,
+                }))
+            }
+
+            // Auto-fill stream key if available
+            if (status.streamKey) {
+                setFormData((prev) => ({
+                    ...prev,
+                    streamKey: status.streamKey || "",
+                }))
+                addToast({
+                    type: "success",
+                    title: "Stream Key Loaded",
+                    description: "Stream key auto-filled from your account settings.",
+                })
+            } else if (status.hasStreamKey && status.streamKeyMasked) {
+                // Has key but couldn't decrypt (shouldn't happen normally)
+                addToast({
+                    type: "info",
+                    title: "Stream Key Available",
+                    description: `Stream key found (${status.streamKeyMasked}). Please enter it manually if not auto-filled.`,
+                })
+            }
+        } catch (error) {
+            console.error("Failed to load stream key:", error)
         }
     }
 
@@ -166,6 +218,7 @@ export default function CreateVideoToLivePage() {
                 targetFps: formData.targetFps,
                 rtmpUrl: formData.rtmpUrl,
                 streamKey: formData.streamKey,
+                enableChatModeration: formData.enableChatModeration,
                 scheduledStartAt: formData.scheduleEnabled && formData.scheduledStartAt
                     ? new Date(formData.scheduledStartAt).toISOString()
                     : undefined,
@@ -621,18 +674,52 @@ export default function CreateVideoToLivePage() {
 
                             <div className="space-y-2">
                                 <Label>Stream Key</Label>
-                                <Input
-                                    type="password"
-                                    value={formData.streamKey}
-                                    onChange={(e) =>
-                                        setFormData((prev) => ({ ...prev, streamKey: e.target.value }))
-                                    }
-                                    placeholder="xxxx-xxxx-xxxx-xxxx-xxxx"
-                                />
+                                <div className="relative">
+                                    <Input
+                                        type={showStreamKey ? "text" : "password"}
+                                        value={formData.streamKey}
+                                        onChange={(e) =>
+                                            setFormData((prev) => ({ ...prev, streamKey: e.target.value }))
+                                        }
+                                        placeholder="xxxx-xxxx-xxxx-xxxx-xxxx"
+                                        className="pr-10"
+                                    />
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                                        onClick={() => setShowStreamKey(!showStreamKey)}
+                                    >
+                                        {showStreamKey ? (
+                                            <EyeOff className="h-4 w-4 text-muted-foreground" />
+                                        ) : (
+                                            <Eye className="h-4 w-4 text-muted-foreground" />
+                                        )}
+                                    </Button>
+                                </div>
                                 <p className="text-xs text-muted-foreground">
                                     Get your stream key from YouTube Studio → Go Live → Stream
                                 </p>
                             </div>
+
+                            <Separator />
+
+                            <div className="flex items-center space-x-2">
+                                <Switch
+                                    checked={formData.enableChatModeration}
+                                    onCheckedChange={(checked) =>
+                                        setFormData((prev) => ({ ...prev, enableChatModeration: checked }))
+                                    }
+                                />
+                                <Label>Enable live chat moderation</Label>
+                            </div>
+                            {formData.enableChatModeration && (
+                                <p className="text-xs text-muted-foreground pl-8">
+                                    Chat moderation will auto-start when your stream goes live.
+                                    The system will automatically detect your YouTube broadcast.
+                                </p>
+                            )}
 
                             <Separator />
 

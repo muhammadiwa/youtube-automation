@@ -42,6 +42,15 @@ celery_app.conf.update(
             "task": "app.modules.stream.stream_job_tasks.collect_health_metrics",
             "schedule": 10.0,  # Every 10 seconds
         },
+        # Comment Sync Tasks
+        "sync-comments-all-accounts": {
+            "task": "comment.sync_all_accounts",
+            "schedule": 300.0,  # Every 5 minutes
+        },
+        "reset-auto-reply-daily-counts": {
+            "task": "comment.reset_daily_auto_reply_counts",
+            "schedule": 86400.0,  # Every 24 hours
+        },
     },
 )
 
@@ -52,4 +61,5 @@ celery_app.autodiscover_tasks([
     "app.modules.stream",
     "app.modules.transcoding",
     "app.modules.backup",
+    "app.modules.comment",
 ])

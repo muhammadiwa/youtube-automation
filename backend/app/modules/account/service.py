@@ -341,6 +341,7 @@ class YouTubeAccountService:
             "channel_title": account.channel_title,
             "has_stream_key": account.has_stream_key(),
             "stream_key_masked": account.get_masked_stream_key(),
+            "stream_key": account.stream_key,  # Return actual stream key for auto-fill
             "rtmp_url": account.rtmp_url,
             "default_stream_id": account.default_stream_id,
             "has_live_streaming_enabled": account.has_live_streaming_enabled,

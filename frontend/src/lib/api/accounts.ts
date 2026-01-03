@@ -232,6 +232,7 @@ export const accountsApi = {
         channelTitle: string
         hasStreamKey: boolean
         streamKeyMasked: string | null
+        streamKey: string | null
         rtmpUrl: string | null
         defaultStreamId: string | null
         hasLiveStreamingEnabled: boolean
@@ -242,6 +243,7 @@ export const accountsApi = {
             channel_title: string
             has_stream_key: boolean
             stream_key_masked: string | null
+            stream_key: string | null
             rtmp_url: string | null
             default_stream_id: string | null
             has_live_streaming_enabled: boolean
@@ -252,6 +254,7 @@ export const accountsApi = {
             channelTitle: response.channel_title,
             hasStreamKey: response.has_stream_key,
             streamKeyMasked: response.stream_key_masked,
+            streamKey: response.stream_key,
             rtmpUrl: response.rtmp_url,
             defaultStreamId: response.default_stream_id,
             hasLiveStreamingEnabled: response.has_live_streaming_enabled,

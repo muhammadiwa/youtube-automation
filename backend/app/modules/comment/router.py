@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session
+from app.modules.auth.jwt import get_current_user
 from app.modules.comment.models import CommentSentiment, CommentStatus
 from app.modules.comment.repository import (
     CommentRepository,
@@ -46,13 +47,13 @@ router = APIRouter(prefix="/comments", tags=["comments"])
 
 @router.get("/inbox", response_model=CommentListResponse)
 async def get_unified_inbox(
-    user_id: uuid.UUID,
     account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
     status: Optional[CommentStatus] = None,
     sentiment: Optional[CommentSentiment] = None,
     requires_attention: Optional[bool] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Get unified inbox of comments from all accounts.
@@ -66,7 +67,7 @@ async def get_unified_inbox(
         account_id_list = [uuid.UUID(aid.strip()) for aid in account_ids.split(",")]
 
     return await service.get_unified_inbox(
-        user_id=user_id,
+        user_id=current_user.id,
         account_ids=account_id_list,
         status=status,
         sentiment=sentiment,

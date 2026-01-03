@@ -158,6 +158,9 @@ async def _start_ffmpeg_worker_async(job_id: str) -> dict:
         # Start monitoring task
         monitor_ffmpeg_worker.delay(job_id, process.pid)
         
+        # Auto-start live chat moderation if this is a YouTube Live stream
+        await _start_moderation_for_job(job)
+        
         return {
             "status": "started",
             "pid": process.pid,
@@ -244,6 +247,9 @@ async def _stop_ffmpeg_worker_async(job_id: str) -> dict:
         job.pid = None
         job.concat_file_path = None
         await repo.update(job)
+        
+        # Auto-stop live chat moderation
+        await _stop_moderation_for_job(job)
         
         # Update video usage tracking if this job has a video_id
         if job.video_id:
@@ -529,10 +535,6 @@ async def _collect_health_metrics_async() -> dict:
                 logger.error(f"Error collecting metrics for job {job.id}: {e}")
     
     return {"checked": checked_count}
-    
-    return {"checked": checked_count}
-    
-    return {"checked": checked_count}
 
 
 # ============================================
@@ -729,3 +731,203 @@ async def _save_health_metrics(
         )
         
         await health_repo.create(health)
+
+
+# ============================================
+# Moderation Integration
+# ============================================
+
+
+async def _start_moderation_for_job(job: StreamJob) -> None:
+    """Start live chat moderation for a stream job.
+    
+    This is called automatically when a stream starts.
+    Will auto-detect broadcast_id if not provided.
+    
+    Only starts moderation if:
+    - Stream is going to YouTube Live
+    - enable_chat_moderation is True
+    - broadcast_id is provided OR can be auto-detected
+    
+    Args:
+        job: Stream job instance
+    """
+    try:
+        # Check if moderation is enabled for this job
+        if not getattr(job, 'enable_chat_moderation', True):
+            logger.debug(f"Chat moderation disabled for job {job.id}")
+            return
+        
+        # Check if this is a YouTube Live stream
+        if not job.rtmp_url or ("youtube.com" not in job.rtmp_url.lower() and "rtmp.youtube.com" not in job.rtmp_url.lower()):
+            logger.debug(f"Skipping moderation for job {job.id} - not a YouTube stream")
+            return
+        
+        # Get broadcast_id - either from job or schedule auto-detect
+        broadcast_id = getattr(job, 'youtube_broadcast_id', None)
+        
+        if broadcast_id:
+            # We have broadcast_id, start moderation immediately
+            await _start_moderation_with_broadcast_id(job, broadcast_id)
+        else:
+            # Schedule auto-detect task (runs in background with delay)
+            # This gives YouTube time to recognize the incoming stream
+            logger.info(f"Scheduling broadcast auto-detection for job {job.id}")
+            auto_detect_and_start_moderation.apply_async(
+                args=[str(job.id)],
+                countdown=10,  # Wait 10 seconds before first attempt
+            )
+                
+    except Exception as e:
+        logger.error(f"Failed to start moderation for job {job.id}: {e}")
+        # Don't fail the stream start if moderation fails
+
+
+async def _start_moderation_with_broadcast_id(job: StreamJob, broadcast_id: str) -> None:
+    """Start moderation with a known broadcast_id.
+    
+    Args:
+        job: Stream job instance
+        broadcast_id: YouTube broadcast ID
+    """
+    from app.modules.moderation.chat_worker import start_moderation_for_broadcast
+    
+    logger.info(f"Starting chat moderation for job {job.id}, broadcast {broadcast_id}")
+    
+    await start_moderation_for_broadcast(
+        account_id=job.account_id,
+        broadcast_id=broadcast_id,
+        session_id=None,
+    )
+    
+    logger.info(f"Chat moderation started for job {job.id}")
+
+
+@celery_app.task(bind=True, max_retries=5)
+def auto_detect_and_start_moderation(self, job_id: str) -> dict:
+    """Background task to auto-detect broadcast_id and start moderation.
+    
+    This task runs with retries to give YouTube time to recognize the stream.
+    
+    Args:
+        job_id: Stream job UUID string
+        
+    Returns:
+        dict: Result with status
+    """
+    logger.info(f"Auto-detecting broadcast for job {job_id} (attempt {self.request.retries + 1})")
+    
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(_auto_detect_and_start_moderation_async(job_id))
+        loop.close()
+        
+        if result.get("status") == "not_found":
+            # Retry with exponential backoff
+            retry_delay = min(60, 10 * (2 ** self.request.retries))  # 10, 20, 40, 60, 60
+            logger.info(f"Broadcast not found for job {job_id}, retrying in {retry_delay}s")
+            raise self.retry(countdown=retry_delay)
+        
+        return result
+        
+    except Exception as e:
+        if self.request.retries >= self.max_retries:
+            logger.warning(f"Max retries reached for broadcast detection on job {job_id}")
+            return {"status": "max_retries", "job_id": job_id}
+        raise
+
+
+async def _auto_detect_and_start_moderation_async(job_id: str) -> dict:
+    """Async implementation of auto-detect and start moderation.
+    
+    Args:
+        job_id: Stream job UUID string
+        
+    Returns:
+        dict: Result with status and broadcast_id if found
+    """
+    from app.modules.account.repository import YouTubeAccountRepository
+    from app.modules.stream.youtube_api import YouTubeLiveStreamingClient
+    
+    async with celery_session_maker() as session:
+        repo = StreamJobRepository(session)
+        job = await repo.get_by_id(job_id)
+        
+        if not job:
+            return {"status": "job_not_found", "job_id": job_id}
+        
+        # Check if job is still running
+        if job.status != StreamJobStatus.RUNNING.value:
+            logger.info(f"Job {job_id} is no longer running, skipping moderation")
+            return {"status": "job_not_running", "job_id": job_id}
+        
+        # Check if broadcast_id was already set (maybe manually)
+        if job.youtube_broadcast_id:
+            logger.info(f"Broadcast ID already set for job {job_id}")
+            return {"status": "already_set", "job_id": job_id, "broadcast_id": job.youtube_broadcast_id}
+        
+        # Get account
+        account_repo = YouTubeAccountRepository(session)
+        account = await account_repo.get_by_id(str(job.account_id))
+        
+        if not account or not account.access_token:
+            logger.warning(f"No valid account/token for job {job_id}")
+            return {"status": "no_account", "job_id": job_id}
+        
+        # Create YouTube API client
+        client = YouTubeLiveStreamingClient(account.access_token)
+        
+        # Try to find broadcast by stream key
+        stream_key = job.stream_key
+        broadcast = None
+        
+        if stream_key:
+            broadcast = await client.find_active_broadcast_by_stream_key(stream_key)
+        
+        # Fallback: get any active broadcast
+        if not broadcast:
+            broadcast = await client.get_any_active_broadcast()
+        
+        if not broadcast:
+            return {"status": "not_found", "job_id": job_id}
+        
+        broadcast_id = broadcast.get("id")
+        
+        # Save broadcast_id to job
+        job.youtube_broadcast_id = broadcast_id
+        await repo.update(job)
+        
+        logger.info(f"Auto-detected broadcast ID {broadcast_id} for job {job_id}")
+        
+        # Start moderation
+        await _start_moderation_with_broadcast_id(job, broadcast_id)
+        
+        return {"status": "started", "job_id": job_id, "broadcast_id": broadcast_id}
+
+
+async def _stop_moderation_for_job(job: StreamJob) -> None:
+    """Stop live chat moderation for a stream job.
+    
+    This is called automatically when a stream stops.
+    
+    Args:
+        job: Stream job instance
+    """
+    try:
+        from app.modules.moderation.chat_worker import stop_moderation_for_broadcast, get_active_workers
+        
+        # Find and stop any active moderation workers for this account
+        active_workers = get_active_workers()
+        
+        for key, worker in list(active_workers.items()):
+            if str(worker.account_id) == str(job.account_id):
+                logger.info(f"Stopping moderation worker for account {job.account_id}")
+                await stop_moderation_for_broadcast(
+                    account_id=job.account_id,
+                    broadcast_id=worker.broadcast_id,
+                )
+                
+    except Exception as e:
+        logger.error(f"Failed to stop moderation for job {job.id}: {e}")
+        # Don't fail the stream stop if moderation stop fails
