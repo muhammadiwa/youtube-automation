@@ -617,6 +617,11 @@ async def create_stream_from_video(
     if request.scheduled_start_at:
         scheduled_start = datetime.fromisoformat(request.scheduled_start_at.replace('Z', '+00:00'))
     
+    # Parse scheduled end time
+    scheduled_end = None
+    if request.scheduled_end_at:
+        scheduled_end = datetime.fromisoformat(request.scheduled_end_at.replace('Z', '+00:00'))
+    
     # Get account and verify ownership
     from app.modules.account.repository import YouTubeAccountRepository
     account_repo = YouTubeAccountRepository(db)
@@ -628,23 +633,27 @@ async def create_stream_from_video(
             detail="YouTube account not found"
         )
     
-    # Check if account has stream key
-    if not account.has_stream_key():
+    # Determine stream key - use request value if provided, otherwise use account's key
+    stream_key = request.stream_key if request.stream_key else account.stream_key
+    rtmp_url = request.rtmp_url if request.rtmp_url else (account.rtmp_url or "rtmp://a.rtmp.youtube.com/live2")
+    
+    # Check if we have a stream key
+    if not stream_key:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No stream key configured for this account. Please sync stream key from YouTube first."
+            detail="No stream key provided. Please enter a stream key or sync from YouTube."
         )
     
     # Create stream job
     stream_service = StreamJobService(db)
     
-    # Create stream job request using account's stream key
+    # Create stream job request
     stream_request = CreateStreamJobRequest(
         account_id=request.account_id,
         video_id=video_id,
         video_path=video_path,
-        rtmp_url=account.rtmp_url or "rtmp://a.rtmp.youtube.com/live2",
-        stream_key=account.stream_key,
+        rtmp_url=rtmp_url,
+        stream_key=stream_key,
         title=request.title or video.title,
         description=video.description,
         loop_mode=request.loop_mode,
@@ -652,7 +661,12 @@ async def create_stream_from_video(
         resolution=request.resolution,
         target_bitrate=request.target_bitrate,
         target_fps=request.target_fps,
-        scheduled_start_at=scheduled_start
+        encoding_mode=request.encoding_mode,
+        enable_chat_moderation=request.enable_chat_moderation,
+        enable_auto_restart=request.enable_auto_restart,
+        max_restarts=request.max_restarts,
+        scheduled_start_at=scheduled_start,
+        scheduled_end_at=scheduled_end
     )
     
     stream_job = await stream_service.create_stream_job(

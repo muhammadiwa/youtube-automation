@@ -9,7 +9,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Loader2, Radio, AlertTriangle } from "lucide-react"
+import { Loader2, Radio, AlertTriangle, Eye, EyeOff } from "lucide-react"
 import {
     Dialog,
     DialogContent,
@@ -21,7 +21,6 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import {
     Select,
     SelectContent,
@@ -34,6 +33,7 @@ import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/components/ui/toast"
 import { SchedulePicker } from "@/components/videos/schedule-picker"
 import { videoLibraryApi } from "@/lib/api/video-library"
+import { accountsApi } from "@/lib/api/accounts"
 import type { Video, YouTubeAccount } from "@/types"
 
 interface CreateStreamDialogProps {
@@ -63,6 +63,7 @@ export function CreateStreamDialog({
     const { addToast } = useToast()
     const [loading, setLoading] = useState(false)
     const [streamScheduled, setStreamScheduled] = useState(false)
+    const [showStreamKey, setShowStreamKey] = useState(false)
 
     const [formData, setFormData] = useState({
         accountId: "",
@@ -72,7 +73,14 @@ export function CreateStreamDialog({
         resolution: "1080p" as "720p" | "1080p" | "1440p" | "4k",
         targetBitrate: 6000,
         targetFps: 30,
+        encodingMode: "cbr" as "cbr" | "vbr",
+        rtmpUrl: "rtmp://a.rtmp.youtube.com/live2",
+        streamKey: "",
+        enableChatModeration: true,
+        enableAutoRestart: true,
+        maxRestarts: 5,
         scheduledStartAt: null as Date | null,
+        scheduledEndAt: null as Date | null,
     })
     const [errors, setErrors] = useState<Record<string, string>>({})
 
@@ -91,12 +99,52 @@ export function CreateStreamDialog({
                 resolution: "1080p" as "720p" | "1080p" | "1440p" | "4k",
                 targetBitrate: 6000,
                 targetFps: 30,
+                encodingMode: "cbr",
+                rtmpUrl: defaultAccount?.rtmpUrl || "rtmp://a.rtmp.youtube.com/live2",
+                streamKey: "",
+                enableChatModeration: true,
+                enableAutoRestart: true,
+                maxRestarts: 5,
                 scheduledStartAt: null,
+                scheduledEndAt: null,
             })
             setStreamScheduled(false)
+            setShowStreamKey(false)
             setErrors({})
+
+            // Load stream key for default account
+            if (defaultAccount?.id) {
+                loadStreamKey(defaultAccount.id)
+            }
         }
     }, [video, accounts])
+
+    // Load stream key when account changes
+    const loadStreamKey = async (accountId: string) => {
+        try {
+            const status = await accountsApi.getStreamKeyStatus(accountId)
+            if (status.rtmpUrl) {
+                setFormData(prev => ({
+                    ...prev,
+                    rtmpUrl: status.rtmpUrl || prev.rtmpUrl,
+                }))
+            }
+            if (status.streamKey) {
+                setFormData(prev => ({
+                    ...prev,
+                    streamKey: status.streamKey || "",
+                }))
+            }
+        } catch (error) {
+            console.error("Failed to load stream key:", error)
+        }
+    }
+
+    // Handle account change
+    const handleAccountChange = (accountId: string) => {
+        setFormData(prev => ({ ...prev, accountId, streamKey: "" }))
+        loadStreamKey(accountId)
+    }
 
     // Get selected account details
     const selectedAccount = accounts.find(a => a.id === formData.accountId)
@@ -112,11 +160,12 @@ export function CreateStreamDialog({
             newErrors.accountId = "Please select a YouTube account"
         } else if (isSelectedAccountExpired || isSelectedAccountError) {
             newErrors.accountId = "Selected account needs to be reconnected"
-        } else if (!selectedAccountHasStreamKey) {
-            newErrors.accountId = "Selected account has no stream key. Please sync stream key first."
         }
         if (!formData.title.trim()) {
             newErrors.title = "Stream title is required"
+        }
+        if (!formData.streamKey.trim()) {
+            newErrors.streamKey = "Stream key is required"
         }
         if (formData.loopMode === "count" && formData.loopCount < 1) {
             newErrors.loopCount = "Loop count must be at least 1"
@@ -159,6 +208,12 @@ export function CreateStreamDialog({
                 resolution: formData.resolution,
                 targetBitrate: formData.targetBitrate,
                 targetFps: formData.targetFps,
+                encodingMode: formData.encodingMode,
+                rtmpUrl: formData.rtmpUrl,
+                streamKey: formData.streamKey,
+                enableChatModeration: formData.enableChatModeration,
+                enableAutoRestart: formData.enableAutoRestart,
+                maxRestarts: formData.maxRestarts,
                 scheduledStartAt: streamScheduled && formData.scheduledStartAt
                     ? formData.scheduledStartAt.toISOString()
                     : undefined,
@@ -226,9 +281,7 @@ export function CreateStreamDialog({
                                 <>
                                     <Select
                                         value={formData.accountId}
-                                        onValueChange={(value) =>
-                                            setFormData({ ...formData, accountId: value })
-                                        }
+                                        onValueChange={handleAccountChange}
                                         disabled={loading}
                                     >
                                         <SelectTrigger id="accountId">
@@ -291,13 +344,86 @@ export function CreateStreamDialog({
                                     )}
                                     {selectedAccount && selectedAccountHasStreamKey && (
                                         <p className="text-xs text-muted-foreground">
-                                            Stream Key: {selectedAccount.streamKeyMasked}
+                                            Saved Stream Key: {selectedAccount.streamKeyMasked}
                                         </p>
                                     )}
                                 </>
                             )}
                             {errors.accountId && (
                                 <p className="text-sm text-destructive">{errors.accountId}</p>
+                            )}
+                        </div>
+
+                        {/* Stream Key & RTMP Settings */}
+                        <div className="space-y-4 rounded-lg border p-4">
+                            <h4 className="font-semibold">Stream Settings</h4>
+
+                            <div className="space-y-2">
+                                <Label htmlFor="rtmpUrl">RTMP URL</Label>
+                                <Input
+                                    id="rtmpUrl"
+                                    value={formData.rtmpUrl}
+                                    onChange={(e) =>
+                                        setFormData({ ...formData, rtmpUrl: e.target.value })
+                                    }
+                                    placeholder="rtmp://a.rtmp.youtube.com/live2"
+                                    disabled={loading}
+                                />
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label htmlFor="streamKey">
+                                    Stream Key <span className="text-destructive">*</span>
+                                </Label>
+                                <div className="relative">
+                                    <Input
+                                        id="streamKey"
+                                        type={showStreamKey ? "text" : "password"}
+                                        value={formData.streamKey}
+                                        onChange={(e) =>
+                                            setFormData({ ...formData, streamKey: e.target.value })
+                                        }
+                                        placeholder="xxxx-xxxx-xxxx-xxxx-xxxx"
+                                        disabled={loading}
+                                        className={`pr-10 ${errors.streamKey ? "border-destructive" : ""}`}
+                                    />
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                                        onClick={() => setShowStreamKey(!showStreamKey)}
+                                    >
+                                        {showStreamKey ? (
+                                            <EyeOff className="h-4 w-4 text-muted-foreground" />
+                                        ) : (
+                                            <Eye className="h-4 w-4 text-muted-foreground" />
+                                        )}
+                                    </Button>
+                                </div>
+                                {errors.streamKey && (
+                                    <p className="text-sm text-destructive">{errors.streamKey}</p>
+                                )}
+                                <p className="text-xs text-muted-foreground">
+                                    Get your stream key from YouTube Studio → Go Live → Stream
+                                </p>
+                            </div>
+
+                            <div className="flex items-center space-x-2">
+                                <Switch
+                                    id="enableChatModeration"
+                                    checked={formData.enableChatModeration}
+                                    onCheckedChange={(checked) =>
+                                        setFormData({ ...formData, enableChatModeration: checked })
+                                    }
+                                    disabled={loading}
+                                />
+                                <Label htmlFor="enableChatModeration">Enable live chat moderation</Label>
+                            </div>
+                            {formData.enableChatModeration && (
+                                <p className="text-xs text-muted-foreground ml-8">
+                                    Chat moderation will auto-start when your stream goes live.
+                                </p>
                             )}
                         </div>
 
@@ -451,12 +577,72 @@ export function CreateStreamDialog({
                                     </SelectContent>
                                 </Select>
                             </div>
+
+                            {/* Encoding Mode */}
+                            <div className="space-y-2">
+                                <Label>Encoding Mode</Label>
+                                <RadioGroup
+                                    value={formData.encodingMode}
+                                    onValueChange={(value: "cbr" | "vbr") =>
+                                        setFormData({ ...formData, encodingMode: value })
+                                    }
+                                    disabled={loading}
+                                    className="flex gap-4"
+                                >
+                                    <div className="flex items-center space-x-2">
+                                        <RadioGroupItem value="cbr" id="cbr" />
+                                        <Label htmlFor="cbr" className="cursor-pointer">CBR (Constant)</Label>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                        <RadioGroupItem value="vbr" id="vbr" />
+                                        <Label htmlFor="vbr" className="cursor-pointer">VBR (Variable)</Label>
+                                    </div>
+                                </RadioGroup>
+                            </div>
+                        </div>
+
+                        {/* Auto-Restart Settings */}
+                        <div className="space-y-4 rounded-lg border p-4">
+                            <h4 className="font-semibold">Auto-Restart Settings</h4>
+
+                            <div className="flex items-center space-x-2">
+                                <Switch
+                                    id="enableAutoRestart"
+                                    checked={formData.enableAutoRestart}
+                                    onCheckedChange={(checked) =>
+                                        setFormData({ ...formData, enableAutoRestart: checked })
+                                    }
+                                    disabled={loading}
+                                />
+                                <Label htmlFor="enableAutoRestart">Enable auto-restart on failure</Label>
+                            </div>
+
+                            {formData.enableAutoRestart && (
+                                <div className="space-y-2 ml-8">
+                                    <Label htmlFor="maxRestarts">Max restart attempts</Label>
+                                    <Input
+                                        id="maxRestarts"
+                                        type="number"
+                                        min="1"
+                                        max="10"
+                                        value={formData.maxRestarts}
+                                        onChange={(e) =>
+                                            setFormData({
+                                                ...formData,
+                                                maxRestarts: parseInt(e.target.value) || 5,
+                                            })
+                                        }
+                                        disabled={loading}
+                                        className="w-24"
+                                    />
+                                </div>
+                            )}
                         </div>
 
                         {/* Schedule Stream */}
-                        <div className="space-y-2">
+                        <div className="space-y-4 rounded-lg border p-4">
                             <div className="flex items-center justify-between">
-                                <Label htmlFor="schedule">Schedule Stream</Label>
+                                <h4 className="font-semibold">Schedule (Optional)</h4>
                                 <Switch
                                     id="schedule"
                                     checked={streamScheduled}
@@ -464,6 +650,9 @@ export function CreateStreamDialog({
                                     disabled={loading}
                                 />
                             </div>
+                            <p className="text-sm text-muted-foreground">
+                                Schedule when the stream should start
+                            </p>
                             {streamScheduled && (
                                 <div className="space-y-2">
                                     <SchedulePicker
@@ -494,7 +683,7 @@ export function CreateStreamDialog({
                         </Button>
                         <Button
                             type="submit"
-                            disabled={loading || accounts.length === 0 || !hasActiveAccounts || isSelectedAccountExpired || isSelectedAccountError || !selectedAccountHasStreamKey}
+                            disabled={loading || accounts.length === 0 || !hasActiveAccounts || isSelectedAccountExpired || isSelectedAccountError}
                         >
                             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             {streamScheduled ? "Schedule Stream" : "Create Stream"}

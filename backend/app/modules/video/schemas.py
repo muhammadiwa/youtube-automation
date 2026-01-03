@@ -310,4 +310,11 @@ class CreateStreamFromVideoRequest(BaseModel):
     resolution: str = "1080p"
     target_bitrate: int = Field(6000, ge=1000, le=50000)
     target_fps: int = Field(30, ge=15, le=60)
+    encoding_mode: str = "cbr"
+    rtmp_url: Optional[str] = None
+    stream_key: Optional[str] = None
+    enable_chat_moderation: bool = True
+    enable_auto_restart: bool = True
+    max_restarts: int = Field(5, ge=1, le=10)
     scheduled_start_at: Optional[str] = None
+    scheduled_end_at: Optional[str] = None

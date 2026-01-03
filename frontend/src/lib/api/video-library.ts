@@ -89,7 +89,14 @@ export interface CreateStreamRequest {
     resolution?: "720p" | "1080p" | "1440p" | "4k"
     targetBitrate?: number
     targetFps?: number
+    encodingMode?: "cbr" | "vbr"
+    rtmpUrl?: string
+    streamKey?: string
+    enableChatModeration?: boolean
+    enableAutoRestart?: boolean
+    maxRestarts?: number
     scheduledStartAt?: string
+    scheduledEndAt?: string
 }
 
 export interface VideoUsageStats {
@@ -372,7 +379,14 @@ export const videoLibraryApi = {
             resolution: data.resolution || "1080p",
             target_bitrate: data.targetBitrate || 6000,
             target_fps: data.targetFps || 30,
+            encoding_mode: data.encodingMode || "cbr",
+            rtmp_url: data.rtmpUrl,
+            stream_key: data.streamKey,
+            enable_chat_moderation: data.enableChatModeration,
+            enable_auto_restart: data.enableAutoRestart,
+            max_restarts: data.maxRestarts,
             scheduled_start_at: data.scheduledStartAt,
+            scheduled_end_at: data.scheduledEndAt,
         })
 
         // Transform snake_case to camelCase

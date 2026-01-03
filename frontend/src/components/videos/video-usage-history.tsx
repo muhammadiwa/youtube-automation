@@ -8,7 +8,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Youtube, Radio, Clock, Eye, Loader2, RefreshCw } from "lucide-react"
+import { Youtube, Radio, Clock, Eye, Loader2, RefreshCw, ChevronLeft, ChevronRight } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -34,15 +34,23 @@ interface VideoUsageHistoryProps {
     onUpdate?: () => void
 }
 
+const ITEMS_PER_PAGE = 5
+
 export function VideoUsageHistory({ videoId, onUpdate }: VideoUsageHistoryProps) {
     const [logs, setLogs] = useState<UsageLog[]>([])
     const [loading, setLoading] = useState(true)
     const [fixing, setFixing] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const [currentPage, setCurrentPage] = useState(1)
 
     useEffect(() => {
         loadUsageHistory()
     }, [videoId])
+
+    // Reset to page 1 when logs change
+    useEffect(() => {
+        setCurrentPage(1)
+    }, [logs.length])
 
     const loadUsageHistory = async () => {
         try {
@@ -88,6 +96,12 @@ export function VideoUsageHistory({ videoId, onUpdate }: VideoUsageHistoryProps)
         }
         return `${secs}s`
     }
+
+    // Pagination calculations
+    const totalPages = Math.ceil(logs.length / ITEMS_PER_PAGE)
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE
+    const endIndex = startIndex + ITEMS_PER_PAGE
+    const paginatedLogs = logs.slice(startIndex, endIndex)
 
     // Check if there are unclosed logs
     const hasUnclosedLogs = logs.some(log => log.usageType === "live_stream" && !log.endedAt)
@@ -161,7 +175,7 @@ export function VideoUsageHistory({ videoId, onUpdate }: VideoUsageHistoryProps)
             </CardHeader>
             <CardContent>
                 <div className="space-y-4">
-                    {logs.map((log) => (
+                    {paginatedLogs.map((log) => (
                         <div
                             key={log.id}
                             className="flex items-start gap-3 rounded-lg border p-3"
@@ -235,6 +249,38 @@ export function VideoUsageHistory({ videoId, onUpdate }: VideoUsageHistoryProps)
                             </div>
                         </div>
                     ))}
+
+                    {/* Pagination */}
+                    {totalPages > 1 && (
+                        <div className="flex items-center justify-between pt-2 border-t">
+                            <span className="text-xs text-muted-foreground">
+                                Showing {startIndex + 1}-{Math.min(endIndex, logs.length)} of {logs.length}
+                            </span>
+                            <div className="flex items-center gap-1">
+                                <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                    disabled={currentPage === 1}
+                                >
+                                    <ChevronLeft className="h-4 w-4" />
+                                </Button>
+                                <span className="text-sm px-2">
+                                    {currentPage} / {totalPages}
+                                </span>
+                                <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                    disabled={currentPage === totalPages}
+                                >
+                                    <ChevronRight className="h-4 w-4" />
+                                </Button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             </CardContent>
         </Card>
