@@ -592,6 +592,136 @@ async def delete_live_event(
 
 
 @router.post(
+    "/events/{event_id}/start",
+    response_model=LiveEventResponse,
+    summary="Start a live event",
+    description="Start streaming for a live event.",
+)
+async def start_live_event(
+    event_id: uuid.UUID,
+    service: StreamService = Depends(get_stream_service),
+) -> LiveEventResponse:
+    """Start a live event.
+
+    Transitions the event to LIVE status and starts the stream.
+
+    Args:
+        event_id: Event UUID
+        service: Stream service instance
+
+    Returns:
+        LiveEventResponse: Updated live event
+    """
+    try:
+        session = await service.start_stream(event_id)
+        event = await service.get_live_event(event_id)
+        if not event:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Event {event_id} not found",
+            )
+        return LiveEventResponse(
+            id=event.id,
+            account_id=event.account_id,
+            youtube_broadcast_id=event.youtube_broadcast_id,
+            youtube_stream_id=event.youtube_stream_id,
+            rtmp_url=event.rtmp_url,
+            title=event.title,
+            description=event.description,
+            thumbnail_url=event.thumbnail_url,
+            category_id=event.category_id,
+            tags=event.tags,
+            latency_mode=event.latency_mode,
+            enable_dvr=event.enable_dvr,
+            enable_auto_start=event.enable_auto_start,
+            enable_auto_stop=event.enable_auto_stop,
+            privacy_status=event.privacy_status,
+            made_for_kids=event.made_for_kids,
+            scheduled_start_at=event.scheduled_start_at,
+            scheduled_end_at=event.scheduled_end_at,
+            actual_start_at=event.actual_start_at,
+            actual_end_at=event.actual_end_at,
+            is_recurring=event.is_recurring,
+            parent_event_id=event.parent_event_id,
+            status=event.status,
+            last_error=event.last_error,
+            peak_viewers=event.peak_viewers,
+            total_chat_messages=event.total_chat_messages,
+            created_at=event.created_at,
+            updated_at=event.updated_at,
+        )
+    except LiveEventNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except StreamServiceError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post(
+    "/events/{event_id}/stop",
+    response_model=LiveEventResponse,
+    summary="Stop a live event",
+    description="Stop streaming for a live event.",
+)
+async def stop_live_event(
+    event_id: uuid.UUID,
+    service: StreamService = Depends(get_stream_service),
+) -> LiveEventResponse:
+    """Stop a live event.
+
+    Transitions the event to ENDED status and stops the stream.
+
+    Args:
+        event_id: Event UUID
+        service: Stream service instance
+
+    Returns:
+        LiveEventResponse: Updated live event
+    """
+    try:
+        await service.stop_stream(event_id)
+        event = await service.get_live_event(event_id)
+        if not event:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Event {event_id} not found",
+            )
+        return LiveEventResponse(
+            id=event.id,
+            account_id=event.account_id,
+            youtube_broadcast_id=event.youtube_broadcast_id,
+            youtube_stream_id=event.youtube_stream_id,
+            rtmp_url=event.rtmp_url,
+            title=event.title,
+            description=event.description,
+            thumbnail_url=event.thumbnail_url,
+            category_id=event.category_id,
+            tags=event.tags,
+            latency_mode=event.latency_mode,
+            enable_dvr=event.enable_dvr,
+            enable_auto_start=event.enable_auto_start,
+            enable_auto_stop=event.enable_auto_stop,
+            privacy_status=event.privacy_status,
+            made_for_kids=event.made_for_kids,
+            scheduled_start_at=event.scheduled_start_at,
+            scheduled_end_at=event.scheduled_end_at,
+            actual_start_at=event.actual_start_at,
+            actual_end_at=event.actual_end_at,
+            is_recurring=event.is_recurring,
+            parent_event_id=event.parent_event_id,
+            status=event.status,
+            last_error=event.last_error,
+            peak_viewers=event.peak_viewers,
+            total_chat_messages=event.total_chat_messages,
+            created_at=event.created_at,
+            updated_at=event.updated_at,
+        )
+    except LiveEventNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except StreamServiceError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post(
     "/events/{event_id}/generate-instances",
     response_model=LiveEventListResponse,
     summary="Generate recurring instances",

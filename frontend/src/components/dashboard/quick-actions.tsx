@@ -20,9 +20,9 @@ export function QuickActions() {
         },
         {
             label: "Start Stream",
-            description: "Go live now",
+            description: "Video-to-Live 24/7",
             icon: Radio,
-            onClick: () => router.push("/dashboard/streams/create"),
+            onClick: () => router.push("/dashboard/streams/create-video-live"),
             gradient: "from-red-500 to-red-600",
             shadowColor: "shadow-red-500/25",
         },

@@ -198,8 +198,8 @@ export default function CreateStreamPage() {
                 account_id: formData.accountId,
                 title: formData.title,
                 description: formData.description || undefined,
-                scheduled_start: scheduledStart,
-                scheduled_end: formData.scheduledEnd
+                scheduled_start_at: scheduledStart,
+                scheduled_end_at: formData.scheduledEnd
                     ? new Date(formData.scheduledEnd).toISOString()
                     : undefined,
                 privacy_status: formData.privacyStatus,

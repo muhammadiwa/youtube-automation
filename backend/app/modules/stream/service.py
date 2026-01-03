@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.account.models import YouTubeAccount
 from app.modules.account.repository import YouTubeAccountRepository
+from app.modules.account.service import YouTubeAccountService
 from app.modules.stream.models import (
     LiveEvent,
     LiveEventStatus,
@@ -97,6 +98,7 @@ class StreamService:
         self.account_repository = YouTubeAccountRepository(session)
         self.playlist_repository = StreamPlaylistRepository(session)
         self.playlist_item_repository = PlaylistItemRepository(session)
+        self.account_service = YouTubeAccountService(session)
 
     async def create_live_event(
         self,
@@ -169,6 +171,8 @@ class StreamService:
                 raise
 
         await self.session.commit()
+        # Refresh event to get updated data after commit
+        await self.session.refresh(event)
         return event
 
     async def schedule_live_event(
@@ -229,6 +233,8 @@ class StreamService:
             raise
 
         await self.session.commit()
+        # Refresh event to get updated data after commit
+        await self.session.refresh(event)
         return event
 
     async def create_recurring_event(
@@ -518,6 +524,9 @@ class StreamService:
         Raises:
             YouTubeAPIError: If API call fails
         """
+        # Refresh token if expired or expiring soon
+        account = await self.account_service.refresh_token_if_needed(account)
+        
         client = YouTubeLiveStreamingClient(account.access_token)
 
         # Create broadcast

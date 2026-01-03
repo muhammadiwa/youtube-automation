@@ -6,29 +6,80 @@ export interface LiveEvent {
     account_id: string
     title: string
     description?: string
-    scheduled_start: string
-    scheduled_end?: string
-    status: "scheduled" | "live" | "ended" | "cancelled"
-    broadcast_id?: string
-    stream_id?: string
+    scheduled_start: string  // mapped from scheduled_start_at
+    scheduled_end?: string   // mapped from scheduled_end_at
+    status: "scheduled" | "live" | "ended" | "cancelled" | "created"
+    broadcast_id?: string    // mapped from youtube_broadcast_id
+    stream_id?: string       // mapped from youtube_stream_id
     rtmp_url?: string
-    stream_key?: string
+    stream_key?: string      // mapped from rtmp_key
     privacy_status: "public" | "unlisted" | "private"
     enable_dvr: boolean
     enable_auto_start: boolean
     enable_auto_stop: boolean
     thumbnail_url?: string
-    viewer_count?: number
+    viewer_count?: number    // mapped from peak_viewers
     created_at: string
     updated_at: string
+}
+
+// Backend response format (raw from API)
+interface BackendLiveEvent {
+    id: string
+    account_id: string
+    title: string
+    description?: string
+    scheduled_start_at?: string
+    scheduled_end_at?: string
+    actual_start_at?: string
+    actual_end_at?: string
+    status: string
+    youtube_broadcast_id?: string
+    youtube_stream_id?: string
+    rtmp_url?: string
+    rtmp_key?: string
+    privacy_status: string
+    enable_dvr: boolean
+    enable_auto_start: boolean
+    enable_auto_stop: boolean
+    thumbnail_url?: string
+    peak_viewers?: number
+    total_chat_messages?: number
+    created_at: string
+    updated_at: string
+}
+
+// Transform backend response to frontend format
+function transformLiveEvent(event: BackendLiveEvent): LiveEvent {
+    return {
+        id: event.id,
+        account_id: event.account_id,
+        title: event.title,
+        description: event.description,
+        scheduled_start: event.scheduled_start_at || event.actual_start_at || "",
+        scheduled_end: event.scheduled_end_at || event.actual_end_at,
+        status: event.status as LiveEvent["status"],
+        broadcast_id: event.youtube_broadcast_id,
+        stream_id: event.youtube_stream_id,
+        rtmp_url: event.rtmp_url,
+        stream_key: event.rtmp_key,
+        privacy_status: event.privacy_status as LiveEvent["privacy_status"],
+        enable_dvr: event.enable_dvr,
+        enable_auto_start: event.enable_auto_start,
+        enable_auto_stop: event.enable_auto_stop,
+        thumbnail_url: event.thumbnail_url,
+        viewer_count: event.peak_viewers,
+        created_at: event.created_at,
+        updated_at: event.updated_at,
+    }
 }
 
 export interface CreateLiveEventRequest {
     account_id: string
     title: string
     description?: string
-    scheduled_start: string
-    scheduled_end?: string
+    scheduled_start_at: string  // Use backend field name
+    scheduled_end_at?: string   // Use backend field name
     privacy_status?: "public" | "unlisted" | "private"
     enable_dvr?: boolean
     enable_auto_start?: boolean
@@ -39,8 +90,8 @@ export interface CreateLiveEventRequest {
 export interface UpdateLiveEventRequest {
     title?: string
     description?: string
-    scheduled_start?: string
-    scheduled_end?: string
+    scheduled_start_at?: string  // Use backend field name
+    scheduled_end_at?: string    // Use backend field name
     privacy_status?: "public" | "unlisted" | "private"
     enable_dvr?: boolean
     enable_auto_start?: boolean
@@ -90,9 +141,9 @@ export interface LiveEventsResponse {
     page_size: number
 }
 
-// Backend response format
+// Backend response format for list
 interface BackendLiveEventsResponse {
-    events: LiveEvent[]
+    events: BackendLiveEvent[]
     total: number
     page: number
     page_size: number
@@ -107,19 +158,16 @@ export const streamsApi = {
         page_size?: number
     }): Promise<LiveEventsResponse> {
         try {
-            const response = await apiClient.get<BackendLiveEventsResponse | LiveEventsResponse>("/streams/events", params)
+            const response = await apiClient.get<BackendLiveEventsResponse>("/streams/events", params)
 
-            // Handle backend response format (events) vs frontend format (items)
+            // Transform backend events to frontend format
             if ('events' in response && Array.isArray(response.events)) {
                 return {
-                    items: response.events,
+                    items: response.events.map(transformLiveEvent),
                     total: response.total || 0,
                     page: response.page || 1,
                     page_size: response.page_size || 10,
                 }
-            }
-            if ('items' in response && Array.isArray(response.items)) {
-                return response as LiveEventsResponse
             }
             return { items: [], total: 0, page: 1, page_size: 10 }
         } catch (error) {
@@ -129,15 +177,18 @@ export const streamsApi = {
     },
 
     async getEvent(eventId: string): Promise<LiveEvent> {
-        return await apiClient.get(`/streams/events/${eventId}`)
+        const response = await apiClient.get<BackendLiveEvent>(`/streams/events/${eventId}`)
+        return transformLiveEvent(response)
     },
 
     async createEvent(data: CreateLiveEventRequest): Promise<LiveEvent> {
-        return await apiClient.post("/streams/events", data)
+        const response = await apiClient.post<BackendLiveEvent>("/streams/events", data)
+        return transformLiveEvent(response)
     },
 
     async updateEvent(eventId: string, data: UpdateLiveEventRequest): Promise<LiveEvent> {
-        return await apiClient.patch(`/streams/events/${eventId}`, data)
+        const response = await apiClient.put<BackendLiveEvent>(`/streams/events/${eventId}`, data)
+        return transformLiveEvent(response)
     },
 
     async deleteEvent(eventId: string): Promise<void> {
@@ -145,11 +196,13 @@ export const streamsApi = {
     },
 
     async startEvent(eventId: string): Promise<LiveEvent> {
-        return await apiClient.post(`/streams/events/${eventId}/start`)
+        const response = await apiClient.post<BackendLiveEvent>(`/streams/events/${eventId}/start`)
+        return transformLiveEvent(response)
     },
 
     async stopEvent(eventId: string): Promise<LiveEvent> {
-        return await apiClient.post(`/streams/events/${eventId}/stop`)
+        const response = await apiClient.post<BackendLiveEvent>(`/streams/events/${eventId}/stop`)
+        return transformLiveEvent(response)
     },
 
     // ============ Playlist ============

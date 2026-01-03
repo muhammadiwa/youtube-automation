@@ -4,7 +4,7 @@ Provides methods for creating and managing YouTube live broadcasts.
 Requirements: 5.1, 5.2, 5.3, 5.4
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Any
 import httpx
 
@@ -81,16 +81,33 @@ class YouTubeLiveStreamingClient:
             "ultraLow": "ultraLow",
         }.get(latency_mode, "normal")
 
+        # Ensure scheduled_start_time is in the future (YouTube rejects past times)
+        # Use timezone-aware UTC now for comparison
+        from datetime import timezone
+        now = datetime.now(timezone.utc)
+        
+        if scheduled_start_time is None:
+            # Default to 1 minute from now to give time for setup
+            scheduled_start_time = now + timedelta(minutes=1)
+        else:
+            # Make scheduled_start_time timezone-aware if it isn't
+            if scheduled_start_time.tzinfo is None:
+                scheduled_start_time = scheduled_start_time.replace(tzinfo=timezone.utc)
+            
+            if scheduled_start_time < now:
+                # If time is in the past, set to 1 minute from now
+                scheduled_start_time = now + timedelta(minutes=1)
+        
+        # Format datetime for YouTube API (ISO 8601 with Z suffix for UTC)
+        # Remove timezone info and add Z suffix
+        start_time_str = scheduled_start_time.replace(tzinfo=None).isoformat() + "Z"
+
         # Build request body
         body = {
             "snippet": {
                 "title": title,
                 "description": description or "",
-                "scheduledStartTime": (
-                    scheduled_start_time.isoformat() + "Z"
-                    if scheduled_start_time
-                    else datetime.utcnow().isoformat() + "Z"
-                ),
+                "scheduledStartTime": start_time_str,
             },
             "status": {
                 "privacyStatus": privacy_status,
@@ -116,8 +133,19 @@ class YouTubeLiveStreamingClient:
 
             if response.status_code != 200:
                 error_data = response.json() if response.content else {}
+                # Extract detailed error message from YouTube API response
+                error_message = f"Failed to create broadcast: {response.status_code}"
+                if error_data:
+                    yt_error = error_data.get("error", {})
+                    yt_message = yt_error.get("message", "")
+                    yt_errors = yt_error.get("errors", [])
+                    if yt_errors:
+                        reasons = [e.get("reason", "") for e in yt_errors]
+                        error_message = f"{error_message} - {yt_message} (reasons: {', '.join(reasons)})"
+                    elif yt_message:
+                        error_message = f"{error_message} - {yt_message}"
                 raise YouTubeAPIError(
-                    f"Failed to create broadcast: {response.status_code}",
+                    error_message,
                     status_code=response.status_code,
                     details=error_data,
                 )
