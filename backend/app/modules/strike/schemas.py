@@ -114,13 +114,40 @@ class StrikeSummary(BaseModel):
     """Summary of strikes for an account."""
 
     account_id: uuid.UUID
+    channel_id: Optional[str] = None
+    channel_name: Optional[str] = None
+    channel_thumbnail: Optional[str] = None
     total_strikes: int
     active_strikes: int
     appealed_strikes: int
     resolved_strikes: int
     expired_strikes: int
     has_high_risk: bool
+    risk_level: str = "low"  # low, medium, high, critical
     latest_strike: Optional[StrikeResponse] = None
+
+
+class AllAccountsSummary(BaseModel):
+    """Summary of strikes across all accounts."""
+    
+    total_accounts: int
+    accounts_with_strikes: int
+    clean_accounts: int
+    total_active_strikes: int
+    total_appealed_strikes: int
+    summaries: list[StrikeSummary]
+
+
+class SyncAllResult(BaseModel):
+    """Result of syncing all accounts."""
+    
+    total_accounts: int
+    synced_accounts: int
+    failed_accounts: int
+    new_strikes: int
+    updated_strikes: int
+    resolved_strikes: int
+    errors: list[str] = []
 
 
 # ============================================

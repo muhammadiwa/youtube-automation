@@ -106,6 +106,17 @@ class YouTubeAccountRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_all(self) -> list[YouTubeAccount]:
+        """Get all YouTube accounts.
+
+        Returns:
+            list[YouTubeAccount]: List of all YouTube accounts
+        """
+        result = await self.session.execute(
+            select(YouTubeAccount).order_by(YouTubeAccount.created_at.desc())
+        )
+        return list(result.scalars().all())
+
     async def get_by_user_id(self, user_id: uuid.UUID) -> list[YouTubeAccount]:
         """Get all accounts for a user.
 

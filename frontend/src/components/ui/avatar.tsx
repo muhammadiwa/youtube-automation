@@ -25,26 +25,21 @@ interface AvatarImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
 const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
     ({ className, alt = "", src, onLoadingStatusChange, onError, onLoad, ...props }, ref) => {
         const [hasError, setHasError] = React.useState(false)
-        const [isLoaded, setIsLoaded] = React.useState(false)
+        const imgRef = React.useRef<HTMLImageElement>(null)
 
         React.useEffect(() => {
-            // Reset state when src changes
             setHasError(false)
-            setIsLoaded(false)
         }, [src])
-
-        const handleLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
-            setIsLoaded(true)
-            setHasError(false)
-            onLoadingStatusChange?.("loaded")
-            onLoad?.(e)
-        }
 
         const handleError = (e: React.SyntheticEvent<HTMLImageElement>) => {
             setHasError(true)
-            setIsLoaded(false)
             onLoadingStatusChange?.("error")
             onError?.(e)
+        }
+
+        const handleLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+            onLoadingStatusChange?.("loaded")
+            onLoad?.(e)
         }
 
         // Don't render if no src or has error
@@ -55,19 +50,16 @@ const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
         return (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-                ref={ref}
+                ref={ref || imgRef}
                 alt={alt}
                 src={src}
                 className={cn(
                     "aspect-square h-full w-full object-cover",
-                    !isLoaded && "opacity-0",
-                    isLoaded && "opacity-100 transition-opacity duration-200",
                     className
                 )}
                 onLoad={handleLoad}
                 onError={handleError}
                 referrerPolicy="no-referrer"
-                loading="lazy"
                 {...props}
             />
         )

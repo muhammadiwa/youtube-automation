@@ -31,6 +31,8 @@ from app.modules.strike.schemas import (
     StrikeSyncResult,
     StrikeTimeline,
     AccountStrikeTimeline,
+    AllAccountsSummary,
+    SyncAllResult,
 )
 from app.modules.strike.models import StrikeStatus, AppealStatus
 from app.modules.strike.tasks import (
@@ -155,6 +157,87 @@ async def dismiss_alert(
     await service.alert_repository.delete(alert)
     await service.session.commit()
     return {"success": True}
+
+
+# ============================================
+# All Accounts Endpoints (must be before /account/{account_id} routes)
+# ============================================
+
+@router.get("/summaries", response_model=AllAccountsSummary)
+async def get_all_accounts_summary(
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Get strike summary for all connected accounts.
+
+    Returns overview of strikes across all YouTube accounts.
+    """
+    service = StrikeService(session)
+    accounts = await service.account_repository.get_all()
+    
+    summaries = []
+    total_active = 0
+    total_appealed = 0
+    accounts_with_strikes = 0
+    
+    for account in accounts:
+        try:
+            summary = await service.get_strike_summary(account.id)
+            summaries.append(summary)
+            total_active += summary.active_strikes
+            total_appealed += summary.appealed_strikes
+            if summary.total_strikes > 0:
+                accounts_with_strikes += 1
+        except Exception:
+            continue
+    
+    return AllAccountsSummary(
+        total_accounts=len(accounts),
+        accounts_with_strikes=accounts_with_strikes,
+        clean_accounts=len(accounts) - accounts_with_strikes,
+        total_active_strikes=total_active,
+        total_appealed_strikes=total_appealed,
+        summaries=summaries,
+    )
+
+
+@router.post("/sync-all", response_model=SyncAllResult)
+async def sync_all_accounts(
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Sync strikes for all connected accounts.
+
+    Fetches current strike status from YouTube for all accounts.
+    """
+    service = StrikeService(session)
+    accounts = await service.account_repository.get_all()
+    
+    synced = 0
+    failed = 0
+    total_new = 0
+    total_updated = 0
+    total_resolved = 0
+    errors = []
+    
+    for account in accounts:
+        try:
+            result = await service.sync_strikes(account.id)
+            synced += 1
+            total_new += result.new_strikes
+            total_updated += result.updated_strikes
+            total_resolved += result.resolved_strikes
+        except Exception as e:
+            failed += 1
+            errors.append(f"{account.channel_title or account.channel_id}: {str(e)}")
+    
+    return SyncAllResult(
+        total_accounts=len(accounts),
+        synced_accounts=synced,
+        failed_accounts=failed,
+        new_strikes=total_new,
+        updated_strikes=total_updated,
+        resolved_strikes=total_resolved,
+        errors=errors,
+    )
 
 
 # ============================================

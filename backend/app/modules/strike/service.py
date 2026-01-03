@@ -302,15 +302,108 @@ class StrikeService:
             if latest_strike is None or strike.issued_at > latest_strike.issued_at:
                 latest_strike = strike
 
+        # Get account info for channel details
+        account = await self.account_repository.get_by_id(account_id)
+        
+        # Calculate risk level
+        risk_level = "low"
+        if active_count >= 3 or has_high_risk:
+            risk_level = "critical"
+        elif active_count == 2:
+            risk_level = "high"
+        elif active_count == 1:
+            risk_level = "medium"
+
         return StrikeSummary(
             account_id=account_id,
+            channel_id=account.channel_id if account else None,
+            channel_name=account.channel_title if account else None,
+            channel_thumbnail=account.thumbnail_url if account else None,
             total_strikes=len(all_strikes),
             active_strikes=active_count,
             appealed_strikes=appealed_count,
             resolved_strikes=resolved_count,
             expired_strikes=expired_count,
             has_high_risk=has_high_risk,
+            risk_level=risk_level,
             latest_strike=StrikeResponse.model_validate(latest_strike) if latest_strike else None,
+        )
+
+    async def get_all_accounts_summary(self, user_id: uuid.UUID) -> "AllAccountsSummary":
+        """Get strike summary for all accounts of a user.
+
+        Args:
+            user_id: User UUID
+
+        Returns:
+            AllAccountsSummary: Summary across all accounts
+        """
+        from app.modules.strike.schemas import AllAccountsSummary
+        
+        # Get all accounts for user
+        accounts = await self.account_repository.get_by_user_id(user_id)
+        
+        summaries = []
+        total_active = 0
+        total_appealed = 0
+        accounts_with_strikes = 0
+        
+        for account in accounts:
+            summary = await self.get_strike_summary(account.id)
+            summaries.append(summary)
+            total_active += summary.active_strikes
+            total_appealed += summary.appealed_strikes
+            if summary.total_strikes > 0:
+                accounts_with_strikes += 1
+        
+        return AllAccountsSummary(
+            total_accounts=len(accounts),
+            accounts_with_strikes=accounts_with_strikes,
+            clean_accounts=len(accounts) - accounts_with_strikes,
+            total_active_strikes=total_active,
+            total_appealed_strikes=total_appealed,
+            summaries=summaries,
+        )
+
+    async def sync_all_accounts(self, user_id: uuid.UUID) -> "SyncAllResult":
+        """Sync strikes for all accounts of a user.
+
+        Args:
+            user_id: User UUID
+
+        Returns:
+            SyncAllResult: Result of sync operation
+        """
+        from app.modules.strike.schemas import SyncAllResult
+        
+        accounts = await self.account_repository.get_by_user_id(user_id)
+        
+        synced = 0
+        failed = 0
+        total_new = 0
+        total_updated = 0
+        total_resolved = 0
+        errors = []
+        
+        for account in accounts:
+            try:
+                result = await self.sync_strikes(account.id)
+                synced += 1
+                total_new += result.new_strikes
+                total_updated += result.updated_strikes
+                total_resolved += result.resolved_strikes
+            except Exception as e:
+                failed += 1
+                errors.append(f"{account.channel_title}: {str(e)}")
+        
+        return SyncAllResult(
+            total_accounts=len(accounts),
+            synced_accounts=synced,
+            failed_accounts=failed,
+            new_strikes=total_new,
+            updated_strikes=total_updated,
+            resolved_strikes=total_resolved,
+            errors=errors,
         )
 
     async def get_strike_timeline(self, strike_id: uuid.UUID) -> StrikeTimeline:
