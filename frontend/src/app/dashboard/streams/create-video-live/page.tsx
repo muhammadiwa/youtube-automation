@@ -84,11 +84,11 @@ export default function CreateVideoToLivePage() {
 
     useEffect(() => {
         loadAccounts()
+        loadVideos() // Load all videos from library on mount
     }, [])
 
     useEffect(() => {
         if (formData.accountId) {
-            loadVideos(formData.accountId)
             loadStreamKey(formData.accountId)
         }
     }, [formData.accountId])
@@ -102,10 +102,11 @@ export default function CreateVideoToLivePage() {
         }
     }
 
-    const loadVideos = async (accountId: string) => {
+    const loadVideos = async () => {
         try {
             setLoadingVideos(true)
-            const response = await videosApi.getVideos({ accountId, pageSize: 100 })
+            // Get ALL videos from user's library (includes videos without accountId)
+            const response = await videosApi.getLibraryVideos({ limit: 100 })
             // Filter only videos that have file_path (uploaded to server)
             const availableVideos = (response.items || []).filter((v) => v.filePath)
             setVideos(availableVideos)
@@ -327,17 +328,15 @@ export default function CreateVideoToLivePage() {
                                     <Select
                                         value={formData.videoId}
                                         onValueChange={handleVideoSelect}
-                                        disabled={!formData.accountId || loadingVideos}
+                                        disabled={loadingVideos}
                                     >
                                         <SelectTrigger>
                                             <SelectValue placeholder={
-                                                !formData.accountId
-                                                    ? "Select account first"
-                                                    : loadingVideos
-                                                        ? "Loading..."
-                                                        : videos.length === 0
-                                                            ? "No videos available"
-                                                            : "Select video"
+                                                loadingVideos
+                                                    ? "Loading..."
+                                                    : videos.length === 0
+                                                        ? "No videos available"
+                                                        : "Select video"
                                             } />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -348,7 +347,7 @@ export default function CreateVideoToLivePage() {
                                             ))}
                                         </SelectContent>
                                     </Select>
-                                    {formData.accountId && !loadingVideos && videos.length === 0 && (
+                                    {!loadingVideos && videos.length === 0 && (
                                         <p className="text-xs text-amber-600 dark:text-amber-400">
                                             No videos with local files found. Upload videos first to use Video-to-Live.
                                         </p>

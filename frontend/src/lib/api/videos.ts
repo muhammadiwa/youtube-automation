@@ -93,6 +93,38 @@ export const videosApi = {
     },
 
     /**
+     * Get all videos from user's library (includes videos without accountId)
+     */
+    async getLibraryVideos(options?: {
+        page?: number
+        limit?: number
+        folderId?: string
+        search?: string
+        sortBy?: string
+        sortOrder?: string
+    }): Promise<PaginatedResponse<Video>> {
+        try {
+            const params: Record<string, string | number | undefined> = {}
+            if (options?.page) params.page = options.page
+            if (options?.limit) params.limit = options.limit
+            if (options?.folderId) params.folder_id = options.folderId
+            if (options?.search) params.search = options.search
+            if (options?.sortBy) params.sort_by = options.sortBy
+            if (options?.sortOrder) params.sort_order = options.sortOrder
+
+            const response = await apiClient.get<PaginatedResponse<Video>>("/videos/library", params)
+
+            if (response && typeof response === 'object' && 'items' in response) {
+                return response as PaginatedResponse<Video>
+            }
+            return defaultPaginatedResponse
+        } catch (error) {
+            console.error("Failed to fetch library videos:", error)
+            return defaultPaginatedResponse
+        }
+    },
+
+    /**
      * Get single video by ID
      */
     async getVideo(videoId: string): Promise<Video> {
