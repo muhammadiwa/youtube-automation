@@ -51,7 +51,6 @@ const adminNavigation: NavSection[] = [
         icon: LayoutDashboard,
         items: [
             { name: "Dashboard", href: "/admin", icon: LayoutDashboard },
-            { name: "Revenue", href: "/admin/revenue", icon: TrendingUp },
             { name: "Funnel Analysis", href: "/admin/funnel", icon: TrendingUp },
         ],
     },

@@ -15,7 +15,6 @@ import {
     HelpCircle,
     Shield,
     MessageSquare,
-    DollarSign,
     AlertTriangle,
     ListTodo,
     Monitor,
@@ -34,7 +33,6 @@ const navigation = [
     { name: "Comments", href: "/dashboard/comments", icon: MessageSquare },
     { name: "Moderation", href: "/dashboard/moderation/settings", icon: Shield },
     { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
-    { name: "Revenue", href: "/dashboard/revenue", icon: DollarSign },
     { name: "Strikes", href: "/dashboard/strikes", icon: AlertTriangle },
     { name: "Monitoring", href: "/dashboard/monitoring", icon: Monitor },
     { name: "Jobs", href: "/dashboard/jobs", icon: ListTodo },
@@ -98,10 +96,6 @@ export function Sidebar({ className }: SidebarProps) {
         // Handle comments routes - check if pathname starts with /dashboard/comments
         if (href.startsWith("/dashboard/comments")) {
             return pathname.startsWith("/dashboard/comments");
-        }
-        // Handle revenue routes - check if pathname starts with /dashboard/revenue
-        if (href.startsWith("/dashboard/revenue")) {
-            return pathname.startsWith("/dashboard/revenue");
         }
         // Handle strikes routes - check if pathname starts with /dashboard/strikes
         if (href.startsWith("/dashboard/strikes")) {

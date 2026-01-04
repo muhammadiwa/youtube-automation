@@ -56,7 +56,7 @@ dan memanfaatkan AI untuk optimasi konten.
 * **Video Management** - Upload, metadata, scheduling, bulk operations
 * **Live Streaming** - Event creation, scheduling, health monitoring
 * **AI Services** - Title/description generation, thumbnail creation
-* **Analytics** - Dashboard metrics, revenue tracking, competitor analysis
+* **Analytics** - Dashboard metrics, competitor analysis
 * **Job Queue** - Background task processing dengan retry logic
 * **Notifications** - Multi-channel alerts (email, SMS, Slack, Telegram)
 
@@ -98,7 +98,7 @@ Authorization: Bearer <access_token>
         },
         {
             "name": "analytics",
-            "description": "Analytics and reporting - metrics, revenue tracking",
+            "description": "Analytics and reporting - metrics tracking",
         },
         {
             "name": "monitoring",

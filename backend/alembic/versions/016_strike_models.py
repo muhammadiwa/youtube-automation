@@ -14,7 +14,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = "016"
-down_revision = "014"
+down_revision = "013"  # Skip 014 (revenue) - revenue feature removed
 branch_labels = None
 depends_on = None
 

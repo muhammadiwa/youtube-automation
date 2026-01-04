@@ -1,7 +1,7 @@
 """Analytics API router.
 
 Implements REST endpoints for analytics and reporting.
-Requirements: 17.1, 17.2, 17.3, 17.4, 17.5, 18.1, 18.2, 18.3, 18.4, 18.5
+Requirements: 17.1, 17.2, 17.3, 17.4, 17.5
 """
 
 import uuid
@@ -31,12 +31,8 @@ from app.modules.analytics.schemas import (
     AnalyticsOverviewResponse,
     TimeSeriesDataPoint,
 )
-from app.modules.analytics.revenue_router import router as revenue_router
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
-
-# Include revenue sub-router
-router.include_router(revenue_router)
 
 
 def _parse_period_to_dates(period: str) -> tuple[date, date]:

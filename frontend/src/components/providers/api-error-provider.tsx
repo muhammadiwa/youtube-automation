@@ -44,10 +44,6 @@ const SILENT_ENDPOINTS = [
     "/analytics/subscribers/timeseries",
     "/analytics/reports",
     "/analytics/revenue/top-videos",
-    // Revenue endpoints - handled gracefully with fallback data
-    "/revenue/dashboard",
-    "/revenue/monthly-breakdown",
-    "/revenue/goals",
     // Moderation endpoints - handled gracefully with empty arrays
     "/moderation/rules",
     "/moderation/comments",
