@@ -58,10 +58,6 @@ const SILENT_ENDPOINTS = [
     "/stream-jobs/history",
     "/stream-jobs/analytics",
     "/stream-jobs/export",
-    // Jobs endpoints - handled gracefully
-    "/jobs",
-    "/jobs/queue-stats",
-    "/jobs/dlq",
     // Notifications endpoints - handled gracefully
     "/notifications",
     // Account OAuth endpoints - 401 here means YouTube token expired, not app session

@@ -16,7 +16,6 @@ import {
     Shield,
     MessageSquare,
     AlertTriangle,
-    ListTodo,
     Monitor,
     Wallet,
 } from "lucide-react";
@@ -35,7 +34,6 @@ const navigation = [
     { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
     { name: "Strikes", href: "/dashboard/strikes", icon: AlertTriangle },
     { name: "Monitoring", href: "/dashboard/monitoring", icon: Monitor },
-    { name: "Jobs", href: "/dashboard/jobs", icon: ListTodo },
     { name: "Billing", href: "/dashboard/billing", icon: Wallet },
     { name: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
@@ -100,10 +98,6 @@ export function Sidebar({ className }: SidebarProps) {
         // Handle strikes routes - check if pathname starts with /dashboard/strikes
         if (href.startsWith("/dashboard/strikes")) {
             return pathname.startsWith("/dashboard/strikes");
-        }
-        // Handle jobs routes - check if pathname starts with /dashboard/jobs
-        if (href.startsWith("/dashboard/jobs")) {
-            return pathname.startsWith("/dashboard/jobs");
         }
         // Handle monitoring routes
         if (href.startsWith("/dashboard/monitoring")) {
