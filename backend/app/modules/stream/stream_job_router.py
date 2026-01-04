@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status, WebSocket,
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.datetime_utils import ensure_utc
 from app.modules.auth.jwt import get_current_user
 from app.modules.stream.stream_job_models import StreamJobStatus
 from app.modules.stream.stream_job_schemas import (
@@ -121,10 +122,16 @@ async def bulk_create_stream_jobs(
     Returns:
         BulkCreateStreamJobResponse: Results of bulk creation
     """
-    from datetime import datetime, timezone
+    from datetime import datetime, timezone, timedelta
     
     created_jobs = []
     errors = []
+    
+    # Create timezone from offset (offset is in minutes)
+    # Note: timedelta uses opposite sign - if user is UTC+7, offset is +420
+    # but we need to subtract to convert local to UTC
+    tz_offset = timedelta(minutes=request.timezone_offset)
+    user_tz = timezone(tz_offset)
     
     for schedule in request.schedules:
         try:
@@ -133,23 +140,28 @@ async def bulk_create_stream_jobs(
             start_time_str = schedule.start_time
             end_time_str = schedule.end_time
             
-            # Create datetime objects
-            scheduled_start = datetime.strptime(
+            # Create datetime objects in user's local timezone
+            local_start = datetime.strptime(
                 f"{date_str} {start_time_str}", 
                 "%Y-%m-%d %H:%M"
-            ).replace(tzinfo=timezone.utc)
+            ).replace(tzinfo=user_tz)
+            
+            # Convert to UTC for storage
+            scheduled_start = local_start.astimezone(timezone.utc)
             
             scheduled_end = None
             if end_time_str:
-                scheduled_end = datetime.strptime(
+                local_end = datetime.strptime(
                     f"{date_str} {end_time_str}",
                     "%Y-%m-%d %H:%M"
-                ).replace(tzinfo=timezone.utc)
+                ).replace(tzinfo=user_tz)
                 
                 # Handle overnight streams (end time is next day)
-                if scheduled_end <= scheduled_start:
-                    from datetime import timedelta
-                    scheduled_end += timedelta(days=1)
+                if local_end <= local_start:
+                    local_end += timedelta(days=1)
+                
+                # Convert to UTC for storage
+                scheduled_end = local_end.astimezone(timezone.utc)
             
             # Create stream job request
             job_request = CreateStreamJobRequest(
@@ -323,13 +335,13 @@ async def get_stream_history(
             loop_mode=job.loop_mode,
             resolution=job.resolution,
             target_bitrate=job.target_bitrate,
-            actual_start_at=job.actual_start_at,
-            actual_end_at=job.actual_end_at,
+            actual_start_at=ensure_utc(job.actual_start_at),
+            actual_end_at=ensure_utc(job.actual_end_at),
             total_duration_seconds=job.total_duration_seconds,
             total_loops=job.current_loop,
             avg_bitrate_kbps=job.current_bitrate / 1000 if job.current_bitrate else None,
             total_dropped_frames=job.dropped_frames,
-            created_at=job.created_at,
+            created_at=ensure_utc(job.created_at),
         )
         for job in jobs
     ]

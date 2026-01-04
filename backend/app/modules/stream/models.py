@@ -16,6 +16,7 @@ from sqlalchemy.sql import func
 
 from app.core.database import Base
 from app.core.encryption import decrypt_token, encrypt_token, is_encrypted
+from app.core.datetime_utils import utcnow, to_naive_utc
 
 
 class LiveEventStatus(str, Enum):
@@ -225,7 +226,7 @@ class LiveEvent(Base):
             return False
         if self.scheduled_start_at is None:
             return False
-        return datetime.utcnow() >= self.scheduled_start_at.replace(tzinfo=None)
+        return to_naive_utc(utcnow()) >= self.scheduled_start_at.replace(tzinfo=None)
 
     def has_time_conflict(self, start_at: datetime, end_at: Optional[datetime]) -> bool:
         """Check if this event conflicts with a given time range.
@@ -343,7 +344,7 @@ class StreamSession(Base):
         """
         if self.started_at is None:
             return None
-        end_time = self.ended_at or datetime.utcnow()
+        end_time = self.ended_at or to_naive_utc(utcnow())
         start = self.started_at.replace(tzinfo=None)
         end = end_time.replace(tzinfo=None) if end_time.tzinfo else end_time
         return int((end - start).total_seconds())
@@ -565,7 +566,7 @@ class PlaylistItem(Base):
     def mark_as_playing(self) -> None:
         """Mark item as currently playing."""
         self.status = PlaylistItemStatus.PLAYING.value
-        self.last_played_at = datetime.utcnow()
+        self.last_played_at = to_naive_utc(utcnow())
 
     def mark_as_completed(self) -> None:
         """Mark item as completed."""
@@ -958,7 +959,7 @@ class SimulcastTarget(Base):
         """
         self.last_error = error
         self.error_count += 1
-        self.last_error_at = datetime.utcnow()
+        self.last_error_at = to_naive_utc(utcnow())
         self.status = SimulcastTargetStatus.FAILED.value
 
     def clear_errors(self) -> None:
@@ -986,12 +987,12 @@ class SimulcastTarget(Base):
             self.dropped_frames = dropped_frames
         if quality is not None:
             self.connection_quality = quality
-        self.last_health_check_at = datetime.utcnow()
+        self.last_health_check_at = to_naive_utc(utcnow())
 
     def start_streaming(self) -> None:
         """Mark target as streaming."""
         self.status = SimulcastTargetStatus.STREAMING.value
-        self.connected_at = datetime.utcnow()
+        self.connected_at = to_naive_utc(utcnow())
         self.disconnected_at = None
         self.clear_errors()
 
@@ -1002,7 +1003,7 @@ class SimulcastTarget(Base):
             reason: Optional reason for stopping
         """
         self.status = SimulcastTargetStatus.STOPPED.value
-        self.disconnected_at = datetime.utcnow()
+        self.disconnected_at = to_naive_utc(utcnow())
         
         # Calculate streaming duration
         if self.connected_at:

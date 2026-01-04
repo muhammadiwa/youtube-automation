@@ -12,6 +12,7 @@ from sqlalchemy import select, update, delete, func as sql_func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.video.models import (
     Video,
     VideoStatus,
@@ -155,11 +156,11 @@ class VideoRepository:
         Returns:
             list[Video]: Videos ready to be published
         """
-        now = datetime.utcnow()
+        now = utcnow()
         result = await self.session.execute(
             select(Video)
             .where(Video.status == VideoStatus.SCHEDULED.value)
-            .where(Video.scheduled_publish_at <= now)
+            .where(Video.scheduled_publish_at <= to_naive_utc(now))
         )
         return list(result.scalars().all())
 
@@ -386,7 +387,7 @@ class VideoRepository:
         """
         video.status = VideoStatus.PUBLISHED.value
         video.visibility = VideoVisibility.PUBLIC.value
-        video.published_at = datetime.utcnow()
+        video.published_at = utcnow()
         await self.session.flush()
         return video
 

@@ -5,11 +5,13 @@ All data is fetched from database - no mock data.
 """
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional
 
 from sqlalchemy import select, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.datetime_utils import utcnow, ensure_utc, to_naive_utc, is_in_future, hours_since
 
 from app.modules.account.models import YouTubeAccount, AccountStatus
 from app.modules.stream.models import LiveEvent, LiveEventStatus
@@ -110,9 +112,9 @@ class MonitoringService:
         Returns:
             List of live streams with total counts
         """
-        now = datetime.utcnow()
+        now = utcnow()
         # Calculate 24 hours ago for stale check
-        stale_threshold = now - timedelta(hours=24)
+        stale_threshold = to_naive_utc(now - timedelta(hours=24))
         
         # Get live events - only those without errors and not stale
         query = (
@@ -137,9 +139,7 @@ class MonitoringService:
         for event, account in rows:
             # Skip stale streams (live for more than 24 hours)
             if event.actual_start_at:
-                start = event.actual_start_at
-                if start.tzinfo is not None:
-                    start = start.replace(tzinfo=None)
+                start = to_naive_utc(ensure_utc(event.actual_start_at))
                 if start < stale_threshold:
                     continue  # Skip stale stream
             
@@ -184,8 +184,9 @@ class MonitoringService:
         days_ahead: int = 7,
     ) -> list[ScheduledStreamInfo]:
         """Get all scheduled streams for user from both LiveEvent and StreamJob."""
-        now = datetime.utcnow()
-        end_date = now + timedelta(days=days_ahead)
+        now = utcnow()
+        now_naive = to_naive_utc(now)
+        end_date = to_naive_utc(now + timedelta(days=days_ahead))
         
         streams = []
         
@@ -208,11 +209,9 @@ class MonitoringService:
         
         for event, account in rows:
             # Handle timezone comparison
-            scheduled_at = event.scheduled_start_at
+            scheduled_at = to_naive_utc(ensure_utc(event.scheduled_start_at))
             if scheduled_at:
-                if scheduled_at.tzinfo is not None:
-                    scheduled_at = scheduled_at.replace(tzinfo=None)
-                if scheduled_at > now and scheduled_at < end_date:
+                if scheduled_at > now_naive and scheduled_at < end_date:
                     stream_info = self._build_scheduled_stream_info(event, account)
                     streams.append(stream_info)
         
@@ -235,11 +234,9 @@ class MonitoringService:
         
         for job, account in rows:
             # Handle timezone comparison
-            scheduled_at = job.scheduled_start_at
+            scheduled_at = to_naive_utc(ensure_utc(job.scheduled_start_at))
             if scheduled_at:
-                if scheduled_at.tzinfo is not None:
-                    scheduled_at = scheduled_at.replace(tzinfo=None)
-                if scheduled_at > now and scheduled_at < end_date:
+                if scheduled_at > now_naive and scheduled_at < end_date:
                     stream_info = self._build_scheduled_stream_info_from_job(job, account)
                     streams.append(stream_info)
         
@@ -252,15 +249,13 @@ class MonitoringService:
         self, job: StreamJob, account: YouTubeAccount
     ) -> ScheduledStreamInfo:
         """Build scheduled stream info from StreamJob."""
-        now = datetime.utcnow()
-        scheduled_at = job.scheduled_start_at
-        
-        # Handle timezone-aware datetime
-        if scheduled_at and scheduled_at.tzinfo is not None:
-            scheduled_at = scheduled_at.replace(tzinfo=None)
+        now = utcnow()
+        scheduled_at = ensure_utc(job.scheduled_start_at)
         
         starts_in = int((scheduled_at - now).total_seconds()) if scheduled_at else 0
         
+        # Use ensure_utc() to keep timezone info - Pydantic will serialize with +00:00
+        # Frontend will correctly interpret as UTC
         return ScheduledStreamInfo(
             stream_id=str(job.id),
             account_id=str(account.id),
@@ -269,8 +264,8 @@ class MonitoringService:
             channel_thumbnail=account.thumbnail_url,
             title=job.title,
             description=job.description,
-            scheduled_start_at=scheduled_at,
-            scheduled_end_at=job.scheduled_end_at.replace(tzinfo=None) if job.scheduled_end_at and job.scheduled_end_at.tzinfo else job.scheduled_end_at,
+            scheduled_start_at=ensure_utc(scheduled_at),
+            scheduled_end_at=ensure_utc(job.scheduled_end_at),
             starts_in_seconds=max(0, starts_in),
         )
 
@@ -396,7 +391,8 @@ class MonitoringService:
 
     async def _get_stream_status(self, account_id: uuid.UUID) -> StreamStatus:
         """Determine stream status for an account (checks both LiveEvent and StreamJob)."""
-        now = datetime.utcnow()
+        now = utcnow()
+        now_naive = to_naive_utc(now)
         
         # Check if live from LiveEvent
         live_query = (
@@ -415,10 +411,8 @@ class MonitoringService:
         
         if live_event:
             if live_event.actual_start_at:
-                start = live_event.actual_start_at
-                if start.tzinfo is not None:
-                    start = start.replace(tzinfo=None)
-                hours_live = (now - start).total_seconds() / 3600
+                start = ensure_utc(live_event.actual_start_at)
+                hours_live = hours_since(start)
                 if hours_live <= 24:
                     return StreamStatus.LIVE
         
@@ -453,10 +447,8 @@ class MonitoringService:
         result = await self.session.execute(scheduled_query)
         event = result.scalar_one_or_none()
         if event and event.scheduled_start_at:
-            scheduled_at = event.scheduled_start_at
-            if scheduled_at.tzinfo is not None:
-                scheduled_at = scheduled_at.replace(tzinfo=None)
-            if scheduled_at > now:
+            scheduled_at = to_naive_utc(ensure_utc(event.scheduled_start_at))
+            if scheduled_at > now_naive:
                 return StreamStatus.SCHEDULED
         
         # Check if scheduled from StreamJob
@@ -475,10 +467,8 @@ class MonitoringService:
         result = await self.session.execute(scheduled_job_query)
         job = result.scalar_one_or_none()
         if job and job.scheduled_start_at:
-            scheduled_at = job.scheduled_start_at
-            if scheduled_at.tzinfo is not None:
-                scheduled_at = scheduled_at.replace(tzinfo=None)
-            if scheduled_at > now:
+            scheduled_at = to_naive_utc(ensure_utc(job.scheduled_start_at))
+            if scheduled_at > now_naive:
                 return StreamStatus.SCHEDULED
         
         return StreamStatus.OFFLINE
@@ -508,11 +498,7 @@ class MonitoringService:
         
         # Check if stream is stale (live for more than 24 hours)
         if event.actual_start_at:
-            now = datetime.utcnow()
-            start = event.actual_start_at
-            if start.tzinfo is not None:
-                start = start.replace(tzinfo=None)
-            hours_live = (now - start).total_seconds() / 3600
+            hours_live = hours_since(event.actual_start_at)
             if hours_live > 24:
                 return None  # Stale stream, don't show as live
         
@@ -520,7 +506,8 @@ class MonitoringService:
 
     async def _get_next_scheduled_stream(self, account: YouTubeAccount) -> Optional[ScheduledStreamInfo]:
         """Get next scheduled stream for account (checks both LiveEvent and StreamJob)."""
-        now = datetime.utcnow()
+        now = utcnow()
+        now_naive = to_naive_utc(now)
         candidates = []
         
         # Check LiveEvent
@@ -540,10 +527,8 @@ class MonitoringService:
         event = result.scalar_one_or_none()
         
         if event and event.scheduled_start_at:
-            scheduled_at = event.scheduled_start_at
-            if scheduled_at.tzinfo is not None:
-                scheduled_at = scheduled_at.replace(tzinfo=None)
-            if scheduled_at > now:
+            scheduled_at = to_naive_utc(ensure_utc(event.scheduled_start_at))
+            if scheduled_at > now_naive:
                 candidates.append(('event', event, scheduled_at))
         
         # Check StreamJob
@@ -563,10 +548,8 @@ class MonitoringService:
         job = result.scalar_one_or_none()
         
         if job and job.scheduled_start_at:
-            scheduled_at = job.scheduled_start_at
-            if scheduled_at.tzinfo is not None:
-                scheduled_at = scheduled_at.replace(tzinfo=None)
-            if scheduled_at > now:
+            scheduled_at = to_naive_utc(ensure_utc(job.scheduled_start_at))
+            if scheduled_at > now_naive:
                 candidates.append(('job', job, scheduled_at))
         
         if not candidates:
@@ -583,15 +566,13 @@ class MonitoringService:
 
     def _build_live_stream_info(self, event: LiveEvent, account: YouTubeAccount) -> LiveStreamInfo:
         """Build live stream info from event and account."""
-        now = datetime.utcnow()
-        started_at = event.actual_start_at or now
-        
-        # Handle timezone-aware datetime
-        if started_at.tzinfo is not None:
-            started_at = started_at.replace(tzinfo=None)
+        now = utcnow()
+        started_at = ensure_utc(event.actual_start_at) or now
         
         duration = int((now - started_at).total_seconds())
         
+        # Use ensure_utc() to keep timezone info - Pydantic will serialize with +00:00
+        # Frontend will correctly interpret as UTC
         return LiveStreamInfo(
             stream_id=str(event.id),
             account_id=str(account.id),
@@ -605,22 +586,20 @@ class MonitoringService:
             peak_viewers=event.peak_viewers or 0,
             chat_messages=event.total_chat_messages or 0,
             likes=0,  # Would need real-time API
-            started_at=started_at,
+            started_at=ensure_utc(started_at),
             duration_seconds=max(0, duration),
             health_status=HealthStatus.HEALTHY,
         )
 
     def _build_scheduled_stream_info(self, event: LiveEvent, account: YouTubeAccount) -> ScheduledStreamInfo:
         """Build scheduled stream info from event and account."""
-        now = datetime.utcnow()
-        scheduled_at = event.scheduled_start_at
-        
-        # Handle timezone-aware datetime
-        if scheduled_at and scheduled_at.tzinfo is not None:
-            scheduled_at = scheduled_at.replace(tzinfo=None)
+        now = utcnow()
+        scheduled_at = ensure_utc(event.scheduled_start_at)
         
         starts_in = int((scheduled_at - now).total_seconds()) if scheduled_at else 0
         
+        # Use ensure_utc() to keep timezone info - Pydantic will serialize with +00:00
+        # Frontend will correctly interpret as UTC
         return ScheduledStreamInfo(
             stream_id=str(event.id),
             account_id=str(account.id),
@@ -629,8 +608,8 @@ class MonitoringService:
             channel_thumbnail=account.thumbnail_url,
             title=event.title,
             description=event.description,
-            scheduled_start_at=scheduled_at,
-            scheduled_end_at=event.scheduled_end_at,
+            scheduled_start_at=ensure_utc(scheduled_at),
+            scheduled_end_at=ensure_utc(event.scheduled_end_at),
             starts_in_seconds=max(0, starts_in),
         )
 
@@ -679,7 +658,7 @@ class MonitoringService:
     def _generate_alerts(self, account: YouTubeAccount, status: ChannelStatusInfo) -> list[Alert]:
         """Generate alerts for a channel based on its status."""
         alerts = []
-        now = datetime.utcnow()
+        now = utcnow()
         
         # Token expired
         if status.is_token_expired:
@@ -781,10 +760,10 @@ class MonitoringService:
         total_viewers = sum(s.viewer_count for s in live_streams)
         
         # Scheduled today
-        today = datetime.utcnow().date()
+        today = utcnow().date()
         scheduled_today = sum(
             1 for s in scheduled_streams 
-            if s.scheduled_start_at.date() == today
+            if s.scheduled_start_at and s.scheduled_start_at.date() == today
         )
         
         # Alert counts

@@ -12,6 +12,7 @@ from sqlalchemy import select, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.stream.stream_job_models import (
     StreamJob,
     StreamJobHealth,
@@ -157,7 +158,7 @@ class StreamJobRepository:
             Sequence[StreamJob]: Scheduled stream jobs ready to start
         """
         if before is None:
-            before = datetime.utcnow()
+            before = to_naive_utc(utcnow())
         
         query = select(StreamJob).where(
             and_(
@@ -175,7 +176,7 @@ class StreamJobRepository:
         Returns:
             Sequence[StreamJob]: Jobs that should stop
         """
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         
         query = select(StreamJob).where(
             and_(
@@ -289,7 +290,7 @@ class StreamJobRepository:
             job.last_error = error
         
         # Update timing based on status
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         if status == StreamJobStatus.RUNNING:
             job.actual_start_at = now
             job.is_stream_key_locked = True
@@ -473,7 +474,7 @@ class StreamJobHealthRepository:
         Returns:
             tuple[Sequence[StreamJobHealth], int]: Health records and total count
         """
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = to_naive_utc(utcnow()) - timedelta(hours=hours)
         
         # Build base query
         base_filter = and_(
@@ -568,7 +569,7 @@ class StreamJobHealthRepository:
         Returns:
             int: Number of deleted records
         """
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = to_naive_utc(utcnow()) - timedelta(days=days)
         
         # Get count first
         count_query = select(func.count(StreamJobHealth.id)).where(
@@ -665,7 +666,7 @@ class StreamJobAnalyticsRepository:
         Returns:
             tuple[Sequence[StreamJob], int]: Jobs and total count
         """
-        since = datetime.utcnow() - timedelta(days=days)
+        since = to_naive_utc(utcnow()) - timedelta(days=days)
         
         # Only get completed/stopped/failed jobs
         finished_statuses = [
@@ -716,7 +717,7 @@ class StreamJobAnalyticsRepository:
         Returns:
             dict: Analytics summary
         """
-        since = datetime.utcnow() - timedelta(days=days)
+        since = to_naive_utc(utcnow()) - timedelta(days=days)
         
         # Get aggregate statistics
         query = select(
@@ -773,7 +774,7 @@ class StreamJobAnalyticsRepository:
         Returns:
             list[dict]: [{date, count}]
         """
-        since = datetime.utcnow() - timedelta(days=days)
+        since = to_naive_utc(utcnow()) - timedelta(days=days)
         
         query = select(
             func.date(StreamJob.created_at).label("date"),
@@ -804,7 +805,7 @@ class StreamJobAnalyticsRepository:
         Returns:
             list[dict]: [{date, hours}]
         """
-        since = datetime.utcnow() - timedelta(days=days)
+        since = to_naive_utc(utcnow()) - timedelta(days=days)
         
         query = select(
             func.date(StreamJob.created_at).label("date"),
@@ -837,7 +838,7 @@ class StreamJobAnalyticsRepository:
         Returns:
             list[dict]: List of job data for CSV
         """
-        since = datetime.utcnow() - timedelta(days=days)
+        since = to_naive_utc(utcnow()) - timedelta(days=days)
         
         query = (
             select(StreamJob)

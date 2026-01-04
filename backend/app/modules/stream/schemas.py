@@ -11,6 +11,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.stream.models import (
     LiveEventStatus,
     LatencyMode,
@@ -85,7 +86,7 @@ class ScheduleLiveEventRequest(BaseModel):
     @field_validator("scheduled_start_at")
     @classmethod
     def validate_future_start(cls, v: datetime) -> datetime:
-        if v.replace(tzinfo=None) < datetime.utcnow():
+        if v.replace(tzinfo=None) < to_naive_utc(utcnow()):
             raise ValueError("Scheduled start time must be in the future")
         return v
 

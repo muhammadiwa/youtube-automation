@@ -15,6 +15,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
 from app.core.database import Base
+from app.core.datetime_utils import utcnow, to_naive_utc
 
 
 class GatewayProvider(str, Enum):
@@ -344,15 +345,15 @@ class GatewayStatistics(Base):
     def record_transaction(self, amount: float, success: bool) -> None:
         """Record a transaction and update statistics."""
         self.total_transactions += 1
-        self.last_transaction_at = datetime.utcnow()
+        self.last_transaction_at = to_naive_utc(utcnow())
         
         if success:
             self.successful_transactions += 1
             self.total_volume += amount
-            self.last_success_at = datetime.utcnow()
+            self.last_success_at = to_naive_utc(utcnow())
         else:
             self.failed_transactions += 1
-            self.last_failure_at = datetime.utcnow()
+            self.last_failure_at = to_naive_utc(utcnow())
         
         self.success_rate = self.calculate_success_rate()
         self.average_transaction = self.calculate_average_transaction()

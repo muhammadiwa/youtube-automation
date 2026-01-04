@@ -12,6 +12,7 @@ from typing import Optional
 
 import httpx
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.payment_gateway.interface import (
     PaymentGatewayInterface,
     CreatePaymentDTO,
@@ -209,7 +210,7 @@ class MidtransGateway(PaymentGatewayInterface):
                 status=status,
                 amount=float(response.get("gross_amount", 0)),
                 currency="IDR",
-                paid_at=datetime.utcnow() if status == PaymentStatus.COMPLETED.value else None,
+                paid_at=to_naive_utc(utcnow()) if status == PaymentStatus.COMPLETED.value else None,
                 payment_method=response.get("payment_type"),
                 gateway_response=response,
             )

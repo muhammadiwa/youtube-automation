@@ -8,6 +8,8 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
+from app.core.datetime_utils import utcnow, to_naive_utc
+
 from app.modules.moderation.models import (
     ChatMessage,
     ModerationActionLog,
@@ -57,7 +59,7 @@ class ModerationActionExecutor:
         Returns:
             ModerationActionLog recording the action
         """
-        processing_started = datetime.utcnow()
+        processing_started = to_naive_utc(utcnow())
         
         # Execute the action
         handler = self._action_handlers.get(action_type)
@@ -70,7 +72,7 @@ class ModerationActionExecutor:
             was_successful = False
             error_message = f"Unknown action type: {action_type}"
 
-        processing_completed = datetime.utcnow()
+        processing_completed = to_naive_utc(utcnow())
 
         # Create action log (Requirements: 12.5)
         action_log = ModerationActionLog(
@@ -93,7 +95,7 @@ class ModerationActionExecutor:
         )
 
         if timeout_duration_seconds and action_type == ModerationActionType.TIMEOUT:
-            action_log.timeout_expires_at = datetime.utcnow() + timedelta(
+            action_log.timeout_expires_at = to_naive_utc(utcnow()) + timedelta(
                 seconds=timeout_duration_seconds
             )
 
@@ -118,7 +120,7 @@ class ModerationActionExecutor:
         try:
             message.is_hidden = True
             message.is_moderated = True
-            message.moderated_at = datetime.utcnow()
+            message.moderated_at = to_naive_utc(utcnow())
             return True, None
         except Exception as e:
             return False, str(e)
@@ -142,7 +144,7 @@ class ModerationActionExecutor:
         try:
             message.is_deleted = True
             message.is_moderated = True
-            message.moderated_at = datetime.utcnow()
+            message.moderated_at = to_naive_utc(utcnow())
             return True, None
         except Exception as e:
             return False, str(e)
@@ -170,7 +172,7 @@ class ModerationActionExecutor:
             # Mark message as moderated
             message.is_hidden = True
             message.is_moderated = True
-            message.moderated_at = datetime.utcnow()
+            message.moderated_at = to_naive_utc(utcnow())
             
             # Note: Actual YouTube API timeout would be called here
             # This is a placeholder for the timeout logic
@@ -195,7 +197,7 @@ class ModerationActionExecutor:
         try:
             # Mark message as moderated but not hidden
             message.is_moderated = True
-            message.moderated_at = datetime.utcnow()
+            message.moderated_at = to_naive_utc(utcnow())
             return True, None
         except Exception as e:
             return False, str(e)
@@ -218,7 +220,7 @@ class ModerationActionExecutor:
             # Mark message as deleted
             message.is_deleted = True
             message.is_moderated = True
-            message.moderated_at = datetime.utcnow()
+            message.moderated_at = to_naive_utc(utcnow())
             
             # Note: Actual YouTube API ban would be called here
             return True, None
@@ -285,7 +287,7 @@ class UserModerationHistory:
         """
         if user_channel_id not in self._violations:
             self._violations[user_channel_id] = []
-        self._violations[user_channel_id].append(datetime.utcnow())
+        self._violations[user_channel_id].append(to_naive_utc(utcnow()))
 
     def record_timeout(self, user_channel_id: str) -> None:
         """Record a timeout for a user.
@@ -295,7 +297,7 @@ class UserModerationHistory:
         """
         if user_channel_id not in self._timeouts:
             self._timeouts[user_channel_id] = []
-        self._timeouts[user_channel_id].append(datetime.utcnow())
+        self._timeouts[user_channel_id].append(to_naive_utc(utcnow()))
 
     def get_recent_violations(
         self,
@@ -314,7 +316,7 @@ class UserModerationHistory:
         if user_channel_id not in self._violations:
             return 0
         
-        cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+        cutoff = to_naive_utc(utcnow()) - timedelta(minutes=minutes)
         return sum(
             1 for v in self._violations[user_channel_id]
             if v >= cutoff

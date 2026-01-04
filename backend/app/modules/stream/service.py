@@ -10,6 +10,7 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.account.models import YouTubeAccount
 from app.modules.account.repository import YouTubeAccountRepository
 from app.modules.account.service import YouTubeAccountService
@@ -590,7 +591,7 @@ class StreamService:
         current_date = pattern.next_occurrence_at or parent_event.scheduled_start_at
 
         if current_date is None:
-            current_date = datetime.utcnow()
+            current_date = to_naive_utc(utcnow())
 
         for _ in range(count):
             if not pattern.should_generate_more():
@@ -818,7 +819,7 @@ class StreamService:
         if active_session:
             if active_session.started_at:
                 from datetime import datetime
-                duration_minutes = int((datetime.utcnow() - active_session.started_at).total_seconds() / 60)
+                duration_minutes = int((to_naive_utc(utcnow()) - active_session.started_at).total_seconds() / 60)
             await self.session_repository.end_session(active_session, end_reason=reason)
 
         # Update event status
@@ -2179,7 +2180,7 @@ class SimulcastService:
             "error_count": target.error_count,
             "other_platforms_affected": other_platforms_affected,
             "active_platforms_count": len(other_active),
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": to_naive_utc(utcnow()).isoformat(),
         }
 
     async def get_simulcast_status(

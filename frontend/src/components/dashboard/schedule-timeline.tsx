@@ -6,56 +6,13 @@ import { Button } from "@/components/ui/button"
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 import { Calendar, Clock, Play, Edit, X } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { formatCountdown, formatTime, formatSmartDate, isWithinHours } from "@/lib/utils/datetime"
 import type { ScheduledStreamInfo } from "@/lib/api/monitoring"
 import Link from "next/link"
 
 interface ScheduleTimelineProps {
     streams: ScheduledStreamInfo[]
     maxItems?: number
-}
-
-function formatCountdown(seconds: number): string {
-    if (seconds <= 0) return "Starting now"
-
-    const days = Math.floor(seconds / 86400)
-    const hours = Math.floor((seconds % 86400) / 3600)
-    const minutes = Math.floor((seconds % 3600) / 60)
-
-    if (days > 0) {
-        return `in ${days}d ${hours}h`
-    }
-    if (hours > 0) {
-        return `in ${hours}h ${minutes}m`
-    }
-    return `in ${minutes}m`
-}
-
-function formatTime(dateString: string): string {
-    const date = new Date(dateString)
-    return date.toLocaleTimeString("en-US", {
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true,
-    })
-}
-
-function formatDate(dateString: string): string {
-    const date = new Date(dateString)
-    const today = new Date()
-    const tomorrow = new Date(today)
-    tomorrow.setDate(tomorrow.getDate() + 1)
-
-    if (date.toDateString() === today.toDateString()) {
-        return "Today"
-    }
-    if (date.toDateString() === tomorrow.toDateString()) {
-        return "Tomorrow"
-    }
-    return date.toLocaleDateString("en-US", {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-    })
 }
 
 function isStartingSoon(seconds: number): boolean {
@@ -162,7 +119,7 @@ export function ScheduleTimeline({ streams, maxItems = 5 }: ScheduleTimelineProp
                                     <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
                                         <span className="flex items-center gap-1">
                                             <Calendar className="h-3 w-3" />
-                                            {formatDate(stream.scheduled_start_at)}
+                                            {formatSmartDate(stream.scheduled_start_at)}
                                         </span>
                                         <span className="flex items-center gap-1">
                                             <Clock className="h-3 w-3" />

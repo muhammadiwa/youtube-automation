@@ -9,6 +9,7 @@ from typing import Optional, List
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.core.datetime_utils import ensure_utc
 from app.modules.stream.stream_job_models import (
     StreamJobStatus,
     LoopMode,
@@ -113,8 +114,8 @@ class CreateStreamJobRequest(StreamJobBase):
 class ScheduleItem(BaseModel):
     """Single schedule item for bulk create."""
     date: str = Field(..., description="Date in YYYY-MM-DD format")
-    start_time: str = Field(..., description="Start time in HH:MM format")
-    end_time: Optional[str] = Field(None, description="End time in HH:MM format (optional)")
+    start_time: str = Field(..., description="Start time in HH:MM format (local time)")
+    end_time: Optional[str] = Field(None, description="End time in HH:MM format (local time, optional)")
 
 
 class BulkCreateStreamJobRequest(BaseModel):
@@ -148,6 +149,10 @@ class BulkCreateStreamJobRequest(BaseModel):
     
     # Chat moderation
     enable_chat_moderation: bool = Field(default=True)
+    
+    # Timezone offset in minutes from UTC (e.g., +420 for UTC+7/WIB)
+    # Positive = ahead of UTC, Negative = behind UTC
+    timezone_offset: int = Field(default=0, description="Timezone offset in minutes from UTC")
     
     # Schedules - list of date/time combinations
     schedules: List[ScheduleItem] = Field(..., min_length=1, max_length=30)
@@ -308,7 +313,10 @@ class StreamJobResponse(BaseModel):
 
     @classmethod
     def from_model(cls, job) -> "StreamJobResponse":
-        """Create response from StreamJob model."""
+        """Create response from StreamJob model.
+        
+        All datetime fields are converted to UTC-aware for proper frontend handling.
+        """
         return cls(
             id=job.id,
             user_id=job.user_id,
@@ -330,13 +338,14 @@ class StreamJobResponse(BaseModel):
             target_bitrate=job.target_bitrate,
             encoding_mode=job.encoding_mode,
             target_fps=job.target_fps,
-            scheduled_start_at=job.scheduled_start_at,
-            scheduled_end_at=job.scheduled_end_at,
+            # Use ensure_utc() for timezone-aware datetime (frontend interprets correctly)
+            scheduled_start_at=ensure_utc(job.scheduled_start_at),
+            scheduled_end_at=ensure_utc(job.scheduled_end_at),
             time_until_start=job.get_time_until_start(),
             pid=job.pid,
             status=job.status,
-            actual_start_at=job.actual_start_at,
-            actual_end_at=job.actual_end_at,
+            actual_start_at=ensure_utc(job.actual_start_at),
+            actual_end_at=ensure_utc(job.actual_end_at),
             total_duration_seconds=job.total_duration_seconds,
             current_duration_seconds=job.get_duration_seconds(),
             last_error=job.last_error,
@@ -352,8 +361,8 @@ class StreamJobResponse(BaseModel):
             current_playlist_index=job.current_playlist_index,
             total_playlist_items=job.total_playlist_items,
             playlist_progress=job.get_playlist_progress(),
-            created_at=job.created_at,
-            updated_at=job.updated_at,
+            created_at=ensure_utc(job.created_at),
+            updated_at=ensure_utc(job.updated_at),
         )
 
 

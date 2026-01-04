@@ -10,6 +10,8 @@ from typing import Optional
 from sqlalchemy import select, update, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
+
 from app.modules.moderation.models import (
     ChatMessage,
     CustomCommand,
@@ -92,7 +94,7 @@ class ModerationRuleRepository:
             .where(ModerationRule.id == rule_id)
             .values(
                 trigger_count=ModerationRule.trigger_count + 1,
-                last_triggered_at=datetime.utcnow(),
+                last_triggered_at=to_naive_utc(utcnow()),
             )
         )
 
@@ -198,7 +200,7 @@ class ChatMessageRepository:
             message.is_hidden = is_hidden
             message.is_deleted = is_deleted
             message.moderation_reason = reason
-            message.moderated_at = datetime.utcnow() if is_moderated else None
+            message.moderated_at = to_naive_utc(utcnow()) if is_moderated else None
             message.analysis_completed = True
             if violated_rules:
                 message.violated_rules = violated_rules
@@ -213,7 +215,7 @@ class ChatMessageRepository:
     ) -> list[ChatMessage]:
         """Get recent messages from an author within a time window."""
         from datetime import timedelta
-        cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+        cutoff = to_naive_utc(utcnow()) - timedelta(minutes=minutes)
         
         result = await self.session.execute(
             select(ChatMessage)
@@ -364,6 +366,6 @@ class CustomCommandRepository:
             .where(CustomCommand.id == command_id)
             .values(
                 usage_count=CustomCommand.usage_count + 1,
-                last_used_at=datetime.utcnow(),
+                last_used_at=to_naive_utc(utcnow()),
             )
         )

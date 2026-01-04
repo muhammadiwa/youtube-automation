@@ -15,6 +15,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.core.database import Base
+from app.core.datetime_utils import utcnow, to_naive_utc
 
 
 class StrikeType(str, Enum):
@@ -181,7 +182,9 @@ class Strike(Base):
         """
         if self.expires_at is None:
             return False
-        return datetime.utcnow() >= self.expires_at.replace(tzinfo=None)
+        now = to_naive_utc(utcnow())
+        expires = self.expires_at.replace(tzinfo=None) if self.expires_at.tzinfo else self.expires_at
+        return now >= expires
 
     def can_appeal(self) -> bool:
         """Check if strike can be appealed.

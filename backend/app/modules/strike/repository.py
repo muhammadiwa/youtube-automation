@@ -12,6 +12,7 @@ from sqlalchemy import select, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.datetime_utils import utcnow
 from app.modules.strike.models import (
     Strike,
     StrikeAlert,
@@ -132,14 +133,14 @@ class StrikeRepository:
         return strike
 
     async def set_status(
-        self, strike: Strike, status: StrikeStatus, resolved_at: Optional[datetime] = None
+        self, strike: Strike, status: StrikeStatus, resolved_at=None
     ) -> Strike:
         """Update strike status."""
         strike.status = status.value
         if resolved_at:
             strike.resolved_at = resolved_at
         elif status in [StrikeStatus.RESOLVED, StrikeStatus.EXPIRED]:
-            strike.resolved_at = datetime.utcnow()
+            strike.resolved_at = utcnow()
         await self.session.flush()
         return strike
 
@@ -154,18 +155,18 @@ class StrikeRepository:
         strike.appeal_status = appeal_status.value
         
         if appeal_status == AppealStatus.PENDING:
-            strike.appeal_submitted_at = datetime.utcnow()
+            strike.appeal_submitted_at = utcnow()
             if appeal_reason:
                 strike.appeal_reason = appeal_reason
         
         if appeal_status in [AppealStatus.APPROVED, AppealStatus.REJECTED]:
-            strike.appeal_resolved_at = datetime.utcnow()
+            strike.appeal_resolved_at = utcnow()
             if appeal_response:
                 strike.appeal_response = appeal_response
             
             if appeal_status == AppealStatus.APPROVED:
                 strike.status = StrikeStatus.RESOLVED.value
-                strike.resolved_at = datetime.utcnow()
+                strike.resolved_at = utcnow()
         
         await self.session.flush()
         return strike
@@ -173,20 +174,20 @@ class StrikeRepository:
     async def mark_notification_sent(self, strike: Strike) -> Strike:
         """Mark strike notification as sent."""
         strike.notification_sent = True
-        strike.notification_sent_at = datetime.utcnow()
+        strike.notification_sent_at = utcnow()
         await self.session.flush()
         return strike
 
     async def mark_streams_paused(self, strike: Strike) -> Strike:
         """Mark that streams have been paused for this strike."""
         strike.streams_paused = True
-        strike.streams_paused_at = datetime.utcnow()
+        strike.streams_paused_at = utcnow()
         await self.session.flush()
         return strike
 
     async def mark_streams_resumed(self, strike: Strike) -> Strike:
         """Mark that streams have been resumed for this strike."""
-        strike.streams_resumed_at = datetime.utcnow()
+        strike.streams_resumed_at = utcnow()
         await self.session.flush()
         return strike
 
@@ -262,7 +263,7 @@ class StrikeAlertRepository:
     ) -> StrikeAlert:
         """Mark alert as delivered."""
         alert.channels_sent = channels
-        alert.delivered_at = datetime.utcnow()
+        alert.delivered_at = utcnow()
         alert.delivery_status = "delivered" if not error else "failed"
         if error:
             alert.delivery_error = error
@@ -274,7 +275,7 @@ class StrikeAlertRepository:
     ) -> StrikeAlert:
         """Acknowledge an alert."""
         alert.acknowledged = True
-        alert.acknowledged_at = datetime.utcnow()
+        alert.acknowledged_at = utcnow()
         alert.acknowledged_by = user_id
         await self.session.flush()
         return alert
@@ -319,7 +320,7 @@ class StrikeAlertRepository:
             StrikeAlert.acknowledged == False
         ).values(
             acknowledged=True,
-            acknowledged_at=datetime.utcnow(),
+            acknowledged_at=utcnow(),
         )
         
         result = await self.session.execute(query)
@@ -407,7 +408,7 @@ class PausedStreamRepository:
     ) -> PausedStream:
         """Resume a paused stream."""
         paused_stream.resumed = True
-        paused_stream.resumed_at = datetime.utcnow()
+        paused_stream.resumed_at = utcnow()
         paused_stream.resumed_by = user_id
         paused_stream.resume_confirmation = confirmation
         await self.session.flush()

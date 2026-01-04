@@ -186,11 +186,12 @@ class APIKey(Base):
 
     def is_valid(self) -> bool:
         """Check if key is valid (active and not expired)."""
+        from app.core.datetime_utils import utcnow, ensure_utc
         if not self.is_active:
             return False
         if self.revoked_at:
             return False
-        if self.expires_at and datetime.utcnow() > self.expires_at:
+        if self.expires_at and utcnow() > ensure_utc(self.expires_at):
             return False
         return True
 

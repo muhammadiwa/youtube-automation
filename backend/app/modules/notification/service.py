@@ -10,6 +10,7 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.notification.models import (
     NotificationChannel,
     NotificationPriority,
@@ -171,7 +172,7 @@ class NotificationService:
         return NotificationSendResponse(
             notification_ids=notification_ids,
             channels_used=channels_used,
-            queued_at=datetime.utcnow(),
+            queued_at=to_naive_utc(utcnow()),
             message=f"Notification queued for {len(channels_used)} channel(s)",
         )
 
@@ -588,7 +589,7 @@ class NotificationService:
                 sla_compliance_percent=stats["sla_compliance_percent"],
                 sla_threshold_seconds=self.SLA_THRESHOLD_SECONDS,
             ),
-            generated_at=datetime.utcnow(),
+            generated_at=to_naive_utc(utcnow()),
         )
 
     # ==================== Helper Methods ====================

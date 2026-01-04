@@ -13,6 +13,7 @@ from celery import Task
 
 from app.core.celery_app import celery_app
 from app.core.database import celery_session_maker
+from app.core.datetime_utils import utcnow
 from app.modules.job.tasks import BaseTaskWithRetry, RetryConfig, RETRY_CONFIGS
 from app.modules.transcoding.models import (
     TranscodeJob,
@@ -429,7 +430,7 @@ async def _process_queued_jobs_async() -> dict:
                 })
     
     return {
-        "processed_at": datetime.utcnow().isoformat(),
+        "processed_at": utcnow().isoformat(),
         "dispatched_count": len(dispatched),
         "dispatched_jobs": dispatched,
         "errors": errors,

@@ -624,14 +624,14 @@ async def get_ai_insights(
                 detail="Invalid account ID format",
             )
 
-    from datetime import datetime
+    from app.core.datetime_utils import utcnow
     insights = await service.generate_ai_insights(
         start_date, end_date, parsed_account_ids
     )
 
     return AIInsightsResponse(
         insights=insights,
-        generated_at=datetime.utcnow(),
+        generated_at=utcnow(),
         period_start=start_date,
         period_end=end_date,
     )

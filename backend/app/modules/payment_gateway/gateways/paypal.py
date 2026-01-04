@@ -6,11 +6,12 @@ Requirements: 30.4 - Process payments through gateway
 
 import base64
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 import httpx
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.payment_gateway.interface import (
     PaymentGatewayInterface,
     CreatePaymentDTO,
@@ -54,7 +55,7 @@ class PayPalGateway(PaymentGatewayInterface):
         """
         # Check if we have a valid cached token
         if self._access_token and self._token_expires_at:
-            if datetime.utcnow() < self._token_expires_at:
+            if utcnow() < self._token_expires_at:
                 return self._access_token
         
         # Get new token
@@ -78,7 +79,7 @@ class PayPalGateway(PaymentGatewayInterface):
             # Token expires in seconds, subtract 60 for safety margin
             expires_in = data.get("expires_in", 3600) - 60
             from datetime import timedelta
-            self._token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+            self._token_expires_at = utcnow() + timedelta(seconds=expires_in)
             
             return self._access_token
     
@@ -215,7 +216,7 @@ class PayPalGateway(PaymentGatewayInterface):
                 status=status,
                 amount=amount,
                 currency=currency,
-                paid_at=datetime.utcnow() if status == PaymentStatus.COMPLETED.value else None,
+                paid_at=utcnow() if status == PaymentStatus.COMPLETED.value else None,
                 payment_method="paypal",
                 gateway_response=response,
             )

@@ -12,6 +12,7 @@ from celery import shared_task
 
 from app.core.celery_app import celery_app
 from app.core.database import get_db as get_async_session
+from app.core.datetime_utils import utcnow, to_naive_utc
 
 
 @celery_app.task(
@@ -76,7 +77,7 @@ def check_and_alert_strikes(self, account_id: str) -> dict:
     async def _check_and_alert():
         async for session in get_async_session():
             service = StrikeService(session)
-            detection_time = datetime.utcnow()
+            detection_time = to_naive_utc(utcnow())
             alerts = await service.check_and_alert_new_strikes(
                 uuid.UUID(account_id), detection_time
             )
@@ -210,7 +211,7 @@ def check_expired_strikes() -> dict:
             service = StrikeService(session)
             expired_count = await service.check_expired_strikes()
             return {
-                "checked_at": datetime.utcnow().isoformat(),
+                "checked_at": utcnow().isoformat(),
                 "expired_count": expired_count,
             }
 
@@ -248,7 +249,7 @@ def sync_all_accounts_strikes(self) -> dict:
             return {
                 "queued_accounts": len(results),
                 "account_ids": results,
-                "queued_at": datetime.utcnow().isoformat(),
+                "queued_at": utcnow().isoformat(),
             }
 
     return asyncio.run(_sync_all())
@@ -274,8 +275,11 @@ class StrikeAlertManager:
         Returns:
             bool: True if alert should be sent
         """
-        threshold = datetime.utcnow() - timedelta(hours=StrikeAlertManager.ALERT_THRESHOLD_HOURS)
-        return strike_issued_at >= threshold or detection_time >= threshold
+        threshold = to_naive_utc(utcnow()) - timedelta(hours=StrikeAlertManager.ALERT_THRESHOLD_HOURS)
+        # Normalize to naive for comparison
+        issued = strike_issued_at.replace(tzinfo=None) if strike_issued_at.tzinfo else strike_issued_at
+        detected = detection_time.replace(tzinfo=None) if detection_time.tzinfo else detection_time
+        return issued >= threshold or detected >= threshold
 
     @staticmethod
     def calculate_alert_urgency(strike_severity: str) -> str:

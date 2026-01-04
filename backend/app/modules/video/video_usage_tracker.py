@@ -11,6 +11,7 @@ from uuid import UUID
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow
 from app.modules.video.models import VideoUsageLog, Video
 
 
@@ -72,8 +73,8 @@ class VideoUsageTracker:
         usage_log = VideoUsageLog(
             video_id=video_id,
             usage_type="youtube_upload",
-            started_at=datetime.utcnow(),
-            ended_at=datetime.utcnow(),
+            started_at=utcnow(),
+            ended_at=utcnow(),
             usage_metadata={
                 "youtube_id": youtube_id,
                 "account_id": str(account_id),
@@ -89,7 +90,7 @@ class VideoUsageTracker:
         video = result.scalar_one_or_none()
         
         if video:
-            video.last_accessed_at = datetime.utcnow()
+            video.last_accessed_at = utcnow()
         
         await self.db.commit()
         await self.db.refresh(usage_log)
@@ -114,7 +115,7 @@ class VideoUsageTracker:
         usage_log = VideoUsageLog(
             video_id=video_id,
             usage_type="live_stream",
-            started_at=datetime.utcnow(),
+            started_at=utcnow(),
             ended_at=None,  # Will be set when stream ends
             usage_metadata={
                 "stream_job_id": str(stream_job_id)
@@ -131,8 +132,8 @@ class VideoUsageTracker:
         if video:
             video.is_used_for_streaming = True
             video.streaming_count += 1
-            video.last_streamed_at = datetime.utcnow()
-            video.last_accessed_at = datetime.utcnow()
+            video.last_streamed_at = utcnow()
+            video.last_accessed_at = utcnow()
         
         await self.db.commit()
         await self.db.refresh(usage_log)
@@ -181,8 +182,8 @@ class VideoUsageTracker:
                 usage_log = VideoUsageLog(
                     video_id=video_id,
                     usage_type="live_stream",
-                    started_at=datetime.utcnow(),
-                    ended_at=datetime.utcnow(),
+                    started_at=utcnow(),
+                    ended_at=utcnow(),
                     usage_metadata={
                         "stream_job_id": str(stream_job_id) if stream_job_id else None,
                         "stream_duration": duration,
@@ -196,7 +197,7 @@ class VideoUsageTracker:
             raise ValueError(f"Usage log not found")
         
         # Update usage log
-        usage_log.ended_at = datetime.utcnow()
+        usage_log.ended_at = utcnow()
         if usage_log.usage_metadata is None:
             usage_log.usage_metadata = {}
         usage_log.usage_metadata["stream_duration"] = duration
@@ -211,7 +212,7 @@ class VideoUsageTracker:
         
         if video:
             video.total_streaming_duration += duration
-            video.last_accessed_at = datetime.utcnow()
+            video.last_accessed_at = utcnow()
             
             # Check if video is still being used for streaming
             # (check if there are other active streaming sessions)

@@ -18,6 +18,7 @@ from celery import shared_task
 
 from app.core.celery_app import celery_app
 from app.core.database import celery_session_maker
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.stream.stream_job_models import (
     StreamJob,
     StreamJobHealth,
@@ -147,7 +148,7 @@ async def _start_ffmpeg_worker_async(job_id: str) -> dict:
         # Update job with PID, status
         job.pid = process.pid
         job.status = StreamJobStatus.RUNNING.value
-        job.actual_start_at = datetime.utcnow()
+        job.actual_start_at = to_naive_utc(utcnow())
         await repo.update(job)
         
         # Store log file path for monitoring
@@ -241,7 +242,7 @@ async def _stop_ffmpeg_worker_async(job_id: str) -> dict:
         
         # Update job status
         job.status = StreamJobStatus.STOPPED.value
-        job.actual_end_at = datetime.utcnow()
+        job.actual_end_at = to_naive_utc(utcnow())
         job.is_stream_key_locked = False
         job.update_total_duration()
         job.pid = None

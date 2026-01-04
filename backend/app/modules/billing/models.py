@@ -236,9 +236,10 @@ class Subscription(Base):
         
         Requirements: 28.4 - Expiration handling
         """
+        from app.core.datetime_utils import utcnow, ensure_utc
         if self.status == SubscriptionStatus.EXPIRED.value:
             return True
-        return datetime.utcnow() > self.current_period_end
+        return utcnow() > ensure_utc(self.current_period_end)
 
 
 class UsageRecord(Base):

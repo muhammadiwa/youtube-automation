@@ -8,6 +8,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.payment_gateway.interface import (
     PaymentGatewayInterface,
     CreatePaymentDTO,
@@ -167,7 +168,7 @@ class StripeGateway(PaymentGatewayInterface):
                     status=status,
                     amount=session.amount_total / 100,
                     currency=session.currency.upper(),
-                    paid_at=datetime.utcnow() if status == PaymentStatus.COMPLETED.value else None,
+                    paid_at=to_naive_utc(utcnow()) if status == PaymentStatus.COMPLETED.value else None,
                     payment_method=session.payment_method_types[0] if session.payment_method_types else None,
                     gateway_response={"session": session.to_dict()},
                 )
@@ -181,7 +182,7 @@ class StripeGateway(PaymentGatewayInterface):
                     status=status,
                     amount=intent.amount / 100,
                     currency=intent.currency.upper(),
-                    paid_at=datetime.utcnow() if status == PaymentStatus.COMPLETED.value else None,
+                    paid_at=to_naive_utc(utcnow()) if status == PaymentStatus.COMPLETED.value else None,
                     payment_method=intent.payment_method_types[0] if intent.payment_method_types else None,
                     gateway_response={"payment_intent": intent.to_dict()},
                 )

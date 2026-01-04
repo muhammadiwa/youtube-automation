@@ -100,7 +100,7 @@ async def mark_alert_as_read(
 
     Requirements: 20.2
     """
-    from datetime import datetime
+    from app.core.datetime_utils import utcnow, to_naive_utc
     
     service = StrikeService(session)
     alert = await service.alert_repository.get_by_id(alert_id)
@@ -110,7 +110,7 @@ async def mark_alert_as_read(
             detail=f"Alert {alert_id} not found",
         )
     alert.acknowledged = True
-    alert.acknowledged_at = datetime.utcnow()
+    alert.acknowledged_at = to_naive_utc(utcnow())
     await service.session.commit()
     await service.session.refresh(alert)
     return StrikeAlertResponse.model_validate(alert)

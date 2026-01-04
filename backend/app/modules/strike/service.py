@@ -10,6 +10,7 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow
 from app.modules.account.models import YouTubeAccount
 from app.modules.account.repository import YouTubeAccountRepository
 from app.modules.stream.models import LiveEvent, LiveEventStatus
@@ -180,7 +181,7 @@ class StrikeService:
 
         return StrikeSyncResult(
             account_id=account_id,
-            synced_at=datetime.utcnow(),
+            synced_at=utcnow(),
             new_strikes=new_strikes,
             updated_strikes=updated_strikes,
             resolved_strikes=resolved_strikes,
@@ -584,7 +585,7 @@ class StrikeService:
             list[StrikeAlert]: Created alerts
         """
         alerts = []
-        threshold = datetime.utcnow() - timedelta(hours=self.ALERT_THRESHOLD_HOURS)
+        threshold = utcnow() - timedelta(hours=self.ALERT_THRESHOLD_HOURS)
 
         # Get strikes that haven't been notified yet
         strikes = await self.strike_repository.get_active_strikes(account_id)

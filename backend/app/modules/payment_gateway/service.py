@@ -16,6 +16,7 @@ from typing import Optional, Type
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow
 from app.modules.payment_gateway.interface import (
     PaymentGatewayInterface,
     CreatePaymentDTO,
@@ -843,7 +844,7 @@ class PaymentService:
             return
         
         # Calculate subscription period
-        now = datetime.utcnow()
+        now = utcnow()
         if billing_cycle == "yearly":
             period_end = now + timedelta(days=365)
         else:

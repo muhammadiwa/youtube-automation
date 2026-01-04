@@ -17,6 +17,7 @@ import {
     CheckCircle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { formatTimeAgo } from "@/lib/utils/datetime"
 import type { Alert, AlertSeverity, AlertType } from "@/lib/api/monitoring"
 
 interface AlertCenterProps {
@@ -52,17 +53,6 @@ const typeConfig: Record<AlertType, { icon: typeof Key; label: string }> = {
     account_error: { icon: AlertCircle, label: "Account Error" },
     viewer_drop: { icon: AlertTriangle, label: "Viewer Drop" },
     peak_viewers: { icon: CheckCircle, label: "Peak Viewers" },
-}
-
-function formatTimeAgo(dateString: string): string {
-    const date = new Date(dateString)
-    const now = new Date()
-    const seconds = Math.floor((now.getTime() - date.getTime()) / 1000)
-
-    if (seconds < 60) return "just now"
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`
-    return `${Math.floor(seconds / 86400)}d ago`
 }
 
 export function AlertCenter({ alerts, maxItems = 10 }: AlertCenterProps) {

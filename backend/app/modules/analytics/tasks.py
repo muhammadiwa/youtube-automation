@@ -9,12 +9,13 @@ import io
 import logging
 import os
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 from celery import shared_task
 
 from app.core.celery_app import celery_app
 from app.core.database import celery_session_maker
+from app.core.datetime_utils import utcnow
 from app.core.storage import storage_service
 
 logger = logging.getLogger(__name__)
@@ -140,7 +141,7 @@ async def _sync_account_analytics_async(account_id: str):
             account.subscriber_count = channel_stats["subscriber_count"]
             account.video_count = channel_stats["video_count"]
             account.view_count = channel_stats["view_count"]
-            account.last_sync_at = datetime.utcnow()
+            account.last_sync_at = utcnow()
             account.last_error = None
 
             await session.commit()
@@ -257,7 +258,7 @@ async def _generate_report_async(report_id: str, include_ai_insights: bool):
                         }
                         for i in insights
                     ],
-                    "generated_at": datetime.utcnow().isoformat(),
+                    "generated_at": utcnow().isoformat(),
                 }
 
             # Generate report file

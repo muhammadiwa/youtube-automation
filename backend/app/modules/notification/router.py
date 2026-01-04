@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.notification.service import NotificationService
 from app.modules.notification.schemas import (
     NotificationSendRequest,
@@ -153,7 +154,7 @@ async def mark_notification_as_read(
         raise HTTPException(status_code=404, detail="Notification not found")
     
     log.acknowledged = True
-    log.acknowledged_at = datetime.utcnow()
+    log.acknowledged_at = to_naive_utc(utcnow())
     await db.commit()
     
     return {
@@ -179,7 +180,7 @@ async def mark_all_notifications_as_read(
     await db.execute(
         update(NotificationLog)
         .where(NotificationLog.acknowledged == False)
-        .values(acknowledged=True, acknowledged_at=datetime.utcnow())
+        .values(acknowledged=True, acknowledged_at=to_naive_utc(utcnow()))
     )
     await db.commit()
     

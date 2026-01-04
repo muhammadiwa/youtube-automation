@@ -13,6 +13,7 @@ from typing import Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session_maker
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.account.repository import YouTubeAccountRepository
 from app.modules.moderation.youtube_chat_api import YouTubeLiveChatClient, YouTubeChatAPIError
 from app.modules.moderation.service import ModerationService, ChatAnalyzer
@@ -197,7 +198,7 @@ class LiveChatModerationWorker:
                     is_member=parsed_message["is_chat_sponsor"],
                     published_at=datetime.fromisoformat(
                         parsed_message["published_at"].replace("Z", "+00:00")
-                    ) if parsed_message.get("published_at") else datetime.utcnow(),
+                    ) if parsed_message.get("published_at") else to_naive_utc(utcnow()),
                 )
 
                 # Check for custom commands first
@@ -377,8 +378,8 @@ class LiveChatModerationWorker:
             was_successful=success,
             error_message=error_message,
             timeout_duration_seconds=violation.timeout_duration_seconds,
-            processing_started_at=datetime.utcnow(),
-            processing_completed_at=datetime.utcnow(),
+            processing_started_at=to_naive_utc(utcnow()),
+            processing_completed_at=to_naive_utc(utcnow()),
         )
         await log_repo.create(action_log)
 

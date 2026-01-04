@@ -16,6 +16,7 @@ from sqlalchemy.sql import func
 
 from app.core.database import Base
 from app.core.encryption import decrypt_token, encrypt_token, is_encrypted
+from app.core.datetime_utils import utcnow, to_naive_utc
 
 
 # ============================================
@@ -388,8 +389,8 @@ class StreamJob(Base):
             return False
         if self.scheduled_start_at is None:
             return False
-        now = datetime.utcnow()
-        scheduled = self.scheduled_start_at.replace(tzinfo=None)
+        now = to_naive_utc(utcnow())
+        scheduled = self.scheduled_start_at.replace(tzinfo=None) if self.scheduled_start_at.tzinfo else self.scheduled_start_at
         return now >= scheduled
 
     def should_stop_now(self) -> bool:
@@ -402,8 +403,8 @@ class StreamJob(Base):
             return False
         if self.scheduled_end_at is None:
             return False
-        now = datetime.utcnow()
-        scheduled_end = self.scheduled_end_at.replace(tzinfo=None)
+        now = to_naive_utc(utcnow())
+        scheduled_end = self.scheduled_end_at.replace(tzinfo=None) if self.scheduled_end_at.tzinfo else self.scheduled_end_at
         return now >= scheduled_end
 
     def get_time_until_start(self) -> Optional[int]:
@@ -414,8 +415,8 @@ class StreamJob(Base):
         """
         if self.scheduled_start_at is None:
             return None
-        now = datetime.utcnow()
-        scheduled = self.scheduled_start_at.replace(tzinfo=None)
+        now = to_naive_utc(utcnow())
+        scheduled = self.scheduled_start_at.replace(tzinfo=None) if self.scheduled_start_at.tzinfo else self.scheduled_start_at
         delta = scheduled - now
         return max(0, int(delta.total_seconds()))
 
@@ -431,8 +432,8 @@ class StreamJob(Base):
         """
         if self.actual_start_at is None:
             return 0
-        end_time = self.actual_end_at or datetime.utcnow()
-        start = self.actual_start_at.replace(tzinfo=None)
+        end_time = self.actual_end_at or to_naive_utc(utcnow())
+        start = self.actual_start_at.replace(tzinfo=None) if self.actual_start_at.tzinfo else self.actual_start_at
         end = end_time.replace(tzinfo=None) if end_time.tzinfo else end_time
         return int((end - start).total_seconds())
 

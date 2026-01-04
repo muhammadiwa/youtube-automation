@@ -158,8 +158,9 @@ class ModerationRule(Base):
 
     def increment_trigger_count(self) -> None:
         """Increment trigger count and update last triggered time."""
+        from app.core.datetime_utils import utcnow, to_naive_utc
         self.trigger_count += 1
-        self.last_triggered_at = datetime.utcnow()
+        self.last_triggered_at = to_naive_utc(utcnow())
 
     def __repr__(self) -> str:
         return f"<ModerationRule(id={self.id}, name={self.name}, type={self.rule_type})>"
@@ -346,10 +347,11 @@ class ChatMessage(Base):
             reason: Reason for moderation
             is_hidden: Whether message was hidden
         """
+        from app.core.datetime_utils import utcnow, to_naive_utc
         self.is_moderated = True
         self.is_hidden = is_hidden
         self.moderation_reason = reason
-        self.moderated_at = datetime.utcnow()
+        self.moderated_at = to_naive_utc(utcnow())
 
     def mark_as_deleted(self, reason: str) -> None:
         """Mark message as deleted.
@@ -357,10 +359,11 @@ class ChatMessage(Base):
         Args:
             reason: Reason for deletion
         """
+        from app.core.datetime_utils import utcnow, to_naive_utc
         self.is_moderated = True
         self.is_deleted = True
         self.moderation_reason = reason
-        self.moderated_at = datetime.utcnow()
+        self.moderated_at = to_naive_utc(utcnow())
 
     def __repr__(self) -> str:
         return f"<ChatMessage(id={self.id}, author={self.author_display_name})>"
@@ -422,14 +425,16 @@ class SlowModeConfig(Base):
 
     def activate(self) -> None:
         """Activate slow mode."""
+        from app.core.datetime_utils import utcnow, to_naive_utc
+        now = to_naive_utc(utcnow())
         self.is_currently_active = True
-        self.activated_at = datetime.utcnow()
-        self.last_activated_at = datetime.utcnow()
+        self.activated_at = now
+        self.last_activated_at = now
         self.activation_count += 1
         
         if self.auto_disable_after_minutes:
             from datetime import timedelta
-            self.auto_disable_at = datetime.utcnow() + timedelta(
+            self.auto_disable_at = now + timedelta(
                 minutes=self.auto_disable_after_minutes
             )
 
@@ -445,11 +450,12 @@ class SlowModeConfig(Base):
         Returns:
             bool: True if should auto-disable
         """
+        from app.core.datetime_utils import utcnow, ensure_utc
         if not self.is_currently_active:
             return False
         if self.auto_disable_at is None:
             return False
-        return datetime.utcnow() >= self.auto_disable_at
+        return utcnow() >= ensure_utc(self.auto_disable_at)
 
     def __repr__(self) -> str:
         return f"<SlowModeConfig(id={self.id}, active={self.is_currently_active})>"
@@ -533,16 +539,18 @@ class CustomCommand(Base):
         Returns:
             bool: True if on cooldown
         """
+        from app.core.datetime_utils import utcnow, ensure_utc
         if self.last_used_at is None:
             return False
         from datetime import timedelta
-        cooldown_end = self.last_used_at + timedelta(seconds=self.cooldown_seconds)
-        return datetime.utcnow() < cooldown_end
+        cooldown_end = ensure_utc(self.last_used_at) + timedelta(seconds=self.cooldown_seconds)
+        return utcnow() < cooldown_end
 
     def record_usage(self) -> None:
         """Record command usage."""
+        from app.core.datetime_utils import utcnow, to_naive_utc
         self.usage_count += 1
-        self.last_used_at = datetime.utcnow()
+        self.last_used_at = to_naive_utc(utcnow())
 
     def __repr__(self) -> str:
         return f"<CustomCommand(id={self.id}, trigger={self.trigger})>"

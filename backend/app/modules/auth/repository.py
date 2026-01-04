@@ -6,6 +6,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.auth.models import User
 
 
@@ -116,7 +117,7 @@ class UserRepository:
         Returns:
             User: Updated user instance
         """
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = to_naive_utc(utcnow())
         await self.session.flush()
         return user
 

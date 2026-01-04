@@ -5,12 +5,13 @@ Requirements: 17.1, 17.2
 """
 
 import uuid
-from datetime import date, datetime
+from datetime import date
 from typing import Optional
 
 from sqlalchemy import select, func as sql_func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow
 from app.modules.analytics.models import AnalyticsSnapshot, AnalyticsReport
 
 
@@ -308,7 +309,7 @@ class AnalyticsReportRepository:
         if error_message:
             report.error_message = error_message
         if status == "completed":
-            report.completed_at = datetime.utcnow()
+            report.completed_at = utcnow()
         await self.session.flush()
         return report
 

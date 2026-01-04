@@ -12,6 +12,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
 from app.core.database import Base
+from app.core.datetime_utils import utcnow
 
 
 class AuditAction(str, Enum):
@@ -124,7 +125,7 @@ class AuditLogger:
             details=details,
             ip_address=ip_address,
             user_agent=user_agent,
-            timestamp=datetime.utcnow(),
+            timestamp=utcnow(),
         )
 
         # Add to in-memory cache

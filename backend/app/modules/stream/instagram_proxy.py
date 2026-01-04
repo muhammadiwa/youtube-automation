@@ -16,6 +16,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
+from app.core.datetime_utils import utcnow, to_naive_utc
+
 
 class InstagramProxyStatus(str, Enum):
     """Status of Instagram proxy connection."""
@@ -155,7 +157,7 @@ class InstagramRTMPProxy:
         
         # Simulate successful connection
         stream_info.status = InstagramProxyStatus.STREAMING
-        stream_info.started_at = datetime.utcnow()
+        stream_info.started_at = to_naive_utc(utcnow())
         
         return True
 

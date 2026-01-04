@@ -11,6 +11,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.stream.stream_job_models import StreamJob, StreamJobStatus
 from app.modules.stream.stream_job_service import StreamJobService
 from app.modules.stream.stream_job_schemas import CreateStreamJobRequest
@@ -117,7 +118,7 @@ class VideoLibraryStreamIntegration:
         await self._update_video_streaming_status(video, is_streaming=True)
         
         # Update last streamed timestamp
-        video.last_streamed_at = datetime.utcnow()
+        video.last_streamed_at = to_naive_utc(utcnow())
         await self.session.commit()
     
     async def on_stream_stop(

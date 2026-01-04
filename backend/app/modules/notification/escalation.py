@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 from dataclasses import dataclass
 
+from app.core.datetime_utils import utcnow, ensure_utc
+
 
 @dataclass
 class EscalationConfig:
@@ -47,7 +49,7 @@ class EscalationState:
         if self.last_escalated_at is None:
             return True
         
-        time_since_escalation = datetime.utcnow() - self.last_escalated_at
+        time_since_escalation = utcnow() - ensure_utc(self.last_escalated_at)
         return time_since_escalation >= timedelta(minutes=wait_minutes)
 
 
@@ -138,7 +140,7 @@ def should_escalate_notification(
     if last_escalated_at is None:
         return True
     
-    time_since_escalation = datetime.utcnow() - last_escalated_at
+    time_since_escalation = utcnow() - ensure_utc(last_escalated_at)
     return time_since_escalation >= timedelta(minutes=wait_minutes)
 
 

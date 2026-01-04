@@ -10,6 +10,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Optional
 
+from app.core.datetime_utils import utcnow, ensure_utc
 from app.modules.moderation.models import ChatMessage, SlowModeConfig
 
 
@@ -153,7 +154,7 @@ class MessageRateTracker:
         Args:
             user_id: User's channel ID
         """
-        self._messages[user_id].append(datetime.utcnow())
+        self._messages[user_id].append(utcnow())
         self._cleanup(user_id)
 
     def get_rate(self, user_id: str) -> int:
@@ -174,10 +175,10 @@ class MessageRateTracker:
         Args:
             user_id: User's channel ID
         """
-        cutoff = datetime.utcnow() - timedelta(seconds=self.window_seconds)
+        cutoff = utcnow() - timedelta(seconds=self.window_seconds)
         self._messages[user_id] = [
             ts for ts in self._messages[user_id]
-            if ts >= cutoff
+            if ensure_utc(ts) >= cutoff
         ]
 
     def is_rate_exceeded(self, user_id: str, threshold: int) -> bool:
@@ -221,7 +222,7 @@ class DuplicateMessageDetector:
             user_id: User's channel ID
             content: Message content
         """
-        self._recent_messages[user_id].append((content, datetime.utcnow()))
+        self._recent_messages[user_id].append((content, utcnow()))
         self._cleanup(user_id)
 
     def is_duplicate(self, user_id: str, content: str) -> bool:
@@ -248,10 +249,10 @@ class DuplicateMessageDetector:
         Args:
             user_id: User's channel ID
         """
-        cutoff = datetime.utcnow() - timedelta(seconds=self.window_seconds)
+        cutoff = utcnow() - timedelta(seconds=self.window_seconds)
         self._recent_messages[user_id] = [
             (content, ts) for content, ts in self._recent_messages[user_id]
-            if ts >= cutoff
+            if ensure_utc(ts) >= cutoff
         ]
 
     def _calculate_similarity(self, s1: str, s2: str) -> float:

@@ -6,11 +6,11 @@ Requirements: 1.1, 1.2, 1.3, 1.5, 5.5, 6.1, 6.2, 6.3, 6.4
 
 import os
 import uuid
-from datetime import datetime
 from typing import Optional, Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, ensure_utc, to_naive_utc, is_in_future
 from app.modules.stream.stream_job_models import (
     StreamJob,
     StreamJobHealth,
@@ -156,11 +156,8 @@ class StreamJobService:
         # Determine initial status
         initial_status = StreamJobStatus.PENDING.value
         if request.scheduled_start_at:
-            # Handle timezone-aware datetime comparison
-            scheduled_at = request.scheduled_start_at
-            if scheduled_at.tzinfo is not None:
-                scheduled_at = scheduled_at.replace(tzinfo=None)
-            if scheduled_at > datetime.utcnow():
+            # Use timezone-aware comparison
+            if is_in_future(request.scheduled_start_at):
                 initial_status = StreamJobStatus.SCHEDULED.value
         
         # Create stream job

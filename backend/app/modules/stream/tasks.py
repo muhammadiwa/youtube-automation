@@ -5,7 +5,7 @@ Requirements: 6.1, 6.4, 6.5
 """
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional
 
 from celery import Task
@@ -14,6 +14,7 @@ from sqlalchemy import select
 from app.core.celery_app import celery_app
 from app.core.config import settings
 from app.core.database import celery_session_maker
+from app.core.datetime_utils import utcnow, ensure_utc, to_naive_utc
 from app.modules.job.tasks import BaseTaskWithRetry, RetryConfig, RETRY_CONFIGS
 from app.modules.stream.models import (
     LiveEvent,
@@ -98,7 +99,7 @@ class StreamScheduler:
             bool: True if within start window
         """
         if current_time is None:
-            current_time = datetime.utcnow()
+            current_time = to_naive_utc(utcnow())
             
         # Normalize timezones
         scheduled = scheduled_time.replace(tzinfo=None) if scheduled_time.tzinfo else scheduled_time
@@ -221,7 +222,7 @@ async def _check_scheduled_streams_async() -> dict:
         await session.commit()
     
     return {
-        "checked_at": datetime.utcnow().isoformat(),
+        "checked_at": utcnow().isoformat(),
         "started_count": len(started),
         "started_events": started,
         "errors": errors,
@@ -259,7 +260,7 @@ async def _start_stream_async(event_id: str) -> dict:
             return {"success": False, "error": f"Event in invalid state: {event.status}"}
         
         # Record start time for timing validation
-        actual_start = datetime.utcnow()
+        actual_start = to_naive_utc(utcnow())
         
         # Calculate deviation if scheduled
         deviation_seconds = None
@@ -327,7 +328,7 @@ async def _stop_stream_async(event_id: str, reason: str) -> dict:
         
         # Update event status
         event.status = LiveEventStatus.ENDED.value
-        event.actual_end_at = datetime.utcnow()
+        event.actual_end_at = to_naive_utc(utcnow())
         
         await session.commit()
         
@@ -521,7 +522,7 @@ async def _check_stream_end_times_async() -> dict:
         )
         events = result.scalars().all()
         
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         
         for event in events:
             try:
@@ -533,7 +534,7 @@ async def _check_stream_end_times_async() -> dict:
                 errors.append({"event_id": str(event.id), "error": str(e)})
     
     return {
-        "checked_at": datetime.utcnow().isoformat(),
+        "checked_at": utcnow().isoformat(),
         "stopped_count": len(stopped),
         "stopped_events": stopped,
         "errors": errors,
@@ -693,7 +694,7 @@ class StreamHealthMonitor:
             return True
         
         # For warnings, don't spam - wait at least 30 seconds
-        elapsed = (datetime.utcnow() - last_alert_time).total_seconds()
+        elapsed = (to_naive_utc(utcnow()) - last_alert_time).total_seconds()
         return elapsed >= self.MAX_ALERT_DELAY_SECONDS
 
 
@@ -785,7 +786,7 @@ async def _collect_health_metrics_async(session_id: str) -> dict:
         
         # In a real implementation, these would come from the streaming agent
         # For now, we simulate metric collection
-        collected_at = datetime.utcnow()
+        collected_at = to_naive_utc(utcnow())
         
         # Get previous log to calculate deltas
         previous_log = await health_repo.get_latest_by_session(uuid.UUID(session_id))
@@ -890,7 +891,7 @@ def trigger_health_alert(
         "session_id": session_id,
         "alert_type": alert_type,
         "alert_message": alert_message,
-        "triggered_at": datetime.utcnow().isoformat(),
+        "triggered_at": utcnow().isoformat(),
     }
 
 
@@ -930,7 +931,7 @@ async def _check_active_streams_health_async() -> dict:
                 errors.append({"session_id": str(stream_session.id), "error": str(e)})
     
     return {
-        "checked_at": datetime.utcnow().isoformat(),
+        "checked_at": utcnow().isoformat(),
         "active_sessions": len(checked),
         "checked_sessions": checked,
         "errors": errors,
@@ -1113,7 +1114,7 @@ def cleanup_old_health_logs(
 
 async def _cleanup_old_health_logs_async(retention_days: int) -> dict:
     """Async implementation of health log cleanup."""
-    cutoff_date = datetime.utcnow() - timedelta(days=retention_days)
+    cutoff_date = to_naive_utc(utcnow()) - timedelta(days=retention_days)
     total_deleted = 0
     
     async with celery_session_maker() as session:

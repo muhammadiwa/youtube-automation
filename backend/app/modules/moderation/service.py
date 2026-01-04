@@ -12,6 +12,8 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
+
 from app.modules.moderation.models import (
     ChatMessage,
     CustomCommand,
@@ -495,7 +497,7 @@ class ModerationService:
 
         # Use the highest severity violation
         violation = result.violations[0]
-        processing_started = datetime.utcnow()
+        processing_started = to_naive_utc(utcnow())
 
         # Create action log
         action_log = ModerationActionLog(
@@ -512,11 +514,11 @@ class ModerationService:
             was_successful=True,
             timeout_duration_seconds=violation.timeout_duration_seconds,
             processing_started_at=processing_started,
-            processing_completed_at=datetime.utcnow(),
+            processing_completed_at=to_naive_utc(utcnow()),
         )
 
         if violation.timeout_duration_seconds:
-            action_log.timeout_expires_at = datetime.utcnow() + timedelta(
+            action_log.timeout_expires_at = to_naive_utc(utcnow()) + timedelta(
                 seconds=violation.timeout_duration_seconds
             )
 

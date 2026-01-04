@@ -8,6 +8,7 @@ from jose import JWTError, jwt
 from pydantic import BaseModel
 
 from app.core.config import settings
+from app.core.datetime_utils import utcnow
 
 
 class TokenPayload(BaseModel):
@@ -69,7 +70,7 @@ def create_token(
         tuple[str, str]: (token, jti) - The encoded token and its unique ID
     """
     jti = str(uuid.uuid4())
-    now = datetime.utcnow()
+    now = utcnow()
     expire = now + expires_delta
 
     payload = {
@@ -181,7 +182,7 @@ def validate_token(token: str, expected_type: str = "access") -> TokenPayload | 
         return None
 
     # Check expiration
-    if payload.exp < datetime.utcnow():
+    if payload.exp < utcnow():
         return None
 
     return payload

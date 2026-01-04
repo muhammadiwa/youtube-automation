@@ -12,6 +12,7 @@ from sqlalchemy import select, and_, or_, func as sql_func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.stream.models import (
     LiveEvent,
     LiveEventStatus,
@@ -270,7 +271,7 @@ class LiveEventRepository:
         Returns:
             list[LiveEvent]: Events ready to start
         """
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         result = await self.session.execute(
             select(LiveEvent)
             .where(LiveEvent.status == LiveEventStatus.SCHEDULED.value)
@@ -388,9 +389,9 @@ class LiveEventRepository:
             event.last_error = error
 
         if status == LiveEventStatus.LIVE and event.actual_start_at is None:
-            event.actual_start_at = datetime.utcnow()
+            event.actual_start_at = to_naive_utc(utcnow())
         elif status in [LiveEventStatus.ENDED, LiveEventStatus.CANCELLED]:
-            event.actual_end_at = datetime.utcnow()
+            event.actual_end_at = to_naive_utc(utcnow())
 
         await self.session.flush()
         return event
@@ -514,7 +515,7 @@ class StreamSessionRepository:
         Returns:
             StreamSession: Updated session instance
         """
-        session.started_at = datetime.utcnow()
+        session.started_at = to_naive_utc(utcnow())
         session.connection_status = ConnectionStatus.GOOD.value
         await self.session.flush()
         return session
@@ -535,7 +536,7 @@ class StreamSessionRepository:
         Returns:
             StreamSession: Updated session instance
         """
-        session.ended_at = datetime.utcnow()
+        session.ended_at = to_naive_utc(utcnow())
         session.connection_status = ConnectionStatus.DISCONNECTED.value
         if end_reason:
             session.end_reason = end_reason
@@ -690,7 +691,7 @@ class RecurrencePatternRepository:
             RecurrencePattern: Updated pattern instance
         """
         pattern.generated_count += 1
-        pattern.last_generated_at = datetime.utcnow()
+        pattern.last_generated_at = to_naive_utc(utcnow())
         await self.session.flush()
         return pattern
 

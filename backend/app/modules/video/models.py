@@ -17,6 +17,7 @@ from sqlalchemy.sql import func
 import sqlalchemy as sa
 
 from app.core.database import Base
+from app.core.datetime_utils import utcnow, ensure_utc, to_naive_utc
 
 if TYPE_CHECKING:
     from app.modules.stream.stream_job_models import StreamJob
@@ -202,7 +203,7 @@ class Video(Base):
             return False
         if self.scheduled_publish_at is None:
             return False
-        return datetime.utcnow() >= self.scheduled_publish_at.replace(tzinfo=None)
+        return utcnow() >= ensure_utc(self.scheduled_publish_at)
 
     def __repr__(self) -> str:
         return f"<Video(id={self.id}, title={self.title}, status={self.status})>"

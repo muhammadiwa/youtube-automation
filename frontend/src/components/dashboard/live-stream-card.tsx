@@ -5,21 +5,11 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 import { Radio, Eye, MessageSquare, Clock, ExternalLink } from "lucide-react"
+import { formatDuration } from "@/lib/utils/datetime"
 import type { LiveStreamInfo } from "@/lib/api/monitoring"
 
 interface LiveStreamCardProps {
     stream: LiveStreamInfo
-}
-
-function formatDuration(seconds: number): string {
-    const hours = Math.floor(seconds / 3600)
-    const minutes = Math.floor((seconds % 3600) / 60)
-    const secs = seconds % 60
-
-    if (hours > 0) {
-        return `${hours}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
-    }
-    return `${minutes}:${secs.toString().padStart(2, "0")}`
 }
 
 function formatNumber(num: number): string {

@@ -22,6 +22,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.auth.jwt import get_current_user
 from app.modules.video.video_library_service import (
     VideoLibraryService,
@@ -848,30 +849,32 @@ async def fix_video_usage_logs(
                 if log.usage_metadata is None:
                     log.usage_metadata = {}
                 log.usage_metadata["stream_duration"] = duration
-                log.usage_metadata["fixed_at"] = datetime.utcnow().isoformat()
+                log.usage_metadata["fixed_at"] = utcnow().isoformat()
                 
                 total_duration_added += duration
                 fixed_count += 1
             elif stream_job and stream_job.status in ["stopped", "failed", "error"]:
                 # Stream job ended but no actual_end_at, use now
-                duration = int((datetime.utcnow() - log.started_at.replace(tzinfo=None)).total_seconds())
-                log.ended_at = datetime.utcnow()
+                now = to_naive_utc(utcnow())
+                duration = int((now - log.started_at.replace(tzinfo=None)).total_seconds())
+                log.ended_at = now
                 if log.usage_metadata is None:
                     log.usage_metadata = {}
                 log.usage_metadata["stream_duration"] = duration
-                log.usage_metadata["fixed_at"] = datetime.utcnow().isoformat()
+                log.usage_metadata["fixed_at"] = utcnow().isoformat()
                 log.usage_metadata["estimated"] = True
                 
                 total_duration_added += duration
                 fixed_count += 1
         else:
             # No stream job ID, close with estimated duration
-            duration = int((datetime.utcnow() - log.started_at.replace(tzinfo=None)).total_seconds())
-            log.ended_at = datetime.utcnow()
+            now = to_naive_utc(utcnow())
+            duration = int((now - log.started_at.replace(tzinfo=None)).total_seconds())
+            log.ended_at = now
             if log.usage_metadata is None:
                 log.usage_metadata = {}
             log.usage_metadata["stream_duration"] = duration
-            log.usage_metadata["fixed_at"] = datetime.utcnow().isoformat()
+            log.usage_metadata["fixed_at"] = utcnow().isoformat()
             log.usage_metadata["estimated"] = True
             
             total_duration_added += duration

@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Callable, Optional, Any
 
+from app.core.datetime_utils import utcnow, ensure_utc
 from app.modules.moderation.models import CustomCommand
 
 
@@ -285,11 +286,11 @@ class CommandProcessor:
         if key not in self._cooldowns:
             return False
         
-        cooldown_end = self._cooldowns[key] + timedelta(
+        cooldown_end = ensure_utc(self._cooldowns[key]) + timedelta(
             seconds=command.cooldown_seconds
         )
         
-        return datetime.utcnow() < cooldown_end
+        return utcnow() < cooldown_end
 
     def record_usage(
         self,
@@ -303,7 +304,7 @@ class CommandProcessor:
             user_channel_id: User's channel ID
         """
         key = (command.id, user_channel_id)
-        self._cooldowns[key] = datetime.utcnow()
+        self._cooldowns[key] = utcnow()
 
     def get_handler(self, command: CustomCommand) -> CommandHandler:
         """Get appropriate handler for command.

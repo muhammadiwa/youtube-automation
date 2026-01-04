@@ -7,6 +7,7 @@ Requirements: 20.1
 from datetime import datetime, timedelta
 from typing import Optional
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.strike.schemas import YouTubeStrikeData
 
 
@@ -117,7 +118,7 @@ def parse_youtube_strike_response(response: dict) -> YouTubeStrikeData:
 
     # Parse dates
     issued_at = datetime.fromisoformat(
-        response.get("issuedAt", datetime.utcnow().isoformat())
+        response.get("issuedAt", utcnow().isoformat())
     )
     
     expires_at = None
@@ -152,7 +153,7 @@ def simulate_strike_data_for_testing(
     Returns:
         YouTubeStrikeData: Simulated strike data
     """
-    issued_at = datetime.utcnow() - timedelta(days=days_ago)
+    issued_at = to_naive_utc(utcnow()) - timedelta(days=days_ago)
     expires_at = issued_at + timedelta(days=90)  # Strikes typically expire in 90 days
 
     return YouTubeStrikeData(

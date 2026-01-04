@@ -10,6 +10,8 @@ from typing import Optional
 from sqlalchemy import select, update, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
+
 from app.modules.notification.models import (
     NotificationPreference,
     NotificationLog,
@@ -218,11 +220,11 @@ class NotificationLogRepository:
             log.last_error = error
         
         if status == NotificationStatus.QUEUED.value:
-            log.queued_at = datetime.utcnow()
+            log.queued_at = to_naive_utc(utcnow())
         elif status == NotificationStatus.SENDING.value:
-            log.sent_at = datetime.utcnow()
+            log.sent_at = to_naive_utc(utcnow())
         elif status == NotificationStatus.DELIVERED.value:
-            log.delivered_at = datetime.utcnow()
+            log.delivered_at = to_naive_utc(utcnow())
             log.delivery_time_seconds = log.calculate_delivery_time()
         
         await self.session.commit()
@@ -243,7 +245,7 @@ class NotificationLogRepository:
             return None
         
         log.status = NotificationStatus.DELIVERED.value
-        log.delivered_at = delivered_at or datetime.utcnow()
+        log.delivered_at = delivered_at or to_naive_utc(utcnow())
         log.delivery_time_seconds = log.calculate_delivery_time()
         
         await self.session.commit()
@@ -264,7 +266,7 @@ class NotificationLogRepository:
             return None
         
         log.acknowledged = True
-        log.acknowledged_at = datetime.utcnow()
+        log.acknowledged_at = to_naive_utc(utcnow())
         log.acknowledged_by = acknowledged_by
         log.response_time_seconds = log.calculate_response_time()
         log.status = NotificationStatus.ACKNOWLEDGED.value
@@ -451,7 +453,7 @@ class NotificationBatchRepository:
             return None
         
         batch.status = NotificationStatus.DELIVERED.value
-        batch.processed_at = datetime.utcnow()
+        batch.processed_at = to_naive_utc(utcnow())
         await self.session.commit()
         await self.session.refresh(batch)
         return batch

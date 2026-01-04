@@ -6,10 +6,10 @@ Requirements: 24.1, 24.2, 24.3, 24.4, 24.5
 
 import time
 import logging
-from datetime import datetime
 from typing import Optional
 
 from app.core.config import settings
+from app.core.datetime_utils import utcnow
 from app.core.metrics import (
     WORKER_STATUS,
     WORKER_CURRENT_LOAD,
@@ -70,7 +70,7 @@ class SystemMonitoringService:
         
         return SystemHealthResponse(
             status=overall_status,
-            timestamp=datetime.utcnow(),
+            timestamp=utcnow(),
             version=settings.VERSION,
             uptime_seconds=time.time() - _app_start_time,
             components=components,
@@ -98,7 +98,7 @@ class SystemMonitoringService:
                 status=HealthStatus.HEALTHY,
                 message="Database connection successful",
                 latency_ms=round(latency, 2),
-                last_check=datetime.utcnow(),
+                last_check=utcnow(),
                 details={"type": "postgresql"},
             )
         except Exception as e:
@@ -110,7 +110,7 @@ class SystemMonitoringService:
                 status=HealthStatus.UNHEALTHY,
                 message=f"Database connection failed: {str(e)}",
                 latency_ms=round(latency, 2),
-                last_check=datetime.utcnow(),
+                last_check=utcnow(),
             )
     
     async def _check_redis_health(self) -> ComponentHealth:
@@ -137,7 +137,7 @@ class SystemMonitoringService:
                 status=HealthStatus.HEALTHY,
                 message="Redis connection successful",
                 latency_ms=round(latency, 2),
-                last_check=datetime.utcnow(),
+                last_check=utcnow(),
                 details={
                     "used_memory_human": info.get("used_memory_human", "unknown"),
                 },
@@ -151,7 +151,7 @@ class SystemMonitoringService:
                 status=HealthStatus.UNHEALTHY,
                 message=f"Redis connection failed: {str(e)}",
                 latency_ms=round(latency, 2),
-                last_check=datetime.utcnow(),
+                last_check=utcnow(),
             )
     
     async def _check_celery_health(self) -> ComponentHealth:
@@ -185,7 +185,7 @@ class SystemMonitoringService:
                 status=status,
                 message=message,
                 latency_ms=round(latency, 2),
-                last_check=datetime.utcnow(),
+                last_check=utcnow(),
                 details={"worker_count": worker_count},
             )
         except Exception as e:
@@ -197,7 +197,7 @@ class SystemMonitoringService:
                 status=HealthStatus.UNHEALTHY,
                 message=f"Celery check failed: {str(e)}",
                 latency_ms=round(latency, 2),
-                last_check=datetime.utcnow(),
+                last_check=utcnow(),
             )
     
     def _determine_overall_status(
@@ -248,7 +248,7 @@ class SystemMonitoringService:
         self._check_alert_thresholds(workers, queues, resources)
         
         return SystemMetricsResponse(
-            timestamp=datetime.utcnow(),
+            timestamp=utcnow(),
             workers=workers,
             queues=queues,
             resources=resources,

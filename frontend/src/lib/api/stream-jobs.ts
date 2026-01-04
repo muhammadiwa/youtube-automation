@@ -253,6 +253,7 @@ export interface BulkCreateStreamJobRequest {
     maxRestarts?: number
     enableChatModeration?: boolean
     schedules: ScheduleItem[]
+    timezoneOffset?: number  // Timezone offset in minutes from UTC
 }
 
 export interface BulkCreateStreamJobResponse {
@@ -435,6 +436,10 @@ export const streamJobsApi = {
      * Bulk create stream jobs with multiple schedules
      */
     async bulkCreateStreamJobs(request: BulkCreateStreamJobRequest): Promise<BulkCreateStreamJobResponse> {
+        // Get user's timezone offset in minutes
+        // getTimezoneOffset() returns negative for ahead of UTC, so we negate it
+        const timezoneOffset = request.timezoneOffset ?? -(new Date().getTimezoneOffset())
+
         const backendData = {
             account_id: request.accountId,
             video_id: request.videoId,
@@ -452,6 +457,7 @@ export const streamJobsApi = {
             enable_auto_restart: request.enableAutoRestart ?? true,
             max_restarts: request.maxRestarts ?? 5,
             enable_chat_moderation: request.enableChatModeration ?? true,
+            timezone_offset: timezoneOffset,
             schedules: request.schedules.map(s => ({
                 date: s.date,
                 start_time: s.startTime,
