@@ -1,14 +1,15 @@
-"""Celery tasks for analytics report generation.
+"""Celery tasks for analytics report generation and YouTube sync.
 
-Implements background tasks for PDF/CSV report generation.
-Requirements: 17.3, 17.4
+Implements background tasks for PDF/CSV report generation and analytics sync.
+Requirements: 17.1, 17.2, 17.3, 17.4
 """
 
 import csv
 import io
+import logging
 import os
 import uuid
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 from celery import shared_task
 
@@ -16,6 +17,183 @@ from app.core.celery_app import celery_app
 from app.core.database import celery_session_maker
 from app.core.storage import storage_service
 
+logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# Analytics Sync Tasks
+# ============================================================================
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def sync_account_analytics(self, account_id: str):
+    """Sync analytics data for a single YouTube account.
+
+    Args:
+        account_id: YouTube account UUID as string
+    """
+    import asyncio
+    try:
+        asyncio.run(_sync_account_analytics_async(account_id))
+    except Exception as exc:
+        logger.error(f"Failed to sync analytics for account {account_id}: {exc}")
+        raise self.retry(exc=exc)
+
+
+async def _sync_account_analytics_async(account_id: str):
+    """Async implementation of single account analytics sync."""
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    from app.modules.analytics.youtube_api import YouTubeAnalyticsClient, YouTubeAnalyticsError
+    from app.modules.analytics.repository import AnalyticsRepository
+    from app.modules.account.service import AccountService
+
+    async with celery_session_maker() as session:
+        # Get account with token
+        result = await session.execute(
+            select(YouTubeAccount).where(YouTubeAccount.id == uuid.UUID(account_id))
+        )
+        account = result.scalar_one_or_none()
+
+        if not account:
+            logger.warning(f"Account {account_id} not found")
+            return
+
+        if account.status != "active":
+            logger.info(f"Skipping inactive account {account_id}")
+            return
+
+        # Refresh token if needed
+        account_service = AccountService(session)
+        try:
+            access_token = await account_service.get_valid_access_token(account)
+        except Exception as e:
+            logger.error(f"Failed to get valid token for account {account_id}: {e}")
+            return
+
+        # Initialize YouTube API client
+        client = YouTubeAnalyticsClient(access_token)
+
+        # Get date range (last 30 days)
+        end_date = date.today() - timedelta(days=1)  # Yesterday (data may not be ready for today)
+        start_date = end_date - timedelta(days=29)
+
+        try:
+            # Fetch channel statistics from Data API
+            channel_stats = await client.get_channel_statistics(account.channel_id)
+            
+            # Fetch analytics from Analytics API
+            analytics = await client.get_channel_analytics(
+                account.channel_id, start_date, end_date
+            )
+            
+            # Fetch traffic sources
+            traffic_sources = await client.get_traffic_sources(
+                account.channel_id, start_date, end_date
+            )
+            
+            # Fetch demographics
+            demographics = await client.get_demographics(
+                account.channel_id, start_date, end_date
+            )
+            
+            # Fetch top videos
+            top_videos = await client.get_top_videos(
+                account.channel_id, start_date, end_date, max_results=10
+            )
+
+            # Get previous snapshot for calculating changes
+            repo = AnalyticsRepository(session)
+            prev_snapshot = await repo.get_by_account_and_date(
+                uuid.UUID(account_id), end_date - timedelta(days=1)
+            )
+
+            # Calculate changes
+            subscriber_change = 0
+            views_change = 0
+            if prev_snapshot:
+                subscriber_change = channel_stats["subscriber_count"] - prev_snapshot.subscriber_count
+                views_change = analytics["views"] - prev_snapshot.total_views
+
+            # Create or update snapshot for today
+            snapshot = await repo.upsert(
+                account_id=uuid.UUID(account_id),
+                snapshot_date=end_date,
+                subscriber_count=channel_stats["subscriber_count"],
+                subscriber_change=subscriber_change,
+                total_views=analytics["views"],
+                views_change=views_change,
+                total_videos=channel_stats["video_count"],
+                total_likes=analytics["likes"],
+                total_comments=analytics["comments"],
+                total_shares=analytics.get("shares", 0),
+                average_view_duration=analytics["average_view_duration"],
+                watch_time_minutes=analytics["watch_time_minutes"],
+                engagement_rate=_calculate_engagement_rate(
+                    analytics["likes"], analytics["comments"], analytics["views"]
+                ),
+                traffic_sources=traffic_sources,
+                demographics=demographics,
+                top_videos=top_videos,
+            )
+
+            # Update account stats
+            account.subscriber_count = channel_stats["subscriber_count"]
+            account.video_count = channel_stats["video_count"]
+            account.view_count = channel_stats["view_count"]
+            account.last_sync_at = datetime.utcnow()
+            account.last_error = None
+
+            await session.commit()
+            logger.info(f"Successfully synced analytics for account {account_id}")
+
+        except YouTubeAnalyticsError as e:
+            logger.error(f"YouTube API error for account {account_id}: {e}")
+            account.last_error = str(e)
+            await session.commit()
+            raise
+
+
+def _calculate_engagement_rate(likes: int, comments: int, views: int) -> float:
+    """Calculate engagement rate as percentage."""
+    if views == 0:
+        return 0.0
+    return ((likes + comments) / views) * 100
+
+
+@celery_app.task(bind=True)
+def sync_all_accounts_analytics(self):
+    """Sync analytics for all active YouTube accounts.
+    
+    This task is scheduled to run daily.
+    """
+    import asyncio
+    asyncio.run(_sync_all_accounts_async())
+
+
+async def _sync_all_accounts_async():
+    """Async implementation of all accounts analytics sync."""
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+
+    async with celery_session_maker() as session:
+        # Get all active accounts
+        result = await session.execute(
+            select(YouTubeAccount).where(YouTubeAccount.status == "active")
+        )
+        accounts = result.scalars().all()
+
+        logger.info(f"Starting analytics sync for {len(accounts)} accounts")
+
+        for account in accounts:
+            # Queue individual sync task for each account
+            sync_account_analytics.delay(str(account.id))
+
+        logger.info(f"Queued analytics sync for {len(accounts)} accounts")
+
+
+# ============================================================================
+# Report Generation Tasks
+# ============================================================================
 
 @celery_app.task(bind=True, max_retries=3)
 def generate_report_task(self, report_id: str, include_ai_insights: bool = True):

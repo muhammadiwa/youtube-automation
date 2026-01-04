@@ -61,6 +61,7 @@ function transformAccount(account: BackendYouTubeAccount): YouTubeAccount {
         thumbnailUrl: account.thumbnail_url || "",
         subscriberCount: account.subscriber_count || 0,
         videoCount: account.video_count || 0,
+        viewCount: account.view_count || 0,
         isMonetized: account.is_monetized || false,
         hasLiveStreamingEnabled: account.has_live_streaming_enabled || false,
         strikeCount: account.strike_count || 0,

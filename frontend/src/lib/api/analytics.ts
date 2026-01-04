@@ -21,6 +21,35 @@ export interface ChannelMetrics {
     top_videos: VideoMetrics[]
 }
 
+export interface ChannelDetailedMetrics {
+    account_id: string
+    period: string
+    start_date: string
+    end_date: string
+    subscribers: number
+    subscriber_change: number
+    views: number
+    views_change: number
+    watch_time: number
+    engagement_rate: number
+    traffic_sources: Record<string, { views: number; watch_time_minutes: number }>
+    demographics: {
+        age_groups: Record<string, { male: number; female: number }>
+        gender: { male: number; female: number }
+    }
+    top_videos: TopVideoData[]
+}
+
+export interface TopVideoData {
+    video_id: string
+    title: string
+    views: number
+    watch_time_minutes: number
+    average_view_duration: number
+    likes: number
+    comments: number
+}
+
 export interface VideoMetrics {
     video_id: string
     title: string
@@ -50,6 +79,11 @@ export interface AnalyticsReport {
     created_at: string
 }
 
+export interface SyncResponse {
+    status: string
+    message: string
+}
+
 export const analyticsApi = {
     // ============ Overview ============
     async getOverview(params?: {
@@ -77,17 +111,92 @@ export const analyticsApi = {
         start_date?: string
         end_date?: string
     }): Promise<ChannelMetrics> {
-        return await apiClient.get(`/analytics/channels/${accountId}`, params)
+        try {
+            // Use the accounts endpoint
+            const response = await apiClient.get<{
+                account_id: string
+                subscriber_count: number
+                total_views: number
+                total_videos: number
+                subscriber_change: number
+                views_change: number
+                engagement_rate: number
+                watch_time_minutes: number
+            }>(`/analytics/accounts/${accountId}`, params);
+
+            return {
+                account_id: response.account_id || accountId,
+                channel_name: "",
+                views: response.total_views || 0,
+                subscribers: response.subscriber_count || 0,
+                watch_time: response.watch_time_minutes || 0,
+                engagement_rate: response.engagement_rate || 0,
+                top_videos: [],
+            };
+        } catch (error) {
+            console.error("Failed to get channel metrics:", error);
+            return {
+                account_id: accountId,
+                channel_name: "",
+                views: 0,
+                subscribers: 0,
+                watch_time: 0,
+                engagement_rate: 0,
+                top_videos: [],
+            };
+        }
+    },
+
+    async getChannelDetailedMetrics(accountId: string, params?: {
+        period?: "7d" | "30d" | "90d" | "1y"
+    }): Promise<ChannelDetailedMetrics> {
+        return await apiClient.get(`/analytics/channel/${accountId}/metrics`, params)
     },
 
     async compareChannels(accountIds: string[], params?: {
         start_date?: string
         end_date?: string
     }): Promise<ChannelMetrics[]> {
-        return await apiClient.post("/analytics/channels/compare", {
+        // Ensure dates are provided
+        const today = new Date();
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(today.getDate() - 30);
+
+        const requestData = {
             account_ids: accountIds,
-            ...params,
-        })
+            start_date: params?.start_date || thirtyDaysAgo.toISOString().split('T')[0],
+            end_date: params?.end_date || today.toISOString().split('T')[0],
+        };
+
+        try {
+            const response = await apiClient.post<{
+                channels: Array<{
+                    account_id: string
+                    channel_title?: string
+                    total_views: number
+                    subscriber_count: number
+                    watch_time_minutes: number
+                    engagement_rate: number
+                }>
+            }>("/analytics/compare", requestData);
+
+            // Transform response to ChannelMetrics format
+            if (response && response.channels) {
+                return response.channels.map((ch) => ({
+                    account_id: ch.account_id,
+                    channel_name: ch.channel_title || "Unknown",
+                    views: ch.total_views || 0,
+                    subscribers: ch.subscriber_count || 0,
+                    watch_time: ch.watch_time_minutes || 0,
+                    engagement_rate: ch.engagement_rate || 0,
+                    top_videos: [],
+                }));
+            }
+            return [];
+        } catch (error) {
+            console.error("Failed to compare channels:", error);
+            return [];
+        }
     },
 
     // ============ Time Series ============
@@ -115,6 +224,15 @@ export const analyticsApi = {
         } catch (error) {
             return []
         }
+    },
+
+    // ============ Sync ============
+    async syncAccount(accountId: string): Promise<SyncResponse> {
+        return await apiClient.post(`/analytics/sync/${accountId}`)
+    },
+
+    async syncAllAccounts(): Promise<SyncResponse> {
+        return await apiClient.post("/analytics/sync")
     },
 
     // ============ Reports ============

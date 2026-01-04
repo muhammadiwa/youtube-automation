@@ -17,6 +17,7 @@ export interface YouTubeAccount {
     thumbnailUrl: string
     subscriberCount: number
     videoCount: number
+    viewCount: number
     isMonetized: boolean
     hasLiveStreamingEnabled: boolean
     strikeCount: number

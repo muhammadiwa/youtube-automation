@@ -22,6 +22,8 @@ import {
     Calendar,
     ArrowRight,
     BarChart3,
+    RefreshCw,
+    Loader2,
 } from "lucide-react";
 import {
     XAxis,
@@ -38,12 +40,14 @@ import analyticsApi, { AnalyticsOverview, TimeSeriesData } from "@/lib/api/analy
 import { AIInsightsPanel } from "@/components/dashboard/ai-insights-panel";
 import accountsApi from "@/lib/api/accounts";
 import { YouTubeAccount } from "@/types";
+import { useToast } from "@/hooks/use-toast";
 
 type Period = "7d" | "30d" | "90d" | "1y";
 
 export default function AnalyticsPage() {
     const { theme } = useTheme();
     const isDark = theme === "dark";
+    const { addToast } = useToast();
 
     const [period, setPeriod] = useState<Period>("30d");
     const [compareEnabled, setCompareEnabled] = useState(false);
@@ -53,47 +57,108 @@ export default function AnalyticsPage() {
     const [viewsData, setViewsData] = useState<TimeSeriesData[]>([]);
     const [subscribersData, setSubscribersData] = useState<TimeSeriesData[]>([]);
     const [loading, setLoading] = useState(true);
+    const [syncing, setSyncing] = useState(false);
 
     useEffect(() => {
         loadAccounts();
     }, []);
 
     useEffect(() => {
-        loadAnalytics();
-    }, [period, selectedAccount]);
+        // Only load analytics after accounts are loaded
+        if (accounts.length > 0 || selectedAccount === "all") {
+            loadAnalytics();
+        }
+    }, [period, selectedAccount, accounts.length]);
 
     const loadAccounts = async () => {
-        const data = await accountsApi.getAccounts();
-        setAccounts(data);
+        try {
+            const data = await accountsApi.getAccounts();
+            setAccounts(data);
+        } catch (error) {
+            console.error("Failed to load accounts:", error);
+        }
     };
 
     const loadAnalytics = async () => {
         setLoading(true);
         try {
-            const params = {
+            const params: { period: Period; account_id?: string } = {
                 period,
-                account_id: selectedAccount !== "all" ? selectedAccount : undefined,
             };
+
+            // Only add account_id if specific account is selected
+            if (selectedAccount !== "all") {
+                params.account_id = selectedAccount;
+            }
 
             const [overviewData, views, subscribers] = await Promise.all([
                 analyticsApi.getOverview(params),
                 analyticsApi.getViewsTimeSeries({
-                    ...params,
+                    account_id: params.account_id,
                     granularity: period === "7d" ? "day" : period === "30d" ? "day" : "week",
                 }),
                 analyticsApi.getSubscribersTimeSeries({
-                    ...params,
+                    account_id: params.account_id,
                     granularity: period === "7d" ? "day" : period === "30d" ? "day" : "week",
                 }),
             ]);
 
-            setOverview(overviewData);
+            // If no analytics data, use account stats as fallback
+            if (overviewData.total_views === 0 && overviewData.total_subscribers === 0 && accounts.length > 0) {
+                const relevantAccounts = selectedAccount !== "all"
+                    ? accounts.filter(a => a.id === selectedAccount)
+                    : accounts;
+
+                const totalViews = relevantAccounts.reduce((sum, a) => sum + (a.viewCount || 0), 0);
+                const totalSubscribers = relevantAccounts.reduce((sum, a) => sum + (a.subscriberCount || 0), 0);
+
+                setOverview({
+                    ...overviewData,
+                    total_views: totalViews,
+                    total_subscribers: totalSubscribers,
+                });
+            } else {
+                setOverview(overviewData);
+            }
+
             setViewsData(views);
             setSubscribersData(subscribers);
         } catch (error) {
             console.error("Failed to load analytics:", error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleSync = async () => {
+        setSyncing(true);
+        try {
+            if (selectedAccount !== "all") {
+                await analyticsApi.syncAccount(selectedAccount);
+                addToast({
+                    title: "Sync Started",
+                    description: "Analytics sync has been queued for this channel.",
+                    type: "success",
+                });
+            } else {
+                await analyticsApi.syncAllAccounts();
+                addToast({
+                    title: "Sync Started",
+                    description: "Analytics sync has been queued for all channels.",
+                    type: "success",
+                });
+            }
+            // Reload data after a delay
+            setTimeout(() => loadAnalytics(), 5000);
+        } catch (error) {
+            console.error("Failed to sync analytics:", error);
+            addToast({
+                title: "Sync Failed",
+                description: "Failed to start analytics sync. Please try again.",
+                type: "error",
+            });
+        } finally {
+            setSyncing(false);
         }
     };
 
@@ -203,8 +268,51 @@ export default function AnalyticsPage() {
                                 Compare
                             </Label>
                         </div>
+
+                        {/* Sync Button */}
+                        <Button variant="outline" onClick={handleSync} disabled={syncing}>
+                            {syncing ? (
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            ) : (
+                                <RefreshCw className="h-4 w-4 mr-2" />
+                            )}
+                            Sync
+                        </Button>
                     </div>
                 </div>
+
+                {/* No Data Warning */}
+                {!loading && overview && overview.total_views === 0 && overview.total_subscribers === 0 && (
+                    <Card className="border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30">
+                        <CardContent className="p-4">
+                            <div className="flex items-center gap-3">
+                                <RefreshCw className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                                <div className="flex-1">
+                                    <p className="font-medium text-amber-800 dark:text-amber-200">
+                                        No Analytics Data Available
+                                    </p>
+                                    <p className="text-sm text-amber-600 dark:text-amber-400">
+                                        Click the Sync button to fetch analytics data from YouTube. This may take a few moments.
+                                    </p>
+                                </div>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleSync}
+                                    disabled={syncing}
+                                    className="border-amber-300 hover:bg-amber-100 dark:border-amber-700 dark:hover:bg-amber-900"
+                                >
+                                    {syncing ? (
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    ) : (
+                                        <RefreshCw className="h-4 w-4 mr-2" />
+                                    )}
+                                    Sync Now
+                                </Button>
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
 
                 {/* Key Metrics Cards */}
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

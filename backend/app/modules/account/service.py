@@ -514,3 +514,24 @@ class YouTubeAccountService:
                 error=str(e),
             )
             raise
+
+    async def get_valid_access_token(self, account: YouTubeAccount) -> str:
+        """Get a valid access token, refreshing if necessary.
+
+        Args:
+            account: Account instance
+
+        Returns:
+            str: Valid access token
+
+        Raises:
+            OAuthError: If token refresh fails
+        """
+        if account.is_token_expired() or account.is_token_expiring_soon(hours=1):
+            account = await self._refresh_account_token(account)
+            await self.session.commit()
+        return account.access_token
+
+
+# Alias for backward compatibility
+AccountService = YouTubeAccountService

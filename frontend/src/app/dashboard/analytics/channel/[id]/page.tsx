@@ -29,9 +29,9 @@ import {
     Download,
     Play,
     Globe,
-    Smartphone,
-    Monitor,
     ExternalLink,
+    RefreshCw,
+    Loader2,
 } from "lucide-react";
 import {
     XAxis,
@@ -49,38 +49,36 @@ import {
 } from "recharts";
 import { useTheme } from "next-themes";
 import Link from "next/link";
-import analyticsApi, { ChannelMetrics, TimeSeriesData, VideoMetrics } from "@/lib/api/analytics";
+import analyticsApi, { ChannelDetailedMetrics, TimeSeriesData, TopVideoData } from "@/lib/api/analytics";
 import accountsApi from "@/lib/api/accounts";
 import { YouTubeAccount } from "@/types";
 import { useToast } from "@/hooks/use-toast";
 
 type Period = "7d" | "30d" | "90d" | "1y";
 
-// Mock traffic sources data
-const trafficSourcesData = [
-    { name: "YouTube Search", value: 35, color: "#3b82f6" },
-    { name: "Suggested Videos", value: 28, color: "#10b981" },
-    { name: "External", value: 15, color: "#f59e0b" },
-    { name: "Browse Features", value: 12, color: "#8b5cf6" },
-    { name: "Direct", value: 10, color: "#ef4444" },
-];
+// Traffic source colors
+const TRAFFIC_SOURCE_COLORS: Record<string, string> = {
+    "YT_SEARCH": "#3b82f6",
+    "SUGGESTED": "#10b981",
+    "EXT_URL": "#f59e0b",
+    "BROWSE": "#8b5cf6",
+    "NO_LINK_OTHER": "#ef4444",
+    "PLAYLIST": "#06b6d4",
+    "NOTIFICATION": "#ec4899",
+    "END_SCREEN": "#84cc16",
+};
 
-// Mock demographics data
-const demographicsData = [
-    { age: "13-17", male: 8, female: 5 },
-    { age: "18-24", male: 25, female: 18 },
-    { age: "25-34", male: 30, female: 22 },
-    { age: "35-44", male: 15, female: 12 },
-    { age: "45-54", male: 8, female: 6 },
-    { age: "55+", male: 5, female: 4 },
-];
-
-// Mock device data
-const deviceData = [
-    { name: "Mobile", value: 55, icon: Smartphone, color: "#3b82f6" },
-    { name: "Desktop", value: 35, icon: Monitor, color: "#10b981" },
-    { name: "TV", value: 10, icon: Monitor, color: "#8b5cf6" },
-];
+// Traffic source display names
+const TRAFFIC_SOURCE_NAMES: Record<string, string> = {
+    "YT_SEARCH": "YouTube Search",
+    "SUGGESTED": "Suggested Videos",
+    "EXT_URL": "External",
+    "BROWSE": "Browse Features",
+    "NO_LINK_OTHER": "Direct/Other",
+    "PLAYLIST": "Playlist",
+    "NOTIFICATION": "Notifications",
+    "END_SCREEN": "End Screen",
+};
 
 export default function ChannelAnalyticsPage() {
     const params = useParams();
@@ -91,10 +89,11 @@ export default function ChannelAnalyticsPage() {
 
     const [period, setPeriod] = useState<Period>("30d");
     const [account, setAccount] = useState<YouTubeAccount | null>(null);
-    const [metrics, setMetrics] = useState<ChannelMetrics | null>(null);
+    const [metrics, setMetrics] = useState<ChannelDetailedMetrics | null>(null);
     const [viewsData, setViewsData] = useState<TimeSeriesData[]>([]);
     const [subscribersData, setSubscribersData] = useState<TimeSeriesData[]>([]);
     const [loading, setLoading] = useState(true);
+    const [syncing, setSyncing] = useState(false);
 
     useEffect(() => {
         loadData();
@@ -105,7 +104,7 @@ export default function ChannelAnalyticsPage() {
         try {
             const [accountData, channelMetrics, views, subscribers] = await Promise.all([
                 accountsApi.getAccount(accountId),
-                analyticsApi.getChannelMetrics(accountId),
+                analyticsApi.getChannelDetailedMetrics(accountId, { period }).catch(() => null),
                 analyticsApi.getViewsTimeSeries({
                     account_id: accountId,
                     granularity: period === "7d" ? "day" : period === "30d" ? "day" : "week",
@@ -117,13 +116,67 @@ export default function ChannelAnalyticsPage() {
             ]);
 
             setAccount(accountData);
-            setMetrics(channelMetrics);
+
+            // If no metrics from API, use account data as fallback
+            if (channelMetrics) {
+                // If metrics are all zero, use account stats
+                if (channelMetrics.views === 0 && channelMetrics.subscribers === 0 && accountData) {
+                    setMetrics({
+                        ...channelMetrics,
+                        views: accountData.viewCount || 0,
+                        subscribers: accountData.subscriberCount || 0,
+                    });
+                } else {
+                    setMetrics(channelMetrics);
+                }
+            } else if (accountData) {
+                // Create fallback metrics from account data
+                setMetrics({
+                    account_id: accountId,
+                    period: period,
+                    start_date: "",
+                    end_date: "",
+                    subscribers: accountData.subscriberCount || 0,
+                    subscriber_change: 0,
+                    views: accountData.viewCount || 0,
+                    views_change: 0,
+                    watch_time: 0,
+                    engagement_rate: 0,
+                    traffic_sources: {},
+                    demographics: { age_groups: {}, gender: { male: 0, female: 0 } },
+                    top_videos: [],
+                });
+            }
+
             setViewsData(views);
             setSubscribersData(subscribers);
         } catch (error) {
             console.error("Failed to load channel analytics:", error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleSync = async () => {
+        setSyncing(true);
+        try {
+            await analyticsApi.syncAccount(accountId);
+            addToast({
+                title: "Sync Started",
+                description: "Analytics sync has been queued. Data will be updated shortly.",
+                type: "success",
+            });
+            // Reload data after a short delay
+            setTimeout(() => loadData(), 3000);
+        } catch (error) {
+            console.error("Failed to sync analytics:", error);
+            addToast({
+                title: "Sync Failed",
+                description: "Failed to start analytics sync. Please try again.",
+                type: "error",
+            });
+        } finally {
+            setSyncing(false);
         }
     };
 
@@ -146,7 +199,7 @@ export default function ChannelAnalyticsPage() {
             await analyticsApi.generateReport({
                 name: `${account?.channelTitle || "Channel"} Analytics Report`,
                 type: "custom",
-                metrics: ["views", "subscribers", "watch_time", "revenue"],
+                metrics: ["views", "subscribers", "watch_time"],
                 format,
                 account_ids: [accountId],
             });
@@ -171,6 +224,34 @@ export default function ChannelAnalyticsPage() {
         views: v.value,
         subscribers: subscribersData[i]?.value || 0,
     }));
+
+    // Transform traffic sources for pie chart
+    const trafficSourcesData = metrics?.traffic_sources
+        ? Object.entries(metrics.traffic_sources).map(([key, value]) => ({
+            name: TRAFFIC_SOURCE_NAMES[key] || key,
+            value: value.views,
+            color: TRAFFIC_SOURCE_COLORS[key] || "#6b7280",
+        }))
+        : [];
+
+    // Calculate total views for percentage
+    const totalTrafficViews = trafficSourcesData.reduce((sum, item) => sum + item.value, 0);
+    const trafficSourcesWithPercent = trafficSourcesData.map(item => ({
+        ...item,
+        percent: totalTrafficViews > 0 ? Math.round((item.value / totalTrafficViews) * 100) : 0,
+    }));
+
+    // Transform demographics for bar chart
+    const demographicsData = metrics?.demographics?.age_groups
+        ? Object.entries(metrics.demographics.age_groups).map(([age, data]) => ({
+            age,
+            male: Math.round(data.male),
+            female: Math.round(data.female),
+        }))
+        : [];
+
+    // Top videos from API
+    const topVideos: TopVideoData[] = metrics?.top_videos || [];
 
     const CustomTooltip = ({ active, payload, label }: any) => {
         if (active && payload && payload.length) {
@@ -203,7 +284,7 @@ export default function ChannelAnalyticsPage() {
                             style={{ backgroundColor: payload[0].payload.color }}
                         />
                         <span className="font-medium">{payload[0].name}:</span>
-                        <span>{payload[0].value}%</span>
+                        <span>{formatNumber(payload[0].value)} views ({payload[0].payload.percent}%)</span>
                     </div>
                 </div>
             );
@@ -211,14 +292,7 @@ export default function ChannelAnalyticsPage() {
         return null;
     };
 
-    // Mock top videos if not available from API
-    const topVideos: VideoMetrics[] = metrics?.top_videos || [
-        { video_id: "1", title: "How to Get Started with YouTube", views: 125000, likes: 8500, comments: 450, watch_time: 45000, average_view_duration: 360, click_through_rate: 8.5 },
-        { video_id: "2", title: "10 Tips for Better Thumbnails", views: 98000, likes: 6200, comments: 320, watch_time: 35000, average_view_duration: 280, click_through_rate: 7.2 },
-        { video_id: "3", title: "YouTube Algorithm Explained", views: 87000, likes: 5800, comments: 280, watch_time: 32000, average_view_duration: 420, click_through_rate: 9.1 },
-        { video_id: "4", title: "Best Camera Settings for YouTube", views: 76000, likes: 4900, comments: 210, watch_time: 28000, average_view_duration: 310, click_through_rate: 6.8 },
-        { video_id: "5", title: "How I Edit My Videos", views: 65000, likes: 4200, comments: 180, watch_time: 24000, average_view_duration: 290, click_through_rate: 7.5 },
-    ];
+    const hasData = metrics && (metrics.views > 0 || metrics.subscribers > 0);
 
     return (
         <DashboardLayout
@@ -249,6 +323,16 @@ export default function ChannelAnalyticsPage() {
                         </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-3">
+                        {/* Sync Button */}
+                        <Button variant="outline" onClick={handleSync} disabled={syncing}>
+                            {syncing ? (
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            ) : (
+                                <RefreshCw className="h-4 w-4 mr-2" />
+                            )}
+                            Sync
+                        </Button>
+
                         {/* Date Range Selector */}
                         <Select value={period} onValueChange={(v) => setPeriod(v as Period)}>
                             <SelectTrigger className="w-[150px]">
@@ -274,6 +358,27 @@ export default function ChannelAnalyticsPage() {
                         </Button>
                     </div>
                 </div>
+
+                {/* No Data Message */}
+                {!loading && !hasData && (
+                    <Card className="border-0 bg-card shadow-lg">
+                        <CardContent className="p-8 text-center">
+                            <RefreshCw className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                            <h3 className="text-lg font-semibold mb-2">No Analytics Data Yet</h3>
+                            <p className="text-muted-foreground mb-4">
+                                Analytics data hasn't been synced for this channel yet. Click the Sync button to fetch the latest data from YouTube.
+                            </p>
+                            <Button onClick={handleSync} disabled={syncing}>
+                                {syncing ? (
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                ) : (
+                                    <RefreshCw className="h-4 w-4 mr-2" />
+                                )}
+                                Sync Now
+                            </Button>
+                        </CardContent>
+                    </Card>
+                )}
 
                 {/* Key Metrics */}
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -399,37 +504,43 @@ export default function ChannelAnalyticsPage() {
                             </div>
                         </CardHeader>
                         <CardContent>
-                            <div className="flex items-center gap-8">
-                                <ResponsiveContainer width="50%" height={200}>
-                                    <PieChart>
-                                        <Pie
-                                            data={trafficSourcesData}
-                                            cx="50%"
-                                            cy="50%"
-                                            innerRadius={50}
-                                            outerRadius={80}
-                                            paddingAngle={2}
-                                            dataKey="value"
-                                        >
-                                            {trafficSourcesData.map((entry, index) => (
-                                                <Cell key={`cell-${index}`} fill={entry.color} />
-                                            ))}
-                                        </Pie>
-                                        <Tooltip content={<PieTooltip />} />
-                                    </PieChart>
-                                </ResponsiveContainer>
-                                <div className="flex-1 space-y-2">
-                                    {trafficSourcesData.map((source) => (
-                                        <div key={source.name} className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                                <div className="h-3 w-3 rounded-full" style={{ backgroundColor: source.color }} />
-                                                <span className="text-sm">{source.name}</span>
+                            {trafficSourcesWithPercent.length > 0 ? (
+                                <div className="flex items-center gap-8">
+                                    <ResponsiveContainer width="50%" height={200}>
+                                        <PieChart>
+                                            <Pie
+                                                data={trafficSourcesWithPercent}
+                                                cx="50%"
+                                                cy="50%"
+                                                innerRadius={50}
+                                                outerRadius={80}
+                                                paddingAngle={2}
+                                                dataKey="value"
+                                            >
+                                                {trafficSourcesWithPercent.map((entry, index) => (
+                                                    <Cell key={`cell-${index}`} fill={entry.color} />
+                                                ))}
+                                            </Pie>
+                                            <Tooltip content={<PieTooltip />} />
+                                        </PieChart>
+                                    </ResponsiveContainer>
+                                    <div className="flex-1 space-y-2">
+                                        {trafficSourcesWithPercent.slice(0, 5).map((source) => (
+                                            <div key={source.name} className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="h-3 w-3 rounded-full" style={{ backgroundColor: source.color }} />
+                                                    <span className="text-sm">{source.name}</span>
+                                                </div>
+                                                <span className="text-sm font-medium">{source.percent}%</span>
                                             </div>
-                                            <span className="text-sm font-medium">{source.value}%</span>
-                                        </div>
-                                    ))}
+                                        ))}
+                                    </div>
                                 </div>
-                            </div>
+                            ) : (
+                                <div className="flex items-center justify-center h-[200px] text-muted-foreground">
+                                    No traffic source data available
+                                </div>
+                            )}
                         </CardContent>
                     </Card>
 
@@ -442,26 +553,34 @@ export default function ChannelAnalyticsPage() {
                             </div>
                         </CardHeader>
                         <CardContent>
-                            <ResponsiveContainer width="100%" height={200}>
-                                <BarChart data={demographicsData} layout="vertical">
-                                    <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#374151" : "#e5e7eb"} horizontal={false} />
-                                    <XAxis type="number" stroke={isDark ? "#6b7280" : "#9ca3af"} fontSize={12} tickLine={false} axisLine={false} />
-                                    <YAxis type="category" dataKey="age" stroke={isDark ? "#6b7280" : "#9ca3af"} fontSize={12} tickLine={false} axisLine={false} width={50} />
-                                    <Tooltip content={<CustomTooltip />} />
-                                    <Bar dataKey="male" name="Male" fill="#3b82f6" radius={[0, 4, 4, 0]} />
-                                    <Bar dataKey="female" name="Female" fill="#ec4899" radius={[0, 4, 4, 0]} />
-                                </BarChart>
-                            </ResponsiveContainer>
-                            <div className="flex justify-center gap-6 mt-4">
-                                <div className="flex items-center gap-2">
-                                    <div className="h-3 w-3 rounded-full bg-blue-500" />
-                                    <span className="text-sm text-muted-foreground">Male</span>
+                            {demographicsData.length > 0 ? (
+                                <>
+                                    <ResponsiveContainer width="100%" height={200}>
+                                        <BarChart data={demographicsData} layout="vertical">
+                                            <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#374151" : "#e5e7eb"} horizontal={false} />
+                                            <XAxis type="number" stroke={isDark ? "#6b7280" : "#9ca3af"} fontSize={12} tickLine={false} axisLine={false} />
+                                            <YAxis type="category" dataKey="age" stroke={isDark ? "#6b7280" : "#9ca3af"} fontSize={12} tickLine={false} axisLine={false} width={50} />
+                                            <Tooltip content={<CustomTooltip />} />
+                                            <Bar dataKey="male" name="Male" fill="#3b82f6" radius={[0, 4, 4, 0]} />
+                                            <Bar dataKey="female" name="Female" fill="#ec4899" radius={[0, 4, 4, 0]} />
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                    <div className="flex justify-center gap-6 mt-4">
+                                        <div className="flex items-center gap-2">
+                                            <div className="h-3 w-3 rounded-full bg-blue-500" />
+                                            <span className="text-sm text-muted-foreground">Male</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <div className="h-3 w-3 rounded-full bg-pink-500" />
+                                            <span className="text-sm text-muted-foreground">Female</span>
+                                        </div>
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="flex items-center justify-center h-[200px] text-muted-foreground">
+                                    No demographics data available
                                 </div>
-                                <div className="flex items-center gap-2">
-                                    <div className="h-3 w-3 rounded-full bg-pink-500" />
-                                    <span className="text-sm text-muted-foreground">Female</span>
-                                </div>
-                            </div>
+                            )}
                         </CardContent>
                     </Card>
                 </div>
@@ -483,34 +602,40 @@ export default function ChannelAnalyticsPage() {
                         </div>
                     </CardHeader>
                     <CardContent>
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>Video</TableHead>
-                                    <TableHead className="text-right">Views</TableHead>
-                                    <TableHead className="text-right">Likes</TableHead>
-                                    <TableHead className="text-right">Comments</TableHead>
-                                    <TableHead className="text-right">Avg. Duration</TableHead>
-                                    <TableHead className="text-right">CTR</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {topVideos.map((video) => (
-                                    <TableRow key={video.video_id}>
-                                        <TableCell className="font-medium max-w-[300px] truncate">
-                                            {video.title}
-                                        </TableCell>
-                                        <TableCell className="text-right">{formatNumber(video.views)}</TableCell>
-                                        <TableCell className="text-right">{formatNumber(video.likes)}</TableCell>
-                                        <TableCell className="text-right">{formatNumber(video.comments)}</TableCell>
-                                        <TableCell className="text-right">
-                                            {Math.floor(video.average_view_duration / 60)}:{(video.average_view_duration % 60).toString().padStart(2, "0")}
-                                        </TableCell>
-                                        <TableCell className="text-right">{video.click_through_rate.toFixed(1)}%</TableCell>
+                        {topVideos.length > 0 ? (
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Video</TableHead>
+                                        <TableHead className="text-right">Views</TableHead>
+                                        <TableHead className="text-right">Likes</TableHead>
+                                        <TableHead className="text-right">Comments</TableHead>
+                                        <TableHead className="text-right">Avg. Duration</TableHead>
+                                        <TableHead className="text-right">Watch Time</TableHead>
                                     </TableRow>
-                                ))}
-                            </TableBody>
-                        </Table>
+                                </TableHeader>
+                                <TableBody>
+                                    {topVideos.map((video) => (
+                                        <TableRow key={video.video_id}>
+                                            <TableCell className="font-medium max-w-[300px] truncate">
+                                                {video.title}
+                                            </TableCell>
+                                            <TableCell className="text-right">{formatNumber(video.views)}</TableCell>
+                                            <TableCell className="text-right">{formatNumber(video.likes)}</TableCell>
+                                            <TableCell className="text-right">{formatNumber(video.comments)}</TableCell>
+                                            <TableCell className="text-right">
+                                                {Math.floor(video.average_view_duration / 60)}:{Math.floor(video.average_view_duration % 60).toString().padStart(2, "0")}
+                                            </TableCell>
+                                            <TableCell className="text-right">{formatWatchTime(video.watch_time_minutes)}</TableCell>
+                                        </TableRow>
+                                    ))}
+                                </TableBody>
+                            </Table>
+                        ) : (
+                            <div className="flex items-center justify-center h-[200px] text-muted-foreground">
+                                No video data available. Click Sync to fetch data from YouTube.
+                            </div>
+                        )}
                     </CardContent>
                 </Card>
             </div>

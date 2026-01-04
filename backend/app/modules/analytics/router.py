@@ -61,9 +61,13 @@ async def get_analytics_overview(
     
     This endpoint provides a simplified overview with period-based filtering.
     Used by the client dashboard home page.
+    If no analytics snapshots exist, falls back to account statistics.
     
     Requirements: 17.1, 17.2
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
     service = AnalyticsService(db)
     
     # Parse period to dates
@@ -86,6 +90,30 @@ async def get_analytics_overview(
         metrics = await service.get_dashboard_metrics(
             user_id, start_date, end_date, account_ids
         )
+        
+        # If no data from snapshots, try to get from account stats
+        if metrics.total_views == 0 and metrics.total_subscribers == 0:
+            # Query accounts directly
+            query = select(YouTubeAccount).where(YouTubeAccount.status == "active")
+            if account_ids:
+                query = query.where(YouTubeAccount.id.in_(account_ids))
+            
+            result = await db.execute(query)
+            accounts = result.scalars().all()
+            
+            if accounts:
+                total_views = sum(a.view_count or 0 for a in accounts)
+                total_subscribers = sum(a.subscriber_count or 0 for a in accounts)
+                
+                return AnalyticsOverviewResponse(
+                    total_views=total_views,
+                    total_subscribers=total_subscribers,
+                    total_watch_time=0,
+                    views_change=0,
+                    subscribers_change=0,
+                    watch_time_change=0,
+                    period=period,
+                )
         
         # Calculate watch time change (compare with previous period)
         period_days = (end_date - start_date).days + 1
@@ -131,9 +159,13 @@ async def get_views_timeseries(
     """Get views time series data for charts.
     
     Returns daily/weekly/monthly view counts for the specified period.
+    If no analytics snapshots exist, returns account view count as single point.
     
     Requirements: 17.1, 17.2
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
     service = AnalyticsService(db)
     
     # Parse dates
@@ -172,6 +204,20 @@ async def get_views_timeseries(
             views_by_date[snapshot_date] = 0
         views_by_date[snapshot_date] += snapshot.total_views
     
+    # If no snapshots, get current view count from accounts
+    if not views_by_date:
+        query = select(YouTubeAccount).where(YouTubeAccount.status == "active")
+        if account_ids:
+            query = query.where(YouTubeAccount.id.in_(account_ids))
+        
+        result = await db.execute(query)
+        accounts = result.scalars().all()
+        
+        if accounts:
+            total_views = sum(a.view_count or 0 for a in accounts)
+            # Put current total at today's date
+            views_by_date[end] = total_views
+    
     # Convert to time series format
     result = []
     current_date = start
@@ -196,9 +242,13 @@ async def get_subscribers_timeseries(
     """Get subscribers time series data for charts.
     
     Returns daily/weekly/monthly subscriber counts for the specified period.
+    If no analytics snapshots exist, returns account subscriber count as single point.
     
     Requirements: 17.1, 17.2
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
     service = AnalyticsService(db)
     
     # Parse dates
@@ -229,13 +279,27 @@ async def get_subscribers_timeseries(
     # Get snapshots for the date range
     snapshots = await service.get_snapshots_by_date_range(start, end, account_ids)
     
-    # Aggregate by date (use subscriber_change for daily change)
+    # Aggregate by date - use subscriber_count (total) not subscriber_change
     subscribers_by_date: dict[date, int] = {}
     for snapshot in snapshots:
         snapshot_date = snapshot.snapshot_date
         if snapshot_date not in subscribers_by_date:
             subscribers_by_date[snapshot_date] = 0
-        subscribers_by_date[snapshot_date] += snapshot.subscriber_change
+        subscribers_by_date[snapshot_date] += snapshot.subscriber_count
+    
+    # If no snapshots, get current subscriber count from accounts
+    if not subscribers_by_date:
+        query = select(YouTubeAccount).where(YouTubeAccount.status == "active")
+        if account_ids:
+            query = query.where(YouTubeAccount.id.in_(account_ids))
+        
+        result = await db.execute(query)
+        accounts = result.scalars().all()
+        
+        if accounts:
+            total_subscribers = sum(a.subscriber_count or 0 for a in accounts)
+            # Put current total at today's date
+            subscribers_by_date[end] = total_subscribers
     
     # Convert to time series format
     result = []
@@ -316,11 +380,37 @@ async def compare_channels(
 
     Requirements: 17.5
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
     service = AnalyticsService(db)
     try:
-        return await service.compare_channels(
+        result = await service.compare_channels(
             request.account_ids, request.start_date, request.end_date
         )
+        
+        # If all channels have zero data, try to get from account stats
+        all_zero = all(
+            ch.total_views == 0 and ch.subscriber_count == 0 
+            for ch in result.channels
+        )
+        
+        if all_zero:
+            # Query accounts directly
+            account_result = await db.execute(
+                select(YouTubeAccount).where(YouTubeAccount.id.in_(request.account_ids))
+            )
+            accounts = {str(a.id): a for a in account_result.scalars().all()}
+            
+            # Update channels with account data
+            for channel in result.channels:
+                account = accounts.get(str(channel.account_id))
+                if account:
+                    channel.subscriber_count = account.subscriber_count or 0
+                    channel.total_views = account.view_count or 0
+                    channel.channel_title = account.channel_title
+        
+        return result
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -495,3 +585,102 @@ async def get_ai_insights_simple(
     )
 
     return insights[:limit]
+
+
+@router.post("/sync/{account_id}")
+async def trigger_account_sync(
+    account_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Trigger manual analytics sync for a specific account.
+    
+    This queues a background task to fetch the latest analytics data
+    from YouTube for the specified account.
+
+    Requirements: 17.1
+    """
+    service = AnalyticsService(db)
+    return await service.trigger_sync(account_id)
+
+
+@router.post("/sync")
+async def trigger_all_accounts_sync(
+    db: AsyncSession = Depends(get_db),
+):
+    """Trigger manual analytics sync for all accounts.
+    
+    This queues background tasks to fetch the latest analytics data
+    from YouTube for all active accounts.
+
+    Requirements: 17.1
+    """
+    service = AnalyticsService(db)
+    return await service.trigger_sync_all()
+
+
+@router.get("/channel/{account_id}/metrics")
+async def get_channel_metrics(
+    account_id: uuid.UUID,
+    period: str = Query("30d", description="Period: 7d, 30d, 90d, 1y"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get detailed channel metrics including traffic sources and demographics.
+    
+    Returns comprehensive analytics data for a specific channel.
+    Falls back to account statistics if no analytics snapshots exist.
+
+    Requirements: 17.1, 17.2
+    """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
+    service = AnalyticsService(db)
+    
+    # Parse period to dates
+    start_date, end_date = _parse_period_to_dates(period)
+    
+    # Get basic metrics
+    account_metrics = await service.get_account_metrics(account_id, start_date, end_date)
+    
+    # Get detailed metrics (traffic sources, demographics, top videos)
+    detailed = await service.get_channel_detailed_metrics(account_id, start_date, end_date)
+    
+    # If no data from snapshots, try to get from account stats
+    if account_metrics.total_views == 0 and account_metrics.subscriber_count == 0:
+        result = await db.execute(
+            select(YouTubeAccount).where(YouTubeAccount.id == account_id)
+        )
+        account = result.scalar_one_or_none()
+        
+        if account:
+            return {
+                "account_id": str(account_id),
+                "period": period,
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "subscribers": account.subscriber_count or 0,
+                "subscriber_change": 0,
+                "views": account.view_count or 0,
+                "views_change": 0,
+                "watch_time": 0,
+                "engagement_rate": 0,
+                "traffic_sources": {},
+                "demographics": {},
+                "top_videos": [],
+            }
+    
+    return {
+        "account_id": str(account_id),
+        "period": period,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "subscribers": account_metrics.subscriber_count,
+        "subscriber_change": account_metrics.subscriber_change,
+        "views": account_metrics.total_views,
+        "views_change": account_metrics.views_change,
+        "watch_time": account_metrics.watch_time_minutes,
+        "engagement_rate": account_metrics.engagement_rate,
+        "traffic_sources": detailed["traffic_sources"],
+        "demographics": detailed["demographics"],
+        "top_videos": detailed["top_videos"],
+    }

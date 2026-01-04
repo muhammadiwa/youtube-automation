@@ -209,29 +209,42 @@ class AnalyticsService:
         Returns:
             ChannelComparisonResponse: Comparison data with variance indicators
         """
+        from sqlalchemy import select
+        from app.modules.account.models import YouTubeAccount
+        
         if len(account_ids) < 2:
             raise AnalyticsServiceError("At least 2 accounts required for comparison")
+
+        # Get account info for channel titles
+        account_result = await self.session.execute(
+            select(YouTubeAccount).where(YouTubeAccount.id.in_(account_ids))
+        )
+        accounts = {a.id: a for a in account_result.scalars().all()}
 
         # Get metrics for each account
         channel_metrics = []
         for account_id in account_ids:
             metrics = await self.get_account_metrics(account_id, start_date, end_date)
-            channel_metrics.append(metrics)
+            channel_metrics.append((account_id, metrics))
 
         # Calculate averages
         avg_subscribers = (
-            sum(m.subscriber_count for m in channel_metrics) / len(channel_metrics)
-        )
-        avg_views = sum(m.total_views for m in channel_metrics) / len(channel_metrics)
+            sum(m.subscriber_count for _, m in channel_metrics) / len(channel_metrics)
+        ) if channel_metrics else 0
+        avg_views = (
+            sum(m.total_views for _, m in channel_metrics) / len(channel_metrics)
+        ) if channel_metrics else 0
         avg_engagement = (
-            sum(m.engagement_rate for m in channel_metrics) / len(channel_metrics)
-        )
+            sum(m.engagement_rate for _, m in channel_metrics) / len(channel_metrics)
+        ) if channel_metrics else 0
 
         # Build comparison items with variance
         comparison_items = []
-        for metrics in channel_metrics:
+        for account_id, metrics in channel_metrics:
+            account = accounts.get(account_id)
             item = ChannelComparisonItem(
                 account_id=metrics.account_id,
+                channel_title=account.channel_title if account else None,
                 subscriber_count=metrics.subscriber_count,
                 subscriber_change=metrics.subscriber_change,
                 total_views=metrics.total_views,
@@ -474,3 +487,75 @@ class AnalyticsService:
                 ))
 
         return insights
+
+    async def trigger_sync(self, account_id: uuid.UUID) -> dict:
+        """Trigger manual analytics sync for an account.
+
+        Args:
+            account_id: YouTube account UUID
+
+        Returns:
+            dict: Status message
+        """
+        from app.modules.analytics.tasks import sync_account_analytics
+        
+        # Queue the sync task
+        sync_account_analytics.delay(str(account_id))
+        
+        return {
+            "status": "queued",
+            "message": f"Analytics sync queued for account {account_id}",
+        }
+
+    async def trigger_sync_all(self) -> dict:
+        """Trigger manual analytics sync for all accounts.
+
+        Returns:
+            dict: Status message
+        """
+        from app.modules.analytics.tasks import sync_all_accounts_analytics
+        
+        # Queue the sync task
+        sync_all_accounts_analytics.delay()
+        
+        return {
+            "status": "queued",
+            "message": "Analytics sync queued for all accounts",
+        }
+
+    async def get_channel_detailed_metrics(
+        self,
+        account_id: uuid.UUID,
+        start_date: date,
+        end_date: date,
+    ) -> dict:
+        """Get detailed channel metrics including traffic sources and demographics.
+
+        Args:
+            account_id: YouTube account UUID
+            start_date: Start of date range
+            end_date: End of date range
+
+        Returns:
+            dict: Detailed metrics including traffic sources, demographics, top videos
+        """
+        # Get latest snapshot with detailed data
+        snapshots = await self.snapshot_repo.get_by_account_date_range(
+            account_id, start_date, end_date
+        )
+
+        if not snapshots:
+            return {
+                "traffic_sources": {},
+                "demographics": {},
+                "top_videos": [],
+            }
+
+        # Get the most recent snapshot with detailed data
+        latest = snapshots[-1]
+
+        return {
+            "traffic_sources": latest.traffic_sources or {},
+            "demographics": latest.demographics or {},
+            "top_videos": latest.top_videos or [],
+        }

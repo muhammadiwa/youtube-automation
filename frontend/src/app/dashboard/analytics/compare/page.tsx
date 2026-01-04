@@ -88,24 +88,64 @@ export default function ChannelComparisonPage() {
 
         setLoading(true);
         try {
-            const metrics = await analyticsApi.compareChannels(selectedAccountIds);
-            setChannelMetrics(metrics);
+            // Calculate date range based on period
+            const endDate = new Date();
+            let startDate = new Date();
+
+            switch (period) {
+                case "7d":
+                    startDate.setDate(endDate.getDate() - 7);
+                    break;
+                case "30d":
+                    startDate.setDate(endDate.getDate() - 30);
+                    break;
+                case "90d":
+                    startDate.setDate(endDate.getDate() - 90);
+                    break;
+                case "1y":
+                    startDate.setFullYear(endDate.getFullYear() - 1);
+                    break;
+            }
+
+            const metrics = await analyticsApi.compareChannels(selectedAccountIds, {
+                start_date: startDate.toISOString().split('T')[0],
+                end_date: endDate.toISOString().split('T')[0],
+            });
+
+            // If API returns empty or error, use account data as fallback
+            if (!metrics || metrics.length === 0) {
+                const fallbackMetrics: ChannelMetrics[] = selectedAccountIds.map((id) => {
+                    const account = accounts.find(a => a.id === id);
+                    return {
+                        account_id: id,
+                        channel_name: account?.channelTitle || "Unknown",
+                        views: account?.viewCount || 0,
+                        subscribers: account?.subscriberCount || 0,
+                        watch_time: 0,
+                        engagement_rate: 0,
+                        top_videos: [],
+                    };
+                });
+                setChannelMetrics(fallbackMetrics);
+            } else {
+                setChannelMetrics(metrics);
+            }
         } catch (error) {
             console.error("Failed to load comparison:", error);
-            // Generate mock data for demo
-            const mockMetrics: ChannelMetrics[] = selectedAccountIds.map((id, index) => {
+            // Use account data as fallback
+            const fallbackMetrics: ChannelMetrics[] = selectedAccountIds.map((id) => {
                 const account = accounts.find(a => a.id === id);
                 return {
                     account_id: id,
-                    channel_name: account?.channelTitle || `Channel ${index + 1}`,
-                    views: Math.floor(Math.random() * 500000) + 50000,
-                    subscribers: Math.floor(Math.random() * 100000) + 10000,
-                    watch_time: Math.floor(Math.random() * 50000) + 5000,
-                    engagement_rate: Math.random() * 10 + 2,
+                    channel_name: account?.channelTitle || "Unknown",
+                    views: account?.viewCount || 0,
+                    subscribers: account?.subscriberCount || 0,
+                    watch_time: 0,
+                    engagement_rate: 0,
                     top_videos: [],
                 };
             });
-            setChannelMetrics(mockMetrics);
+            setChannelMetrics(fallbackMetrics);
         } finally {
             setLoading(false);
         }
