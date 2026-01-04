@@ -48,7 +48,6 @@ const AVAILABLE_METRICS = [
     { id: "views", label: "Views", description: "Total video views" },
     { id: "subscribers", label: "Subscribers", description: "Subscriber count changes" },
     { id: "watch_time", label: "Watch Time", description: "Total watch time in hours" },
-    { id: "revenue", label: "Revenue", description: "Estimated earnings" },
     { id: "engagement", label: "Engagement", description: "Likes, comments, shares" },
     { id: "traffic_sources", label: "Traffic Sources", description: "Where viewers come from" },
     { id: "demographics", label: "Demographics", description: "Audience age and gender" },
@@ -67,7 +66,7 @@ export default function ReportsPage() {
     const [reportName, setReportName] = useState("");
     const [reportType, setReportType] = useState<ReportType>("monthly");
     const [reportFormat, setReportFormat] = useState<ReportFormat>("pdf");
-    const [selectedMetrics, setSelectedMetrics] = useState<string[]>(["views", "subscribers", "watch_time", "revenue"]);
+    const [selectedMetrics, setSelectedMetrics] = useState<string[]>(["views", "subscribers", "watch_time"]);
     const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
     const [startDate, setStartDate] = useState("");
     const [endDate, setEndDate] = useState("");
@@ -142,7 +141,7 @@ export default function ReportsPage() {
 
             // Reset form
             setReportName("");
-            setSelectedMetrics(["views", "subscribers", "watch_time", "revenue"]);
+            setSelectedMetrics(["views", "subscribers", "watch_time"]);
 
             addToast({
                 title: "Report Generated",

@@ -114,15 +114,12 @@ class DashboardMetrics(BaseModel):
     total_subscribers: int = 0
     total_views: int = 0
     total_videos: int = 0
-    total_revenue: float = 0.0
 
     # Changes from previous period
     subscriber_change: int = 0
     subscriber_change_percent: float = 0.0
     views_change: int = 0
     views_change_percent: float = 0.0
-    revenue_change: float = 0.0
-    revenue_change_percent: float = 0.0
 
     # Engagement
     total_likes: int = 0
@@ -149,12 +146,10 @@ class AccountMetrics(BaseModel):
     subscriber_count: int = 0
     total_views: int = 0
     total_videos: int = 0
-    estimated_revenue: float = 0.0
 
     # Changes
     subscriber_change: int = 0
     views_change: int = 0
-    revenue_change: float = 0.0
 
     # Engagement
     engagement_rate: float = 0.0
@@ -180,14 +175,12 @@ class ChannelComparisonItem(BaseModel):
     subscriber_change: int = 0
     total_views: int = 0
     views_change: int = 0
-    estimated_revenue: float = 0.0
     engagement_rate: float = 0.0
     watch_time_minutes: int = 0
 
     # Variance from average (percentage)
     subscriber_variance: float = 0.0
     views_variance: float = 0.0
-    revenue_variance: float = 0.0
     engagement_variance: float = 0.0
 
 
@@ -201,7 +194,6 @@ class ChannelComparisonResponse(BaseModel):
     # Averages for variance calculation
     average_subscribers: float = 0.0
     average_views: float = 0.0
-    average_revenue: float = 0.0
     average_engagement: float = 0.0
 
 
@@ -275,11 +267,9 @@ class AnalyticsOverviewResponse(BaseModel):
     total_views: int = 0
     total_subscribers: int = 0
     total_watch_time: int = 0  # in minutes
-    total_revenue: float = 0.0
     views_change: float = 0.0  # percentage change
     subscribers_change: float = 0.0  # percentage change
     watch_time_change: float = 0.0  # percentage change
-    revenue_change: float = 0.0  # percentage change
     period: str = "30d"
 
 

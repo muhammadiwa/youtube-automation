@@ -38,8 +38,6 @@ type NotificationType =
     // Channel events
     | "strike_detected"
     | "strike_resolved"
-    | "revenue_alert"
-    | "comment_received"
     | "subscriber_milestone"
     // System events
     | "system_alert"
@@ -88,8 +86,6 @@ const EVENT_TYPES: { type: NotificationType; label: string; description: string;
     // Channel events
     { type: "strike_detected", label: "Strike Detected", description: "When a strike is detected on your channel", category: "Channel" },
     { type: "strike_resolved", label: "Strike Resolved", description: "When a strike is resolved", category: "Channel" },
-    { type: "revenue_alert", label: "Revenue Alert", description: "Significant changes in revenue", category: "Channel" },
-    { type: "comment_received", label: "Comment Received", description: "When new comments need attention", category: "Channel" },
     { type: "subscriber_milestone", label: "Subscriber Milestone", description: "When you reach subscriber milestones", category: "Channel" },
     // System events
     { type: "system_alert", label: "System Alert", description: "Important system notifications", category: "System" },

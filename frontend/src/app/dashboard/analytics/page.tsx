@@ -18,7 +18,6 @@ import {
     Eye,
     Users,
     Clock,
-    DollarSign,
     TrendingUp,
     Calendar,
     ArrowRight,
@@ -32,7 +31,6 @@ import {
     ResponsiveContainer,
     Area,
     AreaChart,
-    Legend,
 } from "recharts";
 import { useTheme } from "next-themes";
 import Link from "next/link";
@@ -209,7 +207,7 @@ export default function AnalyticsPage() {
                 </div>
 
                 {/* Key Metrics Cards */}
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     <OverviewCard
                         title="Total Views"
                         value={formatNumber(overview?.total_views || 0)}
@@ -239,16 +237,6 @@ export default function AnalyticsPage() {
                             isPositive: overview.watch_time_change >= 0,
                         } : undefined}
                         gradient="from-purple-500 to-purple-600"
-                    />
-                    <OverviewCard
-                        title="Revenue"
-                        value={`$${formatNumber(overview?.total_revenue || 0)}`}
-                        icon={DollarSign}
-                        trend={overview ? {
-                            value: Math.abs(overview.revenue_change),
-                            isPositive: overview.revenue_change >= 0,
-                        } : undefined}
-                        gradient="from-amber-500 to-amber-600"
                     />
                 </div>
 
@@ -368,7 +356,7 @@ export default function AnalyticsPage() {
                 </div>
 
                 {/* Quick Links */}
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="grid gap-4 sm:grid-cols-2">
                     <Link href="/dashboard/analytics/compare">
                         <Card className="border-0 bg-card shadow-lg hover:shadow-xl transition-all cursor-pointer group">
                             <CardContent className="p-6">
@@ -402,27 +390,6 @@ export default function AnalyticsPage() {
                                             <h3 className="font-semibold">Generate Reports</h3>
                                             <p className="text-sm text-muted-foreground">
                                                 Export PDF & CSV
-                                            </p>
-                                        </div>
-                                    </div>
-                                    <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:translate-x-1 transition-transform" />
-                                </div>
-                            </CardContent>
-                        </Card>
-                    </Link>
-
-                    <Link href="/dashboard/revenue">
-                        <Card className="border-0 bg-card shadow-lg hover:shadow-xl transition-all cursor-pointer group">
-                            <CardContent className="p-6">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-amber-600 shadow-lg">
-                                            <DollarSign className="h-5 w-5 text-white" />
-                                        </div>
-                                        <div>
-                                            <h3 className="font-semibold">Revenue Dashboard</h3>
-                                            <p className="text-sm text-muted-foreground">
-                                                Track earnings
                                             </p>
                                         </div>
                                     </div>

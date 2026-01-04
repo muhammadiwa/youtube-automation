@@ -6,7 +6,7 @@ import { OverviewCard } from "@/components/dashboard/overview-card";
 import { QuickActions } from "@/components/dashboard/quick-actions";
 import { RecentActivity } from "@/components/dashboard/recent-activity";
 import { PerformanceChart } from "@/components/dashboard/performance-chart";
-import { Users, Eye, DollarSign, Radio } from "lucide-react";
+import { Users, Eye, Clock, Radio } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { analyticsApi, type AnalyticsOverview } from "@/lib/api/analytics";
 
@@ -15,16 +15,6 @@ function formatNumber(num: number): string {
     if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
     if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
     return num.toString();
-}
-
-// Helper function to format currency
-function formatCurrency(num: number): string {
-    return new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency: "USD",
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 0,
-    }).format(num);
 }
 
 export default function DashboardPage() {
@@ -62,14 +52,7 @@ export default function DashboardPage() {
                 isPositive: (overview?.views_change || 0) >= 0
             },
         },
-        revenue: {
-            value: loading ? "..." : formatCurrency(overview?.total_revenue || 0),
-            trend: {
-                value: overview?.revenue_change || 0,
-                isPositive: (overview?.revenue_change || 0) >= 0
-            },
-        },
-        activeStreams: {
+        watchTime: {
             value: loading ? "..." : formatNumber(overview?.total_watch_time || 0),
             trend: {
                 value: overview?.watch_time_change || 0,
@@ -92,7 +75,7 @@ export default function DashboardPage() {
                 </div>
 
                 {/* Overview Cards */}
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     <OverviewCard
                         title="Total Subscribers"
                         value={stats.subscribers.value}
@@ -108,18 +91,11 @@ export default function DashboardPage() {
                         gradient="from-purple-500 to-purple-600"
                     />
                     <OverviewCard
-                        title="Revenue"
-                        value={stats.revenue.value}
-                        icon={DollarSign}
-                        trend={stats.revenue.trend}
+                        title="Watch Time (min)"
+                        value={stats.watchTime.value}
+                        icon={Clock}
+                        trend={stats.watchTime.trend}
                         gradient="from-green-500 to-green-600"
-                    />
-                    <OverviewCard
-                        title="Watch Time (hrs)"
-                        value={stats.activeStreams.value}
-                        icon={Radio}
-                        trend={stats.activeStreams.trend}
-                        gradient="from-red-500 to-red-600"
                     />
                 </div>
 

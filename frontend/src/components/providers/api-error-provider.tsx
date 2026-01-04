@@ -43,7 +43,6 @@ const SILENT_ENDPOINTS = [
     "/analytics/views/timeseries",
     "/analytics/subscribers/timeseries",
     "/analytics/reports",
-    "/analytics/revenue/top-videos",
     // Moderation endpoints - handled gracefully with empty arrays
     "/moderation/rules",
     "/moderation/auto-reply",

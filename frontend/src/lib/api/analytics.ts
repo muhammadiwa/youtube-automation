@@ -5,11 +5,9 @@ export interface AnalyticsOverview {
     total_views: number
     total_subscribers: number
     total_watch_time: number
-    total_revenue: number
     views_change: number
     subscribers_change: number
     watch_time_change: number
-    revenue_change: number
     period: string
 }
 
@@ -19,7 +17,6 @@ export interface ChannelMetrics {
     views: number
     subscribers: number
     watch_time: number
-    revenue: number
     engagement_rate: number
     top_videos: VideoMetrics[]
 }
@@ -67,11 +64,9 @@ export const analyticsApi = {
                 total_views: 0,
                 total_subscribers: 0,
                 total_watch_time: 0,
-                total_revenue: 0,
                 views_change: 0,
                 subscribers_change: 0,
                 watch_time_change: 0,
-                revenue_change: 0,
                 period: params?.period || "30d",
             }
         }

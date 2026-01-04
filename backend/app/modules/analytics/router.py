@@ -108,11 +108,9 @@ async def get_analytics_overview(
             total_views=metrics.total_views,
             total_subscribers=metrics.total_subscribers,
             total_watch_time=metrics.total_watch_time_minutes,
-            total_revenue=metrics.total_revenue,
             views_change=metrics.views_change_percent,
             subscribers_change=metrics.subscriber_change_percent,
             watch_time_change=watch_time_change,
-            revenue_change=metrics.revenue_change_percent,
             period=period,
         )
     except InvalidDateRangeError as e:
@@ -497,18 +495,3 @@ async def get_ai_insights_simple(
     )
 
     return insights[:limit]
-
-
-@router.get("/revenue/top-videos")
-async def get_top_earning_videos(
-    account_id: Optional[str] = Query(None, description="Filter by account ID"),
-    period: str = Query("30d", description="Period: 7d, 30d, 90d, 1y"),
-    limit: int = Query(5, ge=1, le=20),
-    db: AsyncSession = Depends(get_db),
-):
-    """Get top earning videos.
-    
-    Returns mock data for now - in production would query actual revenue data.
-    """
-    # Return empty list - frontend handles this gracefully
-    return []

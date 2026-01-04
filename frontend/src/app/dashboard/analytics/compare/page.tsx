@@ -101,7 +101,6 @@ export default function ChannelComparisonPage() {
                     views: Math.floor(Math.random() * 500000) + 50000,
                     subscribers: Math.floor(Math.random() * 100000) + 10000,
                     watch_time: Math.floor(Math.random() * 50000) + 5000,
-                    revenue: Math.floor(Math.random() * 5000) + 500,
                     engagement_rate: Math.random() * 10 + 2,
                     top_videos: [],
                 };
@@ -189,7 +188,6 @@ export default function ChannelComparisonPage() {
         const maxSubs = Math.max(...channelMetrics.map(m => m.subscribers));
         const maxWatchTime = Math.max(...channelMetrics.map(m => m.watch_time));
         const maxEngagement = Math.max(...channelMetrics.map(m => m.engagement_rate));
-        const maxRevenue = Math.max(...channelMetrics.map(m => m.revenue));
 
         return [
             {
@@ -218,13 +216,6 @@ export default function ChannelComparisonPage() {
                 ...channelMetrics.reduce((acc, m) => ({
                     ...acc,
                     [m.channel_name]: maxEngagement > 0 ? (m.engagement_rate / maxEngagement) * 100 : 0,
-                }), {}),
-            },
-            {
-                metric: "Revenue",
-                ...channelMetrics.reduce((acc, m) => ({
-                    ...acc,
-                    [m.channel_name]: maxRevenue > 0 ? (m.revenue / maxRevenue) * 100 : 0,
                 }), {}),
             },
         ];
@@ -365,7 +356,6 @@ export default function ChannelComparisonPage() {
                                                 <TableHead className="text-right">Subscribers</TableHead>
                                                 <TableHead className="text-right">Watch Time</TableHead>
                                                 <TableHead className="text-right">Engagement</TableHead>
-                                                <TableHead className="text-right">Revenue</TableHead>
                                             </TableRow>
                                         </TableHeader>
                                         <TableBody>
@@ -374,7 +364,6 @@ export default function ChannelComparisonPage() {
                                                 const subsVariance = calculateVariance(metrics.subscribers, "subscribers");
                                                 const watchTimeVariance = calculateVariance(metrics.watch_time, "watch_time");
                                                 const engagementVariance = calculateVariance(metrics.engagement_rate, "engagement_rate");
-                                                const revenueVariance = calculateVariance(metrics.revenue, "revenue");
 
                                                 return (
                                                     <TableRow key={metrics.account_id}>
@@ -409,12 +398,6 @@ export default function ChannelComparisonPage() {
                                                             <div className="flex items-center justify-end gap-2">
                                                                 <span>{metrics.engagement_rate.toFixed(1)}%</span>
                                                                 <VarianceIndicator variance={engagementVariance} />
-                                                            </div>
-                                                        </TableCell>
-                                                        <TableCell className="text-right">
-                                                            <div className="flex items-center justify-end gap-2">
-                                                                <span>${formatNumber(metrics.revenue)}</span>
-                                                                <VarianceIndicator variance={revenueVariance} />
                                                             </div>
                                                         </TableCell>
                                                     </TableRow>

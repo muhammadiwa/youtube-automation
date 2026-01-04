@@ -121,13 +121,11 @@ class AnalyticsService:
             current_metrics["total_subscribers"] - comparison_metrics["total_subscribers"]
         )
         views_change = current_metrics["total_views"] - comparison_metrics["total_views"]
-        revenue_change = current_metrics["total_revenue"] - comparison_metrics["total_revenue"]
 
         return DashboardMetrics(
             total_subscribers=current_metrics["total_subscribers"],
             total_views=current_metrics["total_views"],
             total_videos=current_metrics["total_videos"],
-            total_revenue=current_metrics["total_revenue"],
             subscriber_change=subscriber_change,
             subscriber_change_percent=calculate_percent_change(
                 current_metrics["total_subscribers"],
@@ -137,11 +135,6 @@ class AnalyticsService:
             views_change_percent=calculate_percent_change(
                 current_metrics["total_views"],
                 comparison_metrics["total_views"],
-            ),
-            revenue_change=revenue_change,
-            revenue_change_percent=calculate_percent_change(
-                current_metrics["total_revenue"],
-                comparison_metrics["total_revenue"],
             ),
             total_likes=current_metrics["total_likes"],
             total_comments=current_metrics["total_comments"],
@@ -181,7 +174,6 @@ class AnalyticsService:
 
         # Calculate totals and changes
         total_views = sum(s.total_views for s in snapshots)
-        total_revenue = sum(s.estimated_revenue for s in snapshots)
         subscriber_change = sum(s.subscriber_change for s in snapshots)
         views_change = sum(s.views_change for s in snapshots)
         watch_time = sum(s.watch_time_minutes for s in snapshots)
@@ -195,10 +187,8 @@ class AnalyticsService:
             subscriber_count=latest.subscriber_count,
             total_views=total_views,
             total_videos=latest.total_videos,
-            estimated_revenue=total_revenue,
             subscriber_change=subscriber_change,
             views_change=views_change,
-            revenue_change=total_revenue,  # For the period
             engagement_rate=avg_engagement,
             watch_time_minutes=watch_time,
         )
@@ -233,9 +223,6 @@ class AnalyticsService:
             sum(m.subscriber_count for m in channel_metrics) / len(channel_metrics)
         )
         avg_views = sum(m.total_views for m in channel_metrics) / len(channel_metrics)
-        avg_revenue = (
-            sum(m.estimated_revenue for m in channel_metrics) / len(channel_metrics)
-        )
         avg_engagement = (
             sum(m.engagement_rate for m in channel_metrics) / len(channel_metrics)
         )
@@ -249,16 +236,12 @@ class AnalyticsService:
                 subscriber_change=metrics.subscriber_change,
                 total_views=metrics.total_views,
                 views_change=metrics.views_change,
-                estimated_revenue=metrics.estimated_revenue,
                 engagement_rate=metrics.engagement_rate,
                 watch_time_minutes=metrics.watch_time_minutes,
                 subscriber_variance=calculate_variance(
                     metrics.subscriber_count, avg_subscribers
                 ),
                 views_variance=calculate_variance(metrics.total_views, avg_views),
-                revenue_variance=calculate_variance(
-                    metrics.estimated_revenue, avg_revenue
-                ),
                 engagement_variance=calculate_variance(
                     metrics.engagement_rate, avg_engagement
                 ),
@@ -271,7 +254,6 @@ class AnalyticsService:
             end_date=end_date,
             average_subscribers=avg_subscribers,
             average_views=avg_views,
-            average_revenue=avg_revenue,
             average_engagement=avg_engagement,
         )
 
@@ -464,30 +446,6 @@ class AnalyticsService:
                 confidence=0.80,
                 metric_change=views_change_pct,
                 metric_name="views",
-            ))
-
-        # Revenue insight
-        revenue_change_pct = calculate_percent_change(
-            current_metrics["total_revenue"],
-            comparison_metrics["total_revenue"],
-        )
-        if current_metrics["total_revenue"] > 0 and abs(revenue_change_pct) > 5:
-            direction = "increased" if revenue_change_pct > 0 else "decreased"
-            insights.append(AIInsight(
-                category="revenue",
-                title=f"Revenue {direction.title()}",
-                description=(
-                    f"Your estimated revenue has {direction} by {abs(revenue_change_pct):.1f}% "
-                    f"compared to the previous period."
-                ),
-                recommendation=(
-                    "Consider diversifying revenue streams with memberships or merchandise."
-                    if revenue_change_pct > 0 else
-                    "Focus on increasing watch time to improve ad revenue."
-                ),
-                confidence=0.75,
-                metric_change=revenue_change_pct,
-                metric_name="revenue",
             ))
 
         # Engagement insight
