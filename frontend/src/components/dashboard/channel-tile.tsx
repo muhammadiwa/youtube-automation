@@ -25,7 +25,6 @@ import {
     Zap,
     Settings,
     BarChart3,
-    MessageSquare,
     Video,
     Shield,
     Eye,
@@ -188,12 +187,6 @@ function ExpandedDetailPanel({
                         <Button variant="outline" size="sm">
                             <Video className="h-4 w-4 mr-1" />
                             Videos
-                        </Button>
-                    </Link>
-                    <Link href={`/dashboard/comments?account=${channel.accountId}`} onClick={(e) => e.stopPropagation()}>
-                        <Button variant="outline" size="sm">
-                            <MessageSquare className="h-4 w-4 mr-1" />
-                            Comments
                         </Button>
                     </Link>
                     <Button

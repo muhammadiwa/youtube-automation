@@ -46,7 +46,6 @@ const SILENT_ENDPOINTS = [
     "/analytics/revenue/top-videos",
     // Moderation endpoints - handled gracefully with empty arrays
     "/moderation/rules",
-    "/moderation/comments",
     "/moderation/auto-reply",
     "/moderation/commands",
     "/moderation/chatbot",

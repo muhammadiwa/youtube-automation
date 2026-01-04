@@ -526,42 +526,6 @@ class NotificationIntegrationService:
         except Exception as e:
             logger.error(f"Failed to send security alert notification: {e}")
     
-    # ==================== Comment Notifications ====================
-    
-    async def notify_comment_received(
-        self,
-        user_id: uuid.UUID,
-        video_title: str,
-        comment_author: str,
-        comment_preview: str,
-        video_id: str,
-        requires_moderation: bool = False,
-    ) -> None:
-        """Notify when a new comment is received."""
-        try:
-            title = "Comment Needs Review" if requires_moderation else "New Comment"
-            message = f"New comment on '{video_title}' from {comment_author}: {comment_preview[:100]}..."
-            
-            await self.notification_service.send_notification(
-                NotificationSendRequest(
-                    user_id=user_id,
-                    event_type="comment.received" if not requires_moderation else "comment.moderation_required",
-                    title=title,
-                    message=message,
-                    priority=NotificationPriority.HIGH if requires_moderation else NotificationPriority.LOW,
-                    payload={
-                        "video_id": video_id,
-                        "video_title": video_title,
-                        "comment_author": comment_author,
-                        "requires_moderation": requires_moderation,
-                        "action_url": f"/dashboard/videos/{video_id}/comments",
-                    },
-                )
-            )
-            logger.info(f"Comment notification sent to user {user_id}")
-        except Exception as e:
-            logger.error(f"Failed to send comment notification: {e}")
-    
     # ==================== Milestone Notifications ====================
     
     async def notify_subscriber_milestone(

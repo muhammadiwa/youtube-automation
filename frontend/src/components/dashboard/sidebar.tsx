@@ -13,11 +13,10 @@ import {
     Menu,
     Youtube,
     HelpCircle,
-    Shield,
-    MessageSquare,
     AlertTriangle,
     Monitor,
     Wallet,
+    Shield,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -29,9 +28,8 @@ const navigation = [
     { name: "Accounts", href: "/dashboard/accounts", icon: Users },
     { name: "Videos", href: "/dashboard/videos/library", icon: Video },
     { name: "Streams", href: "/dashboard/streams", icon: Radio },
-    { name: "Comments", href: "/dashboard/comments", icon: MessageSquare },
-    { name: "Moderation", href: "/dashboard/moderation/settings", icon: Shield },
     { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
+    { name: "Moderation", href: "/dashboard/moderation/settings", icon: Shield },
     { name: "Strikes", href: "/dashboard/strikes", icon: AlertTriangle },
     { name: "Monitoring", href: "/dashboard/monitoring", icon: Monitor },
     { name: "Billing", href: "/dashboard/billing", icon: Wallet },
@@ -87,17 +85,13 @@ export function Sidebar({ className }: SidebarProps) {
         if (href.startsWith("/dashboard/videos")) {
             return pathname.startsWith("/dashboard/videos");
         }
-        // Handle moderation routes - check if pathname starts with /dashboard/moderation
-        if (href.startsWith("/dashboard/moderation")) {
-            return pathname.startsWith("/dashboard/moderation");
-        }
-        // Handle comments routes - check if pathname starts with /dashboard/comments
-        if (href.startsWith("/dashboard/comments")) {
-            return pathname.startsWith("/dashboard/comments");
-        }
         // Handle strikes routes - check if pathname starts with /dashboard/strikes
         if (href.startsWith("/dashboard/strikes")) {
             return pathname.startsWith("/dashboard/strikes");
+        }
+        // Handle moderation routes
+        if (href.startsWith("/dashboard/moderation")) {
+            return pathname.startsWith("/dashboard/moderation");
         }
         // Handle monitoring routes
         if (href.startsWith("/dashboard/monitoring")) {

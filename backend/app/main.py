@@ -25,7 +25,6 @@ from app.modules.stream import router as stream_router
 from app.modules.stream.stream_job_router import router as stream_job_router
 from app.modules.ai.router import router as ai_router
 from app.modules.analytics.router import router as analytics_router
-from app.modules.comment.router import router as comment_router
 from app.modules.moderation.router import router as moderation_router
 from app.modules.monitoring import monitoring_router
 from app.modules.agent import agent_router
@@ -287,7 +286,6 @@ app.include_router(stream_router, prefix=settings.API_V1_PREFIX)
 app.include_router(stream_job_router, prefix=settings.API_V1_PREFIX)
 app.include_router(ai_router, prefix=settings.API_V1_PREFIX)
 app.include_router(analytics_router, prefix=settings.API_V1_PREFIX)
-app.include_router(comment_router, prefix=settings.API_V1_PREFIX)
 app.include_router(moderation_router, prefix=settings.API_V1_PREFIX)
 app.include_router(monitoring_router, prefix=settings.API_V1_PREFIX)
 app.include_router(agent_router, prefix=settings.API_V1_PREFIX)
