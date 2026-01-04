@@ -1,406 +1,297 @@
-"""Monitoring service for multi-channel dashboard.
+"""Monitoring service - Live Control Center.
 
-Implements channel grid, filtering, and layout preferences.
-Requirements: 16.1, 16.2, 16.3, 16.4, 16.5
+Provides real-time monitoring data for YouTube channels and streams.
+All data is fetched from database - no mock data.
 """
 
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.account.models import YouTubeAccount, AccountStatus
-from app.modules.stream.models import LiveEvent, LiveEventStatus, StreamSession
-from app.modules.monitoring.models import MonitoringLayoutPreference
+from app.modules.stream.models import LiveEvent, LiveEventStatus
+from app.modules.stream.stream_job_models import StreamJob, StreamJobStatus
 from app.modules.monitoring.schemas import (
-    ChannelStatusFilter,
-    ChannelStatus,
-    IssueSeverity,
-    ChannelIssue,
-    ChannelGridItem,
-    ChannelGridResponse,
-    ChannelDetailMetrics,
-    StreamDetailInfo,
-    StreamSummary,
+    StreamStatus,
+    HealthStatus,
+    AlertSeverity,
+    AlertType,
+    Alert,
+    LiveStreamInfo,
+    LiveStreamsResponse,
     ScheduledStreamInfo,
-    LayoutPreferences,
-    LayoutPreferencesResponse,
+    ScheduledStreamsResponse,
+    ChannelStatusInfo,
+    MonitoringOverview,
+    MonitoringDashboardResponse,
 )
 
 
 class MonitoringService:
-    """Service for multi-channel monitoring dashboard.
-    
-    Requirements: 16.1, 16.2, 16.3, 16.4, 16.5
-    """
+    """Service for Live Control Center monitoring."""
 
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get_channel_grid(
-        self,
-        user_id: uuid.UUID,
-        status_filter: ChannelStatusFilter = ChannelStatusFilter.ALL,
-        search: Optional[str] = None,
-        sort_by: str = "status",
-        sort_order: str = "asc",
-        page: int = 1,
-        page_size: int = 12,
-    ) -> ChannelGridResponse:
-        """Get channel grid with filtering support.
-        
-        Requirements: 16.1, 16.2
+    # ========================================================================
+    # Main Dashboard
+    # ========================================================================
+
+    async def get_dashboard(self, user_id: uuid.UUID) -> MonitoringDashboardResponse:
+        """Get complete monitoring dashboard data.
         
         Args:
-            user_id: User ID to get channels for
-            status_filter: Filter by channel status
-            search: Search term for channel title
-            sort_by: Field to sort by
-            sort_order: Sort order (asc/desc)
-            page: Page number
-            page_size: Items per page
+            user_id: User ID to get data for
             
         Returns:
-            ChannelGridResponse with filtered channels
+            Complete dashboard with overview, live streams, scheduled, channels, alerts
         """
-        # Get all accounts for user
-        query = select(YouTubeAccount).where(YouTubeAccount.user_id == user_id)
-        result = await self.session.execute(query)
-        accounts = list(result.scalars().all())
+        # Get all user's accounts
+        accounts = await self._get_user_accounts(user_id)
         
-        # Build channel grid items with status
-        grid_items: list[ChannelGridItem] = []
+        # Build channel status list
+        channels: list[ChannelStatusInfo] = []
+        live_streams: list[LiveStreamInfo] = []
+        scheduled_streams: list[ScheduledStreamInfo] = []
+        alerts: list[Alert] = []
+        
         for account in accounts:
-            item = await self._build_channel_grid_item(account)
-            grid_items.append(item)
-        
-        total = len(grid_items)
-        
-        # Apply filters (Requirements: 16.2)
-        filtered_items = self._apply_filters(
-            grid_items, status_filter, search
-        )
-        
-        filters_applied = []
-        if status_filter != ChannelStatusFilter.ALL:
-            filters_applied.append(f"status:{status_filter.value}")
-        if search:
-            filters_applied.append(f"search:{search}")
-        
-        # Sort items (Requirements: 16.3 - priority sorting for issues)
-        sorted_items = self._sort_channels(filtered_items, sort_by, sort_order)
-        
-        # Paginate
-        start_idx = (page - 1) * page_size
-        end_idx = start_idx + page_size
-        paginated_items = sorted_items[start_idx:end_idx]
-        
-        return ChannelGridResponse(
-            channels=paginated_items,
-            total=total,
-            filtered_count=len(filtered_items),
-            filters_applied=filters_applied,
-        )
-
-    def _apply_filters(
-        self,
-        items: list[ChannelGridItem],
-        status_filter: ChannelStatusFilter,
-        search: Optional[str],
-    ) -> list[ChannelGridItem]:
-        """Apply filters to channel grid items.
-        
-        Requirements: 16.2
-        """
-        filtered = items
-        
-        # Filter by status
-        if status_filter != ChannelStatusFilter.ALL:
-            filtered = [
-                item for item in filtered
-                if self._matches_status_filter(item, status_filter)
-            ]
-        
-        # Filter by search term
-        if search:
-            search_lower = search.lower()
-            filtered = [
-                item for item in filtered
-                if search_lower in item.channel_title.lower()
-                or search_lower in item.channel_id.lower()
-            ]
-        
-        return filtered
-
-    def _matches_status_filter(
-        self, item: ChannelGridItem, status_filter: ChannelStatusFilter
-    ) -> bool:
-        """Check if channel matches the status filter.
-        
-        Requirements: 16.2
-        """
-        if status_filter == ChannelStatusFilter.ALL:
-            return True
-        elif status_filter == ChannelStatusFilter.LIVE:
-            return item.status == ChannelStatus.LIVE
-        elif status_filter == ChannelStatusFilter.SCHEDULED:
-            return item.status == ChannelStatus.SCHEDULED
-        elif status_filter == ChannelStatusFilter.OFFLINE:
-            return item.status == ChannelStatus.OFFLINE
-        elif status_filter == ChannelStatusFilter.ERROR:
-            return item.status == ChannelStatus.ERROR
-        elif status_filter == ChannelStatusFilter.TOKEN_EXPIRED:
-            return item.status == ChannelStatus.TOKEN_EXPIRED
-        return True
-
-    def _sort_channels(
-        self,
-        items: list[ChannelGridItem],
-        sort_by: str,
-        sort_order: str,
-    ) -> list[ChannelGridItem]:
-        """Sort channels with priority for critical issues.
-        
-        Requirements: 16.3 - Priority sorting
-        """
-        reverse = sort_order == "desc"
-        
-        # Always put critical issues first
-        def sort_key(item: ChannelGridItem):
-            # Priority: critical issues first, then by sort field
-            priority = 0 if item.has_critical_issue else 1
+            # Get channel status
+            channel_status = await self._build_channel_status(account)
+            channels.append(channel_status)
             
-            if sort_by == "status":
-                status_order = {
-                    ChannelStatus.ERROR: 0,
-                    ChannelStatus.TOKEN_EXPIRED: 1,
-                    ChannelStatus.LIVE: 2,
-                    ChannelStatus.SCHEDULED: 3,
-                    ChannelStatus.OFFLINE: 4,
-                }
-                return (priority, status_order.get(item.status, 5))
-            elif sort_by == "subscribers":
-                return (priority, -item.subscriber_count if not reverse else item.subscriber_count)
-            elif sort_by == "views":
-                return (priority, -item.view_count if not reverse else item.view_count)
-            elif sort_by == "title":
-                return (priority, item.channel_title.lower())
-            elif sort_by == "quota":
-                return (priority, -item.quota_usage_percent if not reverse else item.quota_usage_percent)
-            else:
-                return (priority, item.channel_title.lower())
+            # Collect live stream if any
+            if channel_status.current_stream:
+                live_streams.append(channel_status.current_stream)
+            
+            # Collect scheduled stream if any
+            if channel_status.next_scheduled:
+                scheduled_streams.append(channel_status.next_scheduled)
+            
+            # Generate alerts for this channel
+            channel_alerts = self._generate_alerts(account, channel_status)
+            alerts.extend(channel_alerts)
         
-        return sorted(items, key=sort_key, reverse=reverse and sort_by not in ["status"])
+        # Get all scheduled streams (not just next one per channel)
+        all_scheduled = await self._get_all_scheduled_streams(user_id)
+        
+        # Build overview
+        overview = self._build_overview(channels, live_streams, all_scheduled, alerts)
+        
+        # Sort alerts by severity and time
+        alerts.sort(key=lambda a: (
+            0 if a.severity == AlertSeverity.CRITICAL else 1 if a.severity == AlertSeverity.WARNING else 2,
+            a.created_at
+        ), reverse=True)
+        
+        return MonitoringDashboardResponse(
+            overview=overview,
+            live_streams=live_streams,
+            scheduled_streams=all_scheduled[:10],  # Limit to 10 upcoming
+            channels=channels,
+            alerts=alerts[:20],  # Limit to 20 alerts
+        )
 
-    async def _build_channel_grid_item(
-        self, account: YouTubeAccount
-    ) -> ChannelGridItem:
-        """Build a channel grid item from account data.
+    # ========================================================================
+    # Live Streams
+    # ========================================================================
+
+    async def get_live_streams(self, user_id: uuid.UUID) -> LiveStreamsResponse:
+        """Get all currently live streams for user.
         
-        Requirements: 16.1, 16.3
+        Only returns streams that are truly live (no error, not stale).
+        
+        Args:
+            user_id: User ID
+            
+        Returns:
+            List of live streams with total counts
         """
-        # Determine channel status
-        status = await self._determine_channel_status(account)
-        
-        # Get current stream info if live
-        current_stream = await self._get_current_stream(account.id)
-        
-        # Get next scheduled stream
-        next_scheduled = await self._get_next_scheduled_stream(account.id)
-        
-        # Detect issues (Requirements: 16.3)
-        issues = self._detect_channel_issues(account, status)
-        has_critical = any(i.severity == IssueSeverity.CRITICAL for i in issues)
-        
-        return ChannelGridItem(
-            account_id=account.id,
-            channel_id=account.channel_id,
-            channel_title=account.channel_title,
-            thumbnail_url=account.thumbnail_url,
-            subscriber_count=account.subscriber_count,
-            video_count=account.video_count,
-            view_count=account.view_count,
-            status=status,
-            is_monetized=account.is_monetized,
-            has_live_streaming_enabled=account.has_live_streaming_enabled,
-            strike_count=account.strike_count,
-            token_expires_at=account.token_expires_at,
-            is_token_expired=account.is_token_expired(),
-            is_token_expiring_soon=account.is_token_expiring_soon(hours=24),
-            daily_quota_used=account.daily_quota_used,
-            quota_usage_percent=account.get_quota_usage_percent(),
-            current_stream_id=current_stream.get("id") if current_stream else None,
-            current_stream_title=current_stream.get("title") if current_stream else None,
-            current_viewer_count=current_stream.get("viewer_count") if current_stream else None,
-            stream_started_at=current_stream.get("started_at") if current_stream else None,
-            next_scheduled_stream_id=next_scheduled.get("id") if next_scheduled else None,
-            next_scheduled_stream_title=next_scheduled.get("title") if next_scheduled else None,
-            next_scheduled_at=next_scheduled.get("scheduled_at") if next_scheduled else None,
-            has_critical_issue=has_critical,
-            issues=issues,
-            last_sync_at=account.last_sync_at,
-            last_error=account.last_error,
-        )
-
-    async def _determine_channel_status(
-        self, account: YouTubeAccount
-    ) -> ChannelStatus:
-        """Determine the current status of a channel."""
-        # Check for token expiry first
-        if account.is_token_expired():
-            return ChannelStatus.TOKEN_EXPIRED
-        
-        # Check for error status
-        if account.status == AccountStatus.ERROR.value:
-            return ChannelStatus.ERROR
-        
-        # Check if currently live
-        live_query = select(LiveEvent).where(
-            and_(
-                LiveEvent.account_id == account.id,
-                LiveEvent.status == LiveEventStatus.LIVE.value,
-            )
-        )
-        result = await self.session.execute(live_query)
-        if result.scalar_one_or_none():
-            return ChannelStatus.LIVE
-        
-        # Check for scheduled streams
         now = datetime.utcnow()
-        scheduled_query = select(LiveEvent).where(
-            and_(
-                LiveEvent.account_id == account.id,
-                LiveEvent.status == LiveEventStatus.SCHEDULED.value,
-                LiveEvent.scheduled_start_at > now,
-            )
-        )
-        result = await self.session.execute(scheduled_query)
-        if result.scalar_one_or_none():
-            return ChannelStatus.SCHEDULED
+        # Calculate 24 hours ago for stale check
+        stale_threshold = now - timedelta(hours=24)
         
-        return ChannelStatus.OFFLINE
-
-    async def _get_current_stream(
-        self, account_id: uuid.UUID
-    ) -> Optional[dict]:
-        """Get current live stream info for an account."""
-        query = select(LiveEvent).where(
-            and_(
-                LiveEvent.account_id == account_id,
-                LiveEvent.status == LiveEventStatus.LIVE.value,
-            )
-        )
-        result = await self.session.execute(query)
-        event = result.scalar_one_or_none()
-        
-        if not event:
-            return None
-        
-        return {
-            "id": event.id,
-            "title": event.title,
-            "viewer_count": event.peak_viewers,
-            "started_at": event.actual_start_at,
-        }
-
-    async def _get_next_scheduled_stream(
-        self, account_id: uuid.UUID
-    ) -> Optional[dict]:
-        """Get next scheduled stream for an account."""
-        now = datetime.utcnow()
+        # Get live events - only those without errors and not stale
         query = (
-            select(LiveEvent)
+            select(LiveEvent, YouTubeAccount)
+            .join(YouTubeAccount, LiveEvent.account_id == YouTubeAccount.id)
             .where(
                 and_(
-                    LiveEvent.account_id == account_id,
+                    YouTubeAccount.user_id == user_id,
+                    LiveEvent.status == LiveEventStatus.LIVE.value,
+                    LiveEvent.last_error.is_(None),  # No error
+                )
+            )
+            .order_by(LiveEvent.actual_start_at.desc())
+        )
+        
+        result = await self.session.execute(query)
+        rows = result.all()
+        
+        streams = []
+        total_viewers = 0
+        
+        for event, account in rows:
+            # Skip stale streams (live for more than 24 hours)
+            if event.actual_start_at:
+                start = event.actual_start_at
+                if start.tzinfo is not None:
+                    start = start.replace(tzinfo=None)
+                if start < stale_threshold:
+                    continue  # Skip stale stream
+            
+            stream_info = self._build_live_stream_info(event, account)
+            streams.append(stream_info)
+            total_viewers += stream_info.viewer_count
+        
+        return LiveStreamsResponse(
+            streams=streams,
+            total_live=len(streams),
+            total_viewers=total_viewers,
+        )
+
+    # ========================================================================
+    # Scheduled Streams
+    # ========================================================================
+
+    async def get_scheduled_streams(
+        self, 
+        user_id: uuid.UUID,
+        days_ahead: int = 7,
+    ) -> ScheduledStreamsResponse:
+        """Get scheduled streams for user.
+        
+        Args:
+            user_id: User ID
+            days_ahead: How many days ahead to look
+            
+        Returns:
+            List of scheduled streams
+        """
+        streams = await self._get_all_scheduled_streams(user_id, days_ahead)
+        
+        return ScheduledStreamsResponse(
+            streams=streams,
+            total_scheduled=len(streams),
+        )
+
+    async def _get_all_scheduled_streams(
+        self,
+        user_id: uuid.UUID,
+        days_ahead: int = 7,
+    ) -> list[ScheduledStreamInfo]:
+        """Get all scheduled streams for user from both LiveEvent and StreamJob."""
+        now = datetime.utcnow()
+        end_date = now + timedelta(days=days_ahead)
+        
+        streams = []
+        
+        # 1. Get from LiveEvent (YouTube Live broadcasts)
+        live_event_query = (
+            select(LiveEvent, YouTubeAccount)
+            .join(YouTubeAccount, LiveEvent.account_id == YouTubeAccount.id)
+            .where(
+                and_(
+                    YouTubeAccount.user_id == user_id,
                     LiveEvent.status == LiveEventStatus.SCHEDULED.value,
-                    LiveEvent.scheduled_start_at > now,
+                    LiveEvent.scheduled_start_at.isnot(None),
                 )
             )
             .order_by(LiveEvent.scheduled_start_at.asc())
-            .limit(1)
         )
-        result = await self.session.execute(query)
-        event = result.scalar_one_or_none()
         
-        if not event:
-            return None
+        result = await self.session.execute(live_event_query)
+        rows = result.all()
         
-        return {
-            "id": event.id,
-            "title": event.title,
-            "scheduled_at": event.scheduled_start_at,
-        }
-
-    def _detect_channel_issues(
-        self, account: YouTubeAccount, status: ChannelStatus
-    ) -> list[ChannelIssue]:
-        """Detect issues with a channel.
+        for event, account in rows:
+            # Handle timezone comparison
+            scheduled_at = event.scheduled_start_at
+            if scheduled_at:
+                if scheduled_at.tzinfo is not None:
+                    scheduled_at = scheduled_at.replace(tzinfo=None)
+                if scheduled_at > now and scheduled_at < end_date:
+                    stream_info = self._build_scheduled_stream_info(event, account)
+                    streams.append(stream_info)
         
-        Requirements: 16.3
-        """
-        issues = []
+        # 2. Get from StreamJob (FFmpeg streaming jobs)
+        stream_job_query = (
+            select(StreamJob, YouTubeAccount)
+            .join(YouTubeAccount, StreamJob.account_id == YouTubeAccount.id)
+            .where(
+                and_(
+                    StreamJob.user_id == user_id,
+                    StreamJob.status == StreamJobStatus.SCHEDULED.value,
+                    StreamJob.scheduled_start_at.isnot(None),
+                )
+            )
+            .order_by(StreamJob.scheduled_start_at.asc())
+        )
+        
+        result = await self.session.execute(stream_job_query)
+        rows = result.all()
+        
+        for job, account in rows:
+            # Handle timezone comparison
+            scheduled_at = job.scheduled_start_at
+            if scheduled_at:
+                if scheduled_at.tzinfo is not None:
+                    scheduled_at = scheduled_at.replace(tzinfo=None)
+                if scheduled_at > now and scheduled_at < end_date:
+                    stream_info = self._build_scheduled_stream_info_from_job(job, account)
+                    streams.append(stream_info)
+        
+        # Sort all streams by scheduled time
+        streams.sort(key=lambda s: s.scheduled_start_at)
+        
+        return streams
+    
+    def _build_scheduled_stream_info_from_job(
+        self, job: StreamJob, account: YouTubeAccount
+    ) -> ScheduledStreamInfo:
+        """Build scheduled stream info from StreamJob."""
         now = datetime.utcnow()
+        scheduled_at = job.scheduled_start_at
         
-        # Critical: Token expired
-        if account.is_token_expired():
-            issues.append(ChannelIssue(
-                severity=IssueSeverity.CRITICAL,
-                message="OAuth token has expired. Re-authentication required.",
-                detected_at=now,
-            ))
+        # Handle timezone-aware datetime
+        if scheduled_at and scheduled_at.tzinfo is not None:
+            scheduled_at = scheduled_at.replace(tzinfo=None)
         
-        # Critical: Account error
-        if account.status == AccountStatus.ERROR.value:
-            issues.append(ChannelIssue(
-                severity=IssueSeverity.CRITICAL,
-                message=f"Account error: {account.last_error or 'Unknown error'}",
-                detected_at=now,
-            ))
+        starts_in = int((scheduled_at - now).total_seconds()) if scheduled_at else 0
         
-        # Critical: Strike detected
-        if account.strike_count > 0:
-            issues.append(ChannelIssue(
-                severity=IssueSeverity.CRITICAL,
-                message=f"Channel has {account.strike_count} active strike(s)",
-                detected_at=now,
-            ))
-        
-        # Warning: Token expiring soon
-        if not account.is_token_expired() and account.is_token_expiring_soon(hours=24):
-            issues.append(ChannelIssue(
-                severity=IssueSeverity.WARNING,
-                message="OAuth token expires within 24 hours",
-                detected_at=now,
-            ))
-        
-        # Warning: High quota usage
-        quota_percent = account.get_quota_usage_percent()
-        if quota_percent >= 90:
-            issues.append(ChannelIssue(
-                severity=IssueSeverity.WARNING,
-                message=f"API quota usage at {quota_percent:.1f}%",
-                detected_at=now,
-            ))
-        elif quota_percent >= 80:
-            issues.append(ChannelIssue(
-                severity=IssueSeverity.INFO,
-                message=f"API quota usage approaching limit ({quota_percent:.1f}%)",
-                detected_at=now,
-            ))
-        
-        return issues
+        return ScheduledStreamInfo(
+            stream_id=str(job.id),
+            account_id=str(account.id),
+            channel_id=account.channel_id,
+            channel_title=account.channel_title,
+            channel_thumbnail=account.thumbnail_url,
+            title=job.title,
+            description=job.description,
+            scheduled_start_at=scheduled_at,
+            scheduled_end_at=job.scheduled_end_at.replace(tzinfo=None) if job.scheduled_end_at and job.scheduled_end_at.tzinfo else job.scheduled_end_at,
+            starts_in_seconds=max(0, starts_in),
+        )
 
-    async def get_channel_details(
-        self, account_id: uuid.UUID, user_id: uuid.UUID
-    ) -> Optional[ChannelDetailMetrics]:
-        """Get detailed metrics for a channel.
+    # ========================================================================
+    # Channel Status
+    # ========================================================================
+
+    async def get_channel_status(
+        self,
+        account_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> Optional[ChannelStatusInfo]:
+        """Get status for a specific channel.
         
-        Requirements: 16.4
+        Args:
+            account_id: Account ID
+            user_id: User ID (for ownership verification)
+            
+        Returns:
+            Channel status or None if not found
         """
-        # Get account and verify ownership
         query = select(YouTubeAccount).where(
             and_(
                 YouTubeAccount.id == account_id,
@@ -413,204 +304,503 @@ class MonitoringService:
         if not account:
             return None
         
-        status = await self._determine_channel_status(account)
-        issues = self._detect_channel_issues(account, status)
+        return await self._build_channel_status(account)
+
+    # ========================================================================
+    # Alerts
+    # ========================================================================
+
+    async def get_alerts(self, user_id: uuid.UUID) -> list[Alert]:
+        """Get all active alerts for user.
         
-        # Get current stream details
-        current_stream = await self._get_current_stream_details(account_id)
+        Args:
+            user_id: User ID
+            
+        Returns:
+            List of alerts sorted by severity
+        """
+        accounts = await self._get_user_accounts(user_id)
+        alerts = []
         
-        # Get recent streams
-        recent_streams = await self._get_recent_streams(account_id, limit=5)
+        for account in accounts:
+            channel_status = await self._build_channel_status(account)
+            channel_alerts = self._generate_alerts(account, channel_status)
+            alerts.extend(channel_alerts)
         
-        # Get scheduled streams
-        scheduled_streams = await self._get_scheduled_streams(account_id, limit=5)
+        # Sort by severity
+        alerts.sort(key=lambda a: (
+            0 if a.severity == AlertSeverity.CRITICAL else 1 if a.severity == AlertSeverity.WARNING else 2,
+            a.created_at
+        ), reverse=True)
         
-        return ChannelDetailMetrics(
-            account_id=account.id,
+        return alerts
+
+    # ========================================================================
+    # Helper Methods
+    # ========================================================================
+
+    async def _get_user_accounts(self, user_id: uuid.UUID) -> list[YouTubeAccount]:
+        """Get all accounts for a user."""
+        query = (
+            select(YouTubeAccount)
+            .where(YouTubeAccount.user_id == user_id)
+            .order_by(YouTubeAccount.channel_title)
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def _build_channel_status(self, account: YouTubeAccount) -> ChannelStatusInfo:
+        """Build channel status from account data."""
+        # Determine stream status
+        stream_status = await self._get_stream_status(account.id)
+        
+        # Get current live stream if any
+        current_stream = await self._get_current_live_stream(account)
+        
+        # Get next scheduled stream
+        next_scheduled = await self._get_next_scheduled_stream(account)
+        
+        # Determine health status
+        health_status = self._determine_health_status(account)
+        
+        # Count alerts
+        alert_count = self._count_alerts(account)
+        
+        # Calculate quota percentage
+        quota_percent = account.get_quota_usage_percent() if hasattr(account, 'get_quota_usage_percent') else 0.0
+        
+        return ChannelStatusInfo(
+            account_id=str(account.id),
             channel_id=account.channel_id,
             channel_title=account.channel_title,
             thumbnail_url=account.thumbnail_url,
-            subscriber_count=account.subscriber_count,
-            video_count=account.video_count,
-            view_count=account.view_count,
-            is_monetized=account.is_monetized,
-            status=status,
-            strike_count=account.strike_count,
+            subscriber_count=account.subscriber_count or 0,
+            video_count=account.video_count or 0,
+            view_count=account.view_count or 0,
+            stream_status=stream_status,
+            health_status=health_status,
             token_expires_at=account.token_expires_at,
-            is_token_expired=account.is_token_expired(),
-            is_token_expiring_soon=account.is_token_expiring_soon(hours=24),
-            daily_quota_used=account.daily_quota_used,
-            daily_quota_limit=10000,
-            quota_usage_percent=account.get_quota_usage_percent(),
-            quota_reset_at=account.quota_reset_at,
+            is_token_expired=account.is_token_expired() if hasattr(account, 'is_token_expired') else False,
+            is_token_expiring_soon=account.is_token_expiring_soon(hours=24) if hasattr(account, 'is_token_expiring_soon') else False,
+            quota_used=account.daily_quota_used or 0,
+            quota_limit=10000,
+            quota_percent=quota_percent,
+            strike_count=account.strike_count or 0,
+            has_error=account.status == AccountStatus.ERROR.value if hasattr(AccountStatus, 'ERROR') else account.status == "error",
+            last_error=account.last_error,
+            alert_count=alert_count,
             current_stream=current_stream,
-            recent_streams=recent_streams,
-            scheduled_streams=scheduled_streams,
-            issues=issues,
+            next_scheduled=next_scheduled,
             last_sync_at=account.last_sync_at,
-            created_at=account.created_at,
         )
 
-    async def _get_current_stream_details(
-        self, account_id: uuid.UUID
-    ) -> Optional[StreamDetailInfo]:
-        """Get detailed info about current live stream."""
-        query = select(LiveEvent).where(
-            and_(
-                LiveEvent.account_id == account_id,
-                LiveEvent.status == LiveEventStatus.LIVE.value,
-            )
-        )
-        result = await self.session.execute(query)
-        event = result.scalar_one_or_none()
+    async def _get_stream_status(self, account_id: uuid.UUID) -> StreamStatus:
+        """Determine stream status for an account (checks both LiveEvent and StreamJob)."""
+        now = datetime.utcnow()
         
-        if not event or not event.actual_start_at:
-            return None
-        
-        duration = int((datetime.utcnow() - event.actual_start_at.replace(tzinfo=None)).total_seconds())
-        
-        return StreamDetailInfo(
-            stream_id=event.id,
-            title=event.title,
-            viewer_count=event.peak_viewers,
-            peak_viewers=event.peak_viewers,
-            chat_messages=event.total_chat_messages,
-            started_at=event.actual_start_at,
-            duration_seconds=duration,
-            health_status="good",
-        )
-
-    async def _get_recent_streams(
-        self, account_id: uuid.UUID, limit: int = 5
-    ) -> list[StreamSummary]:
-        """Get recent completed streams."""
-        query = (
+        # Check if live from LiveEvent
+        live_query = (
             select(LiveEvent)
             .where(
                 and_(
                     LiveEvent.account_id == account_id,
-                    LiveEvent.status == LiveEventStatus.ENDED.value,
+                    LiveEvent.status == LiveEventStatus.LIVE.value,
+                    LiveEvent.last_error.is_(None),
                 )
             )
-            .order_by(LiveEvent.actual_end_at.desc())
-            .limit(limit)
+            .limit(1)
         )
-        result = await self.session.execute(query)
-        events = result.scalars().all()
+        result = await self.session.execute(live_query)
+        live_event = result.scalar_one_or_none()
         
-        summaries = []
-        for event in events:
-            if event.actual_start_at:
-                duration = 0
-                if event.actual_end_at:
-                    duration = int((event.actual_end_at - event.actual_start_at).total_seconds())
-                summaries.append(StreamSummary(
-                    stream_id=event.id,
-                    title=event.title,
-                    started_at=event.actual_start_at,
-                    ended_at=event.actual_end_at,
-                    duration_seconds=duration,
-                    peak_viewers=event.peak_viewers,
-                    total_chat_messages=event.total_chat_messages,
-                ))
+        if live_event:
+            if live_event.actual_start_at:
+                start = live_event.actual_start_at
+                if start.tzinfo is not None:
+                    start = start.replace(tzinfo=None)
+                hours_live = (now - start).total_seconds() / 3600
+                if hours_live <= 24:
+                    return StreamStatus.LIVE
         
-        return summaries
-
-    async def _get_scheduled_streams(
-        self, account_id: uuid.UUID, limit: int = 5
-    ) -> list[ScheduledStreamInfo]:
-        """Get upcoming scheduled streams."""
-        now = datetime.utcnow()
-        query = (
+        # Check if live from StreamJob (running status)
+        streaming_job_query = (
+            select(StreamJob)
+            .where(
+                and_(
+                    StreamJob.account_id == account_id,
+                    StreamJob.status == StreamJobStatus.RUNNING.value,
+                )
+            )
+            .limit(1)
+        )
+        result = await self.session.execute(streaming_job_query)
+        if result.scalar_one_or_none():
+            return StreamStatus.LIVE
+        
+        # Check if scheduled from LiveEvent
+        scheduled_query = (
             select(LiveEvent)
             .where(
                 and_(
                     LiveEvent.account_id == account_id,
                     LiveEvent.status == LiveEventStatus.SCHEDULED.value,
-                    LiveEvent.scheduled_start_at > now,
+                    LiveEvent.scheduled_start_at.isnot(None),
                 )
             )
             .order_by(LiveEvent.scheduled_start_at.asc())
-            .limit(limit)
+            .limit(1)
         )
-        result = await self.session.execute(query)
-        events = result.scalars().all()
+        result = await self.session.execute(scheduled_query)
+        event = result.scalar_one_or_none()
+        if event and event.scheduled_start_at:
+            scheduled_at = event.scheduled_start_at
+            if scheduled_at.tzinfo is not None:
+                scheduled_at = scheduled_at.replace(tzinfo=None)
+            if scheduled_at > now:
+                return StreamStatus.SCHEDULED
         
-        return [
-            ScheduledStreamInfo(
-                stream_id=event.id,
-                title=event.title,
-                scheduled_start_at=event.scheduled_start_at,
-                scheduled_end_at=event.scheduled_end_at,
+        # Check if scheduled from StreamJob
+        scheduled_job_query = (
+            select(StreamJob)
+            .where(
+                and_(
+                    StreamJob.account_id == account_id,
+                    StreamJob.status == StreamJobStatus.SCHEDULED.value,
+                    StreamJob.scheduled_start_at.isnot(None),
+                )
             )
-            for event in events
-            if event.scheduled_start_at
-        ]
-
-    async def get_layout_preferences(
-        self, user_id: uuid.UUID
-    ) -> LayoutPreferencesResponse:
-        """Get user's layout preferences.
+            .order_by(StreamJob.scheduled_start_at.asc())
+            .limit(1)
+        )
+        result = await self.session.execute(scheduled_job_query)
+        job = result.scalar_one_or_none()
+        if job and job.scheduled_start_at:
+            scheduled_at = job.scheduled_start_at
+            if scheduled_at.tzinfo is not None:
+                scheduled_at = scheduled_at.replace(tzinfo=None)
+            if scheduled_at > now:
+                return StreamStatus.SCHEDULED
         
-        Requirements: 16.5
+        return StreamStatus.OFFLINE
+
+    async def _get_current_live_stream(self, account: YouTubeAccount) -> Optional[LiveStreamInfo]:
+        """Get current live stream for account.
+        
+        Only returns streams that are truly live (no error, not stale).
         """
-        query = select(MonitoringLayoutPreference).where(
-            MonitoringLayoutPreference.user_id == user_id
+        query = (
+            select(LiveEvent)
+            .where(
+                and_(
+                    LiveEvent.account_id == account.id,
+                    LiveEvent.status == LiveEventStatus.LIVE.value,
+                    LiveEvent.last_error.is_(None),
+                )
+            )
+            .order_by(LiveEvent.actual_start_at.desc())
+            .limit(1)
         )
         result = await self.session.execute(query)
-        pref = result.scalar_one_or_none()
+        event = result.scalar_one_or_none()
         
-        if not pref:
-            # Return defaults
-            return LayoutPreferencesResponse(
-                user_id=user_id,
-                preferences=LayoutPreferences(),
-                updated_at=datetime.utcnow(),
+        if not event:
+            return None
+        
+        # Check if stream is stale (live for more than 24 hours)
+        if event.actual_start_at:
+            now = datetime.utcnow()
+            start = event.actual_start_at
+            if start.tzinfo is not None:
+                start = start.replace(tzinfo=None)
+            hours_live = (now - start).total_seconds() / 3600
+            if hours_live > 24:
+                return None  # Stale stream, don't show as live
+        
+        return self._build_live_stream_info(event, account)
+
+    async def _get_next_scheduled_stream(self, account: YouTubeAccount) -> Optional[ScheduledStreamInfo]:
+        """Get next scheduled stream for account (checks both LiveEvent and StreamJob)."""
+        now = datetime.utcnow()
+        candidates = []
+        
+        # Check LiveEvent
+        event_query = (
+            select(LiveEvent)
+            .where(
+                and_(
+                    LiveEvent.account_id == account.id,
+                    LiveEvent.status == LiveEventStatus.SCHEDULED.value,
+                    LiveEvent.scheduled_start_at.isnot(None),
+                )
             )
+            .order_by(LiveEvent.scheduled_start_at.asc())
+            .limit(1)
+        )
+        result = await self.session.execute(event_query)
+        event = result.scalar_one_or_none()
         
-        return LayoutPreferencesResponse(
-            user_id=user_id,
-            preferences=LayoutPreferences(
-                grid_columns=pref.grid_columns,
-                grid_rows=pref.grid_rows,
-                show_metrics=pref.show_metrics,
-                sort_by=pref.sort_by,
-                sort_order=pref.sort_order,
-                default_filter=ChannelStatusFilter(pref.default_filter),
-                compact_mode=pref.compact_mode,
-                show_issues_only=pref.show_issues_only,
-            ),
-            updated_at=pref.updated_at,
+        if event and event.scheduled_start_at:
+            scheduled_at = event.scheduled_start_at
+            if scheduled_at.tzinfo is not None:
+                scheduled_at = scheduled_at.replace(tzinfo=None)
+            if scheduled_at > now:
+                candidates.append(('event', event, scheduled_at))
+        
+        # Check StreamJob
+        job_query = (
+            select(StreamJob)
+            .where(
+                and_(
+                    StreamJob.account_id == account.id,
+                    StreamJob.status == StreamJobStatus.SCHEDULED.value,
+                    StreamJob.scheduled_start_at.isnot(None),
+                )
+            )
+            .order_by(StreamJob.scheduled_start_at.asc())
+            .limit(1)
+        )
+        result = await self.session.execute(job_query)
+        job = result.scalar_one_or_none()
+        
+        if job and job.scheduled_start_at:
+            scheduled_at = job.scheduled_start_at
+            if scheduled_at.tzinfo is not None:
+                scheduled_at = scheduled_at.replace(tzinfo=None)
+            if scheduled_at > now:
+                candidates.append(('job', job, scheduled_at))
+        
+        if not candidates:
+            return None
+        
+        # Return the one with earliest scheduled time
+        candidates.sort(key=lambda x: x[2])
+        source_type, source, _ = candidates[0]
+        
+        if source_type == 'event':
+            return self._build_scheduled_stream_info(source, account)
+        else:
+            return self._build_scheduled_stream_info_from_job(source, account)
+
+    def _build_live_stream_info(self, event: LiveEvent, account: YouTubeAccount) -> LiveStreamInfo:
+        """Build live stream info from event and account."""
+        now = datetime.utcnow()
+        started_at = event.actual_start_at or now
+        
+        # Handle timezone-aware datetime
+        if started_at.tzinfo is not None:
+            started_at = started_at.replace(tzinfo=None)
+        
+        duration = int((now - started_at).total_seconds())
+        
+        return LiveStreamInfo(
+            stream_id=str(event.id),
+            account_id=str(account.id),
+            channel_id=account.channel_id,
+            channel_title=account.channel_title,
+            channel_thumbnail=account.thumbnail_url,
+            title=event.title,
+            description=event.description,
+            youtube_broadcast_id=event.youtube_broadcast_id,
+            viewer_count=event.peak_viewers or 0,  # Use peak as current (would need real-time API)
+            peak_viewers=event.peak_viewers or 0,
+            chat_messages=event.total_chat_messages or 0,
+            likes=0,  # Would need real-time API
+            started_at=started_at,
+            duration_seconds=max(0, duration),
+            health_status=HealthStatus.HEALTHY,
         )
 
-    async def update_layout_preferences(
+    def _build_scheduled_stream_info(self, event: LiveEvent, account: YouTubeAccount) -> ScheduledStreamInfo:
+        """Build scheduled stream info from event and account."""
+        now = datetime.utcnow()
+        scheduled_at = event.scheduled_start_at
+        
+        # Handle timezone-aware datetime
+        if scheduled_at and scheduled_at.tzinfo is not None:
+            scheduled_at = scheduled_at.replace(tzinfo=None)
+        
+        starts_in = int((scheduled_at - now).total_seconds()) if scheduled_at else 0
+        
+        return ScheduledStreamInfo(
+            stream_id=str(event.id),
+            account_id=str(account.id),
+            channel_id=account.channel_id,
+            channel_title=account.channel_title,
+            channel_thumbnail=account.thumbnail_url,
+            title=event.title,
+            description=event.description,
+            scheduled_start_at=scheduled_at,
+            scheduled_end_at=event.scheduled_end_at,
+            starts_in_seconds=max(0, starts_in),
+        )
+
+    def _determine_health_status(self, account: YouTubeAccount) -> HealthStatus:
+        """Determine health status based on account state."""
+        # Critical conditions
+        if account.is_token_expired() if hasattr(account, 'is_token_expired') else False:
+            return HealthStatus.CRITICAL
+        if account.status == "error":
+            return HealthStatus.CRITICAL
+        if (account.strike_count or 0) >= 2:
+            return HealthStatus.CRITICAL
+        
+        # Warning conditions
+        if account.is_token_expiring_soon(hours=24) if hasattr(account, 'is_token_expiring_soon') else False:
+            return HealthStatus.WARNING
+        quota_percent = account.get_quota_usage_percent() if hasattr(account, 'get_quota_usage_percent') else 0
+        if quota_percent >= 80:
+            return HealthStatus.WARNING
+        if (account.strike_count or 0) >= 1:
+            return HealthStatus.WARNING
+        
+        return HealthStatus.HEALTHY
+
+    def _count_alerts(self, account: YouTubeAccount) -> int:
+        """Count number of alerts for an account."""
+        count = 0
+        
+        if account.is_token_expired() if hasattr(account, 'is_token_expired') else False:
+            count += 1
+        elif account.is_token_expiring_soon(hours=24) if hasattr(account, 'is_token_expiring_soon') else False:
+            count += 1
+        
+        if account.status == "error":
+            count += 1
+        
+        quota_percent = account.get_quota_usage_percent() if hasattr(account, 'get_quota_usage_percent') else 0
+        if quota_percent >= 80:
+            count += 1
+        
+        if (account.strike_count or 0) > 0:
+            count += 1
+        
+        return count
+
+    def _generate_alerts(self, account: YouTubeAccount, status: ChannelStatusInfo) -> list[Alert]:
+        """Generate alerts for a channel based on its status."""
+        alerts = []
+        now = datetime.utcnow()
+        
+        # Token expired
+        if status.is_token_expired:
+            alerts.append(Alert(
+                id=f"token-expired-{account.id}",
+                type=AlertType.TOKEN_EXPIRED,
+                severity=AlertSeverity.CRITICAL,
+                channel_id=account.channel_id,
+                channel_title=account.channel_title,
+                message="OAuth token has expired",
+                details="Re-authenticate to restore access",
+                created_at=now,
+            ))
+        # Token expiring soon
+        elif status.is_token_expiring_soon:
+            alerts.append(Alert(
+                id=f"token-expiring-{account.id}",
+                type=AlertType.TOKEN_EXPIRING,
+                severity=AlertSeverity.WARNING,
+                channel_id=account.channel_id,
+                channel_title=account.channel_title,
+                message="OAuth token expires within 24 hours",
+                details="Re-authenticate soon to avoid interruption",
+                created_at=now,
+            ))
+        
+        # Account error
+        if status.has_error:
+            alerts.append(Alert(
+                id=f"error-{account.id}",
+                type=AlertType.ACCOUNT_ERROR,
+                severity=AlertSeverity.CRITICAL,
+                channel_id=account.channel_id,
+                channel_title=account.channel_title,
+                message="Account has an error",
+                details=status.last_error,
+                created_at=now,
+            ))
+        
+        # Quota warnings
+        if status.quota_percent >= 95:
+            alerts.append(Alert(
+                id=f"quota-critical-{account.id}",
+                type=AlertType.QUOTA_CRITICAL,
+                severity=AlertSeverity.CRITICAL,
+                channel_id=account.channel_id,
+                channel_title=account.channel_title,
+                message=f"API quota at {status.quota_percent:.0f}%",
+                details="Quota will reset at midnight Pacific Time",
+                created_at=now,
+            ))
+        elif status.quota_percent >= 80:
+            alerts.append(Alert(
+                id=f"quota-high-{account.id}",
+                type=AlertType.QUOTA_HIGH,
+                severity=AlertSeverity.WARNING,
+                channel_id=account.channel_id,
+                channel_title=account.channel_title,
+                message=f"API quota at {status.quota_percent:.0f}%",
+                details="Consider reducing API calls",
+                created_at=now,
+            ))
+        
+        # Strikes
+        if status.strike_count > 0:
+            severity = AlertSeverity.CRITICAL if status.strike_count >= 2 else AlertSeverity.WARNING
+            alerts.append(Alert(
+                id=f"strike-{account.id}",
+                type=AlertType.STRIKE_DETECTED,
+                severity=severity,
+                channel_id=account.channel_id,
+                channel_title=account.channel_title,
+                message=f"Channel has {status.strike_count} strike(s)",
+                details="Review strikes in YouTube Studio",
+                created_at=now,
+            ))
+        
+        return alerts
+
+    def _build_overview(
         self,
-        user_id: uuid.UUID,
-        updates: dict,
-    ) -> LayoutPreferencesResponse:
-        """Update user's layout preferences.
+        channels: list[ChannelStatusInfo],
+        live_streams: list[LiveStreamInfo],
+        scheduled_streams: list[ScheduledStreamInfo],
+        alerts: list[Alert],
+    ) -> MonitoringOverview:
+        """Build overview statistics."""
+        # Count by stream status
+        live_count = sum(1 for c in channels if c.stream_status == StreamStatus.LIVE)
+        scheduled_count = sum(1 for c in channels if c.stream_status == StreamStatus.SCHEDULED)
+        offline_count = sum(1 for c in channels if c.stream_status == StreamStatus.OFFLINE)
         
-        Requirements: 16.5
-        """
-        query = select(MonitoringLayoutPreference).where(
-            MonitoringLayoutPreference.user_id == user_id
+        # Count by health status
+        healthy_count = sum(1 for c in channels if c.health_status == HealthStatus.HEALTHY)
+        warning_count = sum(1 for c in channels if c.health_status == HealthStatus.WARNING)
+        critical_count = sum(1 for c in channels if c.health_status == HealthStatus.CRITICAL)
+        
+        # Total viewers
+        total_viewers = sum(s.viewer_count for s in live_streams)
+        
+        # Scheduled today
+        today = datetime.utcnow().date()
+        scheduled_today = sum(
+            1 for s in scheduled_streams 
+            if s.scheduled_start_at.date() == today
         )
-        result = await self.session.execute(query)
-        pref = result.scalar_one_or_none()
         
-        if not pref:
-            # Create new preferences
-            pref = MonitoringLayoutPreference(user_id=user_id)
-            self.session.add(pref)
+        # Alert counts
+        active_alerts = len(alerts)
+        critical_alerts = sum(1 for a in alerts if a.severity == AlertSeverity.CRITICAL)
         
-        # Apply updates
-        for key, value in updates.items():
-            if value is not None and hasattr(pref, key):
-                if key == "default_filter" and isinstance(value, ChannelStatusFilter):
-                    setattr(pref, key, value.value)
-                else:
-                    setattr(pref, key, value)
-        
-        await self.session.flush()
-        
-        return await self.get_layout_preferences(user_id)
+        return MonitoringOverview(
+            total_channels=len(channels),
+            live_channels=live_count,
+            scheduled_channels=scheduled_count,
+            offline_channels=offline_count,
+            healthy_channels=healthy_count,
+            warning_channels=warning_count,
+            critical_channels=critical_count,
+            total_viewers=total_viewers,
+            total_scheduled_today=scheduled_today,
+            active_alerts=active_alerts,
+            critical_alerts=critical_alerts,
+        )

@@ -1,7 +1,6 @@
 """Pydantic schemas for monitoring module.
 
-Defines request/response schemas for multi-channel monitoring dashboard.
-Requirements: 16.1, 16.2, 16.3, 16.4, 16.5
+Live Control Center - Real-time monitoring for YouTube channels and streams.
 """
 
 import uuid
@@ -12,236 +11,228 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
-class ChannelStatusFilter(str, Enum):
-    """Filter options for channel status.
-    
-    Requirements: 16.2
-    """
-    ALL = "all"
+# ============================================================================
+# Enums
+# ============================================================================
+
+class StreamStatus(str, Enum):
+    """Status of a live stream."""
     LIVE = "live"
     SCHEDULED = "scheduled"
     OFFLINE = "offline"
-    ERROR = "error"
-    TOKEN_EXPIRED = "token_expired"
+    ENDED = "ended"
 
 
-class ChannelStatus(str, Enum):
-    """Status of a channel in the monitoring grid."""
-    LIVE = "live"
-    SCHEDULED = "scheduled"
-    OFFLINE = "offline"
-    ERROR = "error"
-    TOKEN_EXPIRED = "token_expired"
+class HealthStatus(str, Enum):
+    """Health status of a channel."""
+    HEALTHY = "healthy"
+    WARNING = "warning"
+    CRITICAL = "critical"
 
 
-class IssueSeverity(str, Enum):
-    """Severity level for channel issues.
-    
-    Requirements: 16.3
-    """
+class AlertSeverity(str, Enum):
+    """Severity level for alerts."""
     CRITICAL = "critical"
     WARNING = "warning"
     INFO = "info"
 
 
-class ChannelIssue(BaseModel):
-    """Represents an issue with a channel.
-    
-    Requirements: 16.3
-    """
-    severity: IssueSeverity
+class AlertType(str, Enum):
+    """Type of alert."""
+    TOKEN_EXPIRED = "token_expired"
+    TOKEN_EXPIRING = "token_expiring"
+    QUOTA_HIGH = "quota_high"
+    QUOTA_CRITICAL = "quota_critical"
+    STREAM_DROPPED = "stream_dropped"
+    STRIKE_DETECTED = "strike_detected"
+    ACCOUNT_ERROR = "account_error"
+    VIEWER_DROP = "viewer_drop"
+    PEAK_VIEWERS = "peak_viewers"
+
+
+# ============================================================================
+# Alert Schemas
+# ============================================================================
+
+class Alert(BaseModel):
+    """An alert/notification for monitoring."""
+    id: str
+    type: AlertType
+    severity: AlertSeverity
+    channel_id: str
+    channel_title: str
     message: str
-    detected_at: datetime
+    details: Optional[str] = None
+    created_at: datetime
+    acknowledged: bool = False
 
 
-class ChannelGridItem(BaseModel):
-    """Response schema for a channel in the monitoring grid.
+# ============================================================================
+# Live Stream Schemas
+# ============================================================================
+
+class LiveStreamInfo(BaseModel):
+    """Information about a currently live stream."""
+    stream_id: str
+    account_id: str
+    channel_id: str
+    channel_title: str
+    channel_thumbnail: Optional[str] = None
     
-    Requirements: 16.1, 16.2, 16.3
-    """
-    account_id: uuid.UUID
+    # Stream details
+    title: str
+    description: Optional[str] = None
+    youtube_broadcast_id: Optional[str] = None
+    
+    # Real-time metrics
+    viewer_count: int = 0
+    peak_viewers: int = 0
+    chat_messages: int = 0
+    likes: int = 0
+    
+    # Timing
+    started_at: datetime
+    duration_seconds: int = 0
+    
+    # Health
+    health_status: HealthStatus = HealthStatus.HEALTHY
+    
+    class Config:
+        from_attributes = True
+
+
+class LiveStreamsResponse(BaseModel):
+    """Response for live streams endpoint."""
+    streams: list[LiveStreamInfo]
+    total_live: int
+    total_viewers: int
+
+
+# ============================================================================
+# Scheduled Stream Schemas
+# ============================================================================
+
+class ScheduledStreamInfo(BaseModel):
+    """Information about a scheduled stream."""
+    stream_id: str
+    account_id: str
+    channel_id: str
+    channel_title: str
+    channel_thumbnail: Optional[str] = None
+    
+    # Stream details
+    title: str
+    description: Optional[str] = None
+    
+    # Timing
+    scheduled_start_at: datetime
+    scheduled_end_at: Optional[datetime] = None
+    starts_in_seconds: int = 0  # Countdown
+    
+    class Config:
+        from_attributes = True
+
+
+class ScheduledStreamsResponse(BaseModel):
+    """Response for scheduled streams endpoint."""
+    streams: list[ScheduledStreamInfo]
+    total_scheduled: int
+
+
+# ============================================================================
+# Channel Status Schemas
+# ============================================================================
+
+class ChannelStatusInfo(BaseModel):
+    """Status information for a channel."""
+    account_id: str
     channel_id: str
     channel_title: str
     thumbnail_url: Optional[str] = None
+    
+    # Stats
     subscriber_count: int = 0
     video_count: int = 0
     view_count: int = 0
-    status: ChannelStatus
-    is_monetized: bool = False
-    has_live_streaming_enabled: bool = False
-    strike_count: int = 0
+    
+    # Status
+    stream_status: StreamStatus = StreamStatus.OFFLINE
+    health_status: HealthStatus = HealthStatus.HEALTHY
     
     # Token status
     token_expires_at: Optional[datetime] = None
     is_token_expired: bool = False
     is_token_expiring_soon: bool = False
     
-    # Quota status
-    daily_quota_used: int = 0
-    quota_usage_percent: float = 0.0
+    # Quota
+    quota_used: int = 0
+    quota_limit: int = 10000
+    quota_percent: float = 0.0
     
-    # Live stream info (if live)
-    current_stream_id: Optional[uuid.UUID] = None
-    current_stream_title: Optional[str] = None
-    current_viewer_count: Optional[int] = None
-    stream_started_at: Optional[datetime] = None
+    # Issues
+    strike_count: int = 0
+    has_error: bool = False
+    last_error: Optional[str] = None
+    alert_count: int = 0
     
-    # Scheduled stream info
-    next_scheduled_stream_id: Optional[uuid.UUID] = None
-    next_scheduled_stream_title: Optional[str] = None
-    next_scheduled_at: Optional[datetime] = None
+    # Current stream (if live)
+    current_stream: Optional[LiveStreamInfo] = None
     
-    # Issues (Requirements: 16.3)
-    has_critical_issue: bool = False
-    issues: list[ChannelIssue] = Field(default_factory=list)
+    # Next scheduled stream
+    next_scheduled: Optional[ScheduledStreamInfo] = None
     
     # Timestamps
     last_sync_at: Optional[datetime] = None
-    last_error: Optional[str] = None
-
+    
     class Config:
         from_attributes = True
 
 
-class ChannelGridResponse(BaseModel):
-    """Response schema for channel grid endpoint.
+# ============================================================================
+# Overview/Stats Schemas
+# ============================================================================
+
+class MonitoringOverview(BaseModel):
+    """Overview statistics for monitoring dashboard."""
+    # Channel counts
+    total_channels: int = 0
+    live_channels: int = 0
+    scheduled_channels: int = 0
+    offline_channels: int = 0
     
-    Requirements: 16.1, 16.2
-    """
-    channels: list[ChannelGridItem]
-    total: int
-    filtered_count: int
-    filters_applied: list[str] = Field(default_factory=list)
-
-
-class ChannelDetailMetrics(BaseModel):
-    """Detailed metrics for a channel (expanded view).
+    # Health counts
+    healthy_channels: int = 0
+    warning_channels: int = 0
+    critical_channels: int = 0
     
-    Requirements: 16.4
-    """
-    account_id: uuid.UUID
-    channel_id: str
-    channel_title: str
-    thumbnail_url: Optional[str] = None
+    # Aggregate metrics
+    total_viewers: int = 0
+    total_scheduled_today: int = 0
     
-    # Basic stats
-    subscriber_count: int = 0
-    video_count: int = 0
-    view_count: int = 0
-    is_monetized: bool = False
-    
-    # Status
-    status: ChannelStatus
-    strike_count: int = 0
-    
-    # Token info
-    token_expires_at: Optional[datetime] = None
-    is_token_expired: bool = False
-    is_token_expiring_soon: bool = False
-    
-    # Quota info
-    daily_quota_used: int = 0
-    daily_quota_limit: int = 10000
-    quota_usage_percent: float = 0.0
-    quota_reset_at: Optional[datetime] = None
-    
-    # Current stream details (if live)
-    current_stream: Optional["StreamDetailInfo"] = None
-    
-    # Recent streams
-    recent_streams: list["StreamSummary"] = Field(default_factory=list)
-    
-    # Scheduled streams
-    scheduled_streams: list["ScheduledStreamInfo"] = Field(default_factory=list)
-    
-    # Issues
-    issues: list[ChannelIssue] = Field(default_factory=list)
-    
-    # Analytics summary (last 7 days)
-    views_last_7_days: int = 0
-    subscribers_gained_last_7_days: int = 0
-    watch_time_minutes_last_7_days: int = 0
-    
-    # Timestamps
-    last_sync_at: Optional[datetime] = None
-    created_at: Optional[datetime] = None
+    # Alerts
+    active_alerts: int = 0
+    critical_alerts: int = 0
 
 
-class StreamDetailInfo(BaseModel):
-    """Detailed info about a current live stream."""
-    stream_id: uuid.UUID
-    title: str
-    viewer_count: int = 0
-    peak_viewers: int = 0
-    chat_messages: int = 0
-    started_at: datetime
-    duration_seconds: int = 0
-    health_status: str = "unknown"
-    bitrate: Optional[int] = None
-    dropped_frames: int = 0
+# ============================================================================
+# Request Schemas
+# ============================================================================
+
+class MonitoringFilters(BaseModel):
+    """Filters for monitoring queries."""
+    stream_status: Optional[StreamStatus] = None
+    health_status: Optional[HealthStatus] = None
+    search: Optional[str] = None
 
 
-class StreamSummary(BaseModel):
-    """Summary of a past stream."""
-    stream_id: uuid.UUID
-    title: str
-    started_at: datetime
-    ended_at: Optional[datetime] = None
-    duration_seconds: int = 0
-    peak_viewers: int = 0
-    total_chat_messages: int = 0
+# ============================================================================
+# Response Schemas
+# ============================================================================
 
-
-class ScheduledStreamInfo(BaseModel):
-    """Info about a scheduled stream."""
-    stream_id: uuid.UUID
-    title: str
-    scheduled_start_at: datetime
-    scheduled_end_at: Optional[datetime] = None
-
-
-class LayoutPreferences(BaseModel):
-    """User preferences for monitoring layout.
-    
-    Requirements: 16.5
-    """
-    grid_columns: int = Field(4, ge=1, le=8, description="Number of columns in grid")
-    grid_rows: int = Field(3, ge=1, le=10, description="Number of rows per page")
-    show_metrics: list[str] = Field(
-        default_factory=lambda: ["subscribers", "views", "status", "quota"],
-        description="Metrics to display on channel tiles"
-    )
-    sort_by: str = Field("status", description="Sort field")
-    sort_order: str = Field("asc", pattern="^(asc|desc)$")
-    default_filter: ChannelStatusFilter = ChannelStatusFilter.ALL
-    compact_mode: bool = False
-    show_issues_only: bool = False
-
-
-class LayoutPreferencesUpdate(BaseModel):
-    """Request schema for updating layout preferences.
-    
-    Requirements: 16.5
-    """
-    grid_columns: Optional[int] = Field(None, ge=1, le=8)
-    grid_rows: Optional[int] = Field(None, ge=1, le=10)
-    show_metrics: Optional[list[str]] = None
-    sort_by: Optional[str] = None
-    sort_order: Optional[str] = Field(None, pattern="^(asc|desc)$")
-    default_filter: Optional[ChannelStatusFilter] = None
-    compact_mode: Optional[bool] = None
-    show_issues_only: Optional[bool] = None
-
-
-class LayoutPreferencesResponse(BaseModel):
-    """Response schema for layout preferences.
-    
-    Requirements: 16.5
-    """
-    user_id: uuid.UUID
-    preferences: LayoutPreferences
-    updated_at: datetime
-
-
-# Update forward references
-ChannelDetailMetrics.model_rebuild()
+class MonitoringDashboardResponse(BaseModel):
+    """Complete monitoring dashboard data."""
+    overview: MonitoringOverview
+    live_streams: list[LiveStreamInfo]
+    scheduled_streams: list[ScheduledStreamInfo]
+    channels: list[ChannelStatusInfo]
+    alerts: list[Alert]

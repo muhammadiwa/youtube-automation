@@ -1,7 +1,6 @@
-"""Monitoring module for multi-channel monitoring dashboard.
+"""Monitoring module - Live Control Center.
 
-Implements channel grid, filtering, and layout preferences.
-Requirements: 16.1, 16.2, 16.3, 16.4, 16.5
+Provides real-time monitoring for YouTube channels and live streams.
 """
 
 from app.modules.monitoring.router import router as monitoring_router

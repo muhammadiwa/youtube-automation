@@ -1,7 +1,6 @@
-"""Monitoring API router.
+"""Monitoring API router - Live Control Center.
 
-Implements REST endpoints for multi-channel monitoring dashboard.
-Requirements: 16.1, 16.2, 16.3, 16.4, 16.5
+REST endpoints for real-time monitoring of YouTube channels and streams.
 """
 
 import uuid
@@ -15,116 +14,102 @@ from app.modules.auth.jwt import get_current_user
 from app.modules.auth.models import User
 from app.modules.monitoring.service import MonitoringService
 from app.modules.monitoring.schemas import (
-    ChannelStatusFilter,
-    ChannelGridResponse,
-    ChannelDetailMetrics,
-    LayoutPreferencesUpdate,
-    LayoutPreferencesResponse,
+    MonitoringDashboardResponse,
+    LiveStreamsResponse,
+    ScheduledStreamsResponse,
+    ChannelStatusInfo,
+    Alert,
+    MonitoringOverview,
 )
 
 router = APIRouter(prefix="/monitoring", tags=["monitoring"])
 
 
-@router.get("/channels", response_model=ChannelGridResponse)
-async def get_channel_grid(
-    status_filter: ChannelStatusFilter = Query(
-        ChannelStatusFilter.ALL,
-        description="Filter channels by status"
-    ),
-    search: Optional[str] = Query(
-        None,
-        description="Search term for channel title"
-    ),
-    sort_by: str = Query(
-        "status",
-        description="Sort field (status, subscribers, views, title, quota)"
-    ),
-    sort_order: str = Query(
-        "asc",
-        pattern="^(asc|desc)$",
-        description="Sort order"
-    ),
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(12, ge=1, le=50, description="Items per page"),
+@router.get("/dashboard", response_model=MonitoringDashboardResponse)
+async def get_monitoring_dashboard(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get channel grid with filtering and status indicators.
+    """Get complete monitoring dashboard data.
     
-    Returns all channels for the current user with live status indicators.
-    Supports filtering by status (live, scheduled, offline, error, token_expired).
-    
-    Requirements: 16.1, 16.2
+    Returns overview stats, live streams, scheduled streams, channel statuses, and alerts.
+    All data is real-time from the database.
     """
     service = MonitoringService(db)
+    return await service.get_dashboard(current_user.id)
+
+
+@router.get("/overview", response_model=MonitoringOverview)
+async def get_monitoring_overview(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get monitoring overview statistics only.
     
-    return await service.get_channel_grid(
-        user_id=current_user.id,
-        status_filter=status_filter,
-        search=search,
-        sort_by=sort_by,
-        sort_order=sort_order,
-        page=page,
-        page_size=page_size,
-    )
+    Lightweight endpoint for quick stats refresh.
+    """
+    service = MonitoringService(db)
+    dashboard = await service.get_dashboard(current_user.id)
+    return dashboard.overview
 
 
-@router.get("/channels/{account_id}", response_model=ChannelDetailMetrics)
-async def get_channel_details(
+@router.get("/live", response_model=LiveStreamsResponse)
+async def get_live_streams(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all currently live streams.
+    
+    Returns list of live streams with viewer counts and metrics.
+    """
+    service = MonitoringService(db)
+    return await service.get_live_streams(current_user.id)
+
+
+@router.get("/scheduled", response_model=ScheduledStreamsResponse)
+async def get_scheduled_streams(
+    days_ahead: int = Query(7, ge=1, le=30, description="Days ahead to look"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get scheduled streams.
+    
+    Returns list of upcoming scheduled streams with countdown timers.
+    """
+    service = MonitoringService(db)
+    return await service.get_scheduled_streams(current_user.id, days_ahead)
+
+
+@router.get("/channels/{account_id}", response_model=ChannelStatusInfo)
+async def get_channel_status(
     account_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get detailed metrics for a specific channel.
+    """Get status for a specific channel.
     
-    Shows detailed metrics without leaving the monitoring view.
-    Includes current stream info, recent streams, scheduled streams, and issues.
-    
-    Requirements: 16.4
+    Returns detailed status including current stream, next scheduled, and alerts.
     """
     service = MonitoringService(db)
+    channel_status = await service.get_channel_status(account_id, current_user.id)
     
-    details = await service.get_channel_details(account_id, current_user.id)
-    
-    if not details:
+    if not channel_status:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Channel not found",
         )
     
-    return details
+    return channel_status
 
 
-@router.get("/preferences", response_model=LayoutPreferencesResponse)
-async def get_layout_preferences(
+@router.get("/alerts", response_model=list[Alert])
+async def get_alerts(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get user's monitoring layout preferences.
+    """Get all active alerts.
     
-    Returns saved preferences for grid size and displayed metrics.
-    
-    Requirements: 16.5
+    Returns alerts sorted by severity (critical first).
     """
     service = MonitoringService(db)
-    
-    return await service.get_layout_preferences(current_user.id)
-
-
-@router.put("/preferences", response_model=LayoutPreferencesResponse)
-async def update_layout_preferences(
-    request: LayoutPreferencesUpdate,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Update user's monitoring layout preferences.
-    
-    Saves preferences for grid size and displayed metrics.
-    
-    Requirements: 16.5
-    """
-    service = MonitoringService(db)
-    
-    updates = request.model_dump(exclude_unset=True)
-    
-    return await service.update_layout_preferences(current_user.id, updates)
+    return await service.get_alerts(current_user.id)

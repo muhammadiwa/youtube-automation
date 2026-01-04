@@ -155,8 +155,13 @@ class StreamJobService:
         
         # Determine initial status
         initial_status = StreamJobStatus.PENDING.value
-        if request.scheduled_start_at and request.scheduled_start_at > datetime.utcnow():
-            initial_status = StreamJobStatus.SCHEDULED.value
+        if request.scheduled_start_at:
+            # Handle timezone-aware datetime comparison
+            scheduled_at = request.scheduled_start_at
+            if scheduled_at.tzinfo is not None:
+                scheduled_at = scheduled_at.replace(tzinfo=None)
+            if scheduled_at > datetime.utcnow():
+                initial_status = StreamJobStatus.SCHEDULED.value
         
         # Create stream job
         job = StreamJob(
