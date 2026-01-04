@@ -62,6 +62,15 @@ const SILENT_ENDPOINTS = [
     "/notifications",
     // Account OAuth endpoints - 401 here means YouTube token expired, not app session
     "/accounts/", // Covers /accounts/{id}/refresh-token, /accounts/{id}/sync, etc.
+    // Billing endpoints - handled gracefully with fallback data
+    "/billing/subscriptions",
+    "/billing/plans",
+    "/billing/usage",
+    "/billing/invoices",
+    "/billing/payment-methods",
+    "/billing/dashboard",
+    "/payments/gateways",
+    "/payments/history",
 ]
 
 // Endpoints where 401 should NOT trigger logout (YouTube OAuth errors)
