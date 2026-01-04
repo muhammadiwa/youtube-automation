@@ -218,15 +218,58 @@ async def get_views_timeseries(
             # Put current total at today's date
             views_by_date[end] = total_views
     
-    # Convert to time series format
+    # Convert to time series format based on granularity
     result = []
-    current_date = start
-    while current_date <= end:
-        result.append(TimeSeriesDataPoint(
-            date=current_date.isoformat(),
-            value=views_by_date.get(current_date, 0),
-        ))
-        current_date += timedelta(days=1)
+    
+    if granularity == "month":
+        # Aggregate by month
+        from collections import defaultdict
+        monthly_data: dict[str, int] = defaultdict(int)
+        for d, value in views_by_date.items():
+            month_key = d.replace(day=1).isoformat()
+            monthly_data[month_key] += value
+        
+        # Generate monthly points
+        current = start.replace(day=1)
+        end_month = end.replace(day=1)
+        while current <= end_month:
+            result.append(TimeSeriesDataPoint(
+                date=current.isoformat(),
+                value=monthly_data.get(current.isoformat(), 0),
+            ))
+            # Move to next month
+            if current.month == 12:
+                current = current.replace(year=current.year + 1, month=1)
+            else:
+                current = current.replace(month=current.month + 1)
+    
+    elif granularity == "week":
+        # Aggregate by week (starting Monday)
+        from collections import defaultdict
+        weekly_data: dict[str, int] = defaultdict(int)
+        for d, value in views_by_date.items():
+            # Get Monday of the week
+            week_start = d - timedelta(days=d.weekday())
+            weekly_data[week_start.isoformat()] += value
+        
+        # Generate weekly points
+        current = start - timedelta(days=start.weekday())  # Start from Monday
+        while current <= end:
+            result.append(TimeSeriesDataPoint(
+                date=current.isoformat(),
+                value=weekly_data.get(current.isoformat(), 0),
+            ))
+            current += timedelta(days=7)
+    
+    else:
+        # Daily granularity
+        current_date = start
+        while current_date <= end:
+            result.append(TimeSeriesDataPoint(
+                date=current_date.isoformat(),
+                value=views_by_date.get(current_date, 0),
+            ))
+            current_date += timedelta(days=1)
     
     return result
 
@@ -301,15 +344,58 @@ async def get_subscribers_timeseries(
             # Put current total at today's date
             subscribers_by_date[end] = total_subscribers
     
-    # Convert to time series format
+    # Convert to time series format based on granularity
     result = []
-    current_date = start
-    while current_date <= end:
-        result.append(TimeSeriesDataPoint(
-            date=current_date.isoformat(),
-            value=subscribers_by_date.get(current_date, 0),
-        ))
-        current_date += timedelta(days=1)
+    
+    if granularity == "month":
+        # Aggregate by month
+        from collections import defaultdict
+        monthly_data: dict[str, int] = defaultdict(int)
+        for d, value in subscribers_by_date.items():
+            month_key = d.replace(day=1).isoformat()
+            monthly_data[month_key] = max(monthly_data[month_key], value)  # Use max for subscribers (cumulative)
+        
+        # Generate monthly points
+        current = start.replace(day=1)
+        end_month = end.replace(day=1)
+        while current <= end_month:
+            result.append(TimeSeriesDataPoint(
+                date=current.isoformat(),
+                value=monthly_data.get(current.isoformat(), 0),
+            ))
+            # Move to next month
+            if current.month == 12:
+                current = current.replace(year=current.year + 1, month=1)
+            else:
+                current = current.replace(month=current.month + 1)
+    
+    elif granularity == "week":
+        # Aggregate by week (starting Monday)
+        from collections import defaultdict
+        weekly_data: dict[str, int] = defaultdict(int)
+        for d, value in subscribers_by_date.items():
+            # Get Monday of the week
+            week_start = d - timedelta(days=d.weekday())
+            weekly_data[week_start.isoformat()] = max(weekly_data[week_start.isoformat()], value)
+        
+        # Generate weekly points
+        current = start - timedelta(days=start.weekday())  # Start from Monday
+        while current <= end:
+            result.append(TimeSeriesDataPoint(
+                date=current.isoformat(),
+                value=weekly_data.get(current.isoformat(), 0),
+            ))
+            current += timedelta(days=7)
+    
+    else:
+        # Daily granularity
+        current_date = start
+        while current_date <= end:
+            result.append(TimeSeriesDataPoint(
+                date=current_date.isoformat(),
+                value=subscribers_by_date.get(current_date, 0),
+            ))
+            current_date += timedelta(days=1)
     
     return result
 

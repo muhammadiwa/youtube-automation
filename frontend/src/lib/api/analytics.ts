@@ -283,66 +283,9 @@ export const aiInsightsApi = {
         try {
             return await apiClient.get("/analytics/ai-insights", params)
         } catch (error) {
-            // Return mock insights for demo
-            return [
-                {
-                    id: "1",
-                    type: "growth",
-                    title: "Shorts Performing Well",
-                    description: "Your shorts content is getting 40% more engagement than long-form videos. Consider increasing shorts production to capitalize on this trend.",
-                    metric: "engagement",
-                    change_percentage: 40,
-                    action_url: "/dashboard/videos?type=shorts",
-                    action_label: "View Shorts",
-                    priority: "high",
-                    created_at: new Date().toISOString(),
-                },
-                {
-                    id: "2",
-                    type: "optimization",
-                    title: "Best Upload Time",
-                    description: "Videos uploaded between 2-4 PM get 25% more views in the first 24 hours. Schedule your next uploads during this window.",
-                    metric: "views",
-                    change_percentage: 25,
-                    action_url: "/dashboard/videos/upload",
-                    action_label: "Schedule Upload",
-                    priority: "medium",
-                    created_at: new Date().toISOString(),
-                },
-                {
-                    id: "3",
-                    type: "trend",
-                    title: "Weekend Audience Peak",
-                    description: "Your audience is most active on Saturday mornings. Consider scheduling more content for this time slot.",
-                    metric: "audience",
-                    action_url: "/dashboard/streams/create",
-                    action_label: "Schedule Stream",
-                    priority: "medium",
-                    created_at: new Date().toISOString(),
-                },
-                {
-                    id: "4",
-                    type: "warning",
-                    title: "Declining CTR",
-                    description: "Click-through rate has dropped 15% this month. Consider A/B testing new thumbnail styles to improve performance.",
-                    metric: "ctr",
-                    change_percentage: -15,
-                    action_url: "/dashboard/videos",
-                    action_label: "Update Thumbnails",
-                    priority: "high",
-                    created_at: new Date().toISOString(),
-                },
-                {
-                    id: "5",
-                    type: "recommendation",
-                    title: "Trending Topic Opportunity",
-                    description: "Topics related to 'AI tools' are trending in your niche. Creating content around this could boost discoverability.",
-                    action_url: "/dashboard/videos/upload",
-                    action_label: "Create Video",
-                    priority: "low",
-                    created_at: new Date().toISOString(),
-                },
-            ]
+            // Return empty array - no mock data
+            console.error("Failed to fetch AI insights:", error)
+            return []
         }
     },
 

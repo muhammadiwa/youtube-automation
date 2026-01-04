@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useParams } from "next/navigation";
 import { DashboardLayout } from "@/components/dashboard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,7 +26,6 @@ import {
     Clock,
     TrendingUp,
     Calendar,
-    Download,
     Play,
     Globe,
     ExternalLink,
@@ -55,6 +54,37 @@ import { YouTubeAccount } from "@/types";
 import { useToast } from "@/hooks/use-toast";
 
 type Period = "7d" | "30d" | "90d" | "1y";
+
+// Helper function to calculate date range from period
+function getDateRange(period: Period): { start_date: string; end_date: string; startLabel: string; endLabel: string } {
+    const end = new Date();
+    const start = new Date();
+
+    switch (period) {
+        case "7d":
+            start.setDate(end.getDate() - 7);
+            break;
+        case "30d":
+            start.setDate(end.getDate() - 30);
+            break;
+        case "90d":
+            start.setDate(end.getDate() - 90);
+            break;
+        case "1y":
+            start.setFullYear(end.getFullYear() - 1);
+            break;
+    }
+
+    const formatDate = (d: Date) => d.toISOString().split('T')[0];
+    const formatLabel = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+    return {
+        start_date: formatDate(start),
+        end_date: formatDate(end),
+        startLabel: formatLabel(start),
+        endLabel: formatLabel(end),
+    };
+}
 
 // Traffic source colors
 const TRAFFIC_SOURCE_COLORS: Record<string, string> = {
@@ -99,19 +129,31 @@ export default function ChannelAnalyticsPage() {
         loadData();
     }, [accountId, period]);
 
+    // Calculate date range based on period
+    const dateRange = useMemo(() => getDateRange(period), [period]);
+
     const loadData = async () => {
         setLoading(true);
         try {
+            // Calculate granularity based on period for better chart display
+            // 7d = daily (7 points), 30d = daily (30 points), 90d = weekly (~13 points), 1y = monthly (12 points)
+            const granularity = period === "7d" ? "day" : period === "30d" ? "day" : period === "90d" ? "week" : "month";
+            const { start_date, end_date } = getDateRange(period);
+
             const [accountData, channelMetrics, views, subscribers] = await Promise.all([
                 accountsApi.getAccount(accountId),
                 analyticsApi.getChannelDetailedMetrics(accountId, { period }).catch(() => null),
                 analyticsApi.getViewsTimeSeries({
                     account_id: accountId,
-                    granularity: period === "7d" ? "day" : period === "30d" ? "day" : "week",
+                    start_date,
+                    end_date,
+                    granularity,
                 }),
                 analyticsApi.getSubscribersTimeSeries({
                     account_id: accountId,
-                    granularity: period === "7d" ? "day" : period === "30d" ? "day" : "week",
+                    start_date,
+                    end_date,
+                    granularity,
                 }),
             ]);
 
@@ -219,11 +261,40 @@ export default function ChannelAnalyticsPage() {
     };
 
     // Combine data for charts
-    const chartData = viewsData.map((v, i) => ({
-        date: new Date(v.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-        views: v.value,
-        subscribers: subscribersData[i]?.value || 0,
-    }));
+    const chartData = viewsData.map((v, i) => {
+        const dateObj = new Date(v.date);
+        let dateLabel: string;
+
+        // Format date label based on period
+        if (period === "1y") {
+            // Monthly: "Jan", "Feb", etc.
+            dateLabel = dateObj.toLocaleDateString("en-US", { month: "short" });
+        } else if (period === "90d") {
+            // Weekly: "Jan 1", "Jan 8", etc.
+            dateLabel = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+        } else {
+            // Daily: "Jan 1", "Jan 2", etc.
+            dateLabel = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+        }
+
+        return {
+            date: dateLabel,
+            views: v.value,
+            subscribers: subscribersData[i]?.value || 0,
+        };
+    });
+
+    // Calculate XAxis interval based on data points for clean display
+    const getXAxisInterval = () => {
+        const dataLength = chartData.length;
+        if (dataLength <= 7) return 0; // Show all
+        if (dataLength <= 14) return 1; // Show every 2nd
+        if (dataLength <= 31) return 4; // Show every 5th (for 30 days)
+        return Math.floor(dataLength / 6); // Show ~6 labels
+    };
+
+    // Format date range for display
+    const dateRangeLabel = `${dateRange.startLabel} - ${dateRange.endLabel}`;
 
     // Transform traffic sources for pie chart
     const trafficSourcesData = metrics?.traffic_sources
@@ -346,16 +417,6 @@ export default function ChannelAnalyticsPage() {
                                 <SelectItem value="1y">Last year</SelectItem>
                             </SelectContent>
                         </Select>
-
-                        {/* Export Buttons */}
-                        <Button variant="outline" onClick={() => handleExport("csv")}>
-                            <Download className="h-4 w-4 mr-2" />
-                            CSV
-                        </Button>
-                        <Button variant="outline" onClick={() => handleExport("pdf")}>
-                            <Download className="h-4 w-4 mr-2" />
-                            PDF
-                        </Button>
                     </div>
                 </div>
 
@@ -441,9 +502,14 @@ export default function ChannelAnalyticsPage() {
                     {/* Views Chart */}
                     <Card className="border-0 bg-card shadow-lg">
                         <CardHeader className="pb-4">
-                            <div className="flex items-center gap-2">
-                                <Eye className="h-5 w-5 text-blue-500" />
-                                <CardTitle className="text-lg">Views</CardTitle>
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                    <Eye className="h-5 w-5 text-blue-500" />
+                                    <CardTitle className="text-lg">Views</CardTitle>
+                                </div>
+                                <span className="text-sm text-muted-foreground">
+                                    {dateRangeLabel}
+                                </span>
                             </div>
                         </CardHeader>
                         <CardContent>
@@ -456,7 +522,7 @@ export default function ChannelAnalyticsPage() {
                                         </linearGradient>
                                     </defs>
                                     <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#374151" : "#e5e7eb"} vertical={false} />
-                                    <XAxis dataKey="date" stroke={isDark ? "#6b7280" : "#9ca3af"} fontSize={12} tickLine={false} axisLine={false} />
+                                    <XAxis dataKey="date" stroke={isDark ? "#6b7280" : "#9ca3af"} fontSize={12} tickLine={false} axisLine={false} interval={getXAxisInterval()} />
                                     <YAxis stroke={isDark ? "#6b7280" : "#9ca3af"} fontSize={12} tickLine={false} axisLine={false} tickFormatter={(v) => formatNumber(v)} />
                                     <Tooltip content={<CustomTooltip />} />
                                     <Area type="monotone" dataKey="views" stroke="#3b82f6" strokeWidth={2} fill="url(#viewsGradientChannel)" />
@@ -468,9 +534,14 @@ export default function ChannelAnalyticsPage() {
                     {/* Subscribers Chart */}
                     <Card className="border-0 bg-card shadow-lg">
                         <CardHeader className="pb-4">
-                            <div className="flex items-center gap-2">
-                                <Users className="h-5 w-5 text-green-500" />
-                                <CardTitle className="text-lg">Subscribers</CardTitle>
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                    <Users className="h-5 w-5 text-green-500" />
+                                    <CardTitle className="text-lg">Subscribers</CardTitle>
+                                </div>
+                                <span className="text-sm text-muted-foreground">
+                                    {dateRangeLabel}
+                                </span>
                             </div>
                         </CardHeader>
                         <CardContent>
@@ -483,7 +554,7 @@ export default function ChannelAnalyticsPage() {
                                         </linearGradient>
                                     </defs>
                                     <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#374151" : "#e5e7eb"} vertical={false} />
-                                    <XAxis dataKey="date" stroke={isDark ? "#6b7280" : "#9ca3af"} fontSize={12} tickLine={false} axisLine={false} />
+                                    <XAxis dataKey="date" stroke={isDark ? "#6b7280" : "#9ca3af"} fontSize={12} tickLine={false} axisLine={false} interval={getXAxisInterval()} />
                                     <YAxis stroke={isDark ? "#6b7280" : "#9ca3af"} fontSize={12} tickLine={false} axisLine={false} tickFormatter={(v) => formatNumber(v)} />
                                     <Tooltip content={<CustomTooltip />} />
                                     <Area type="monotone" dataKey="subscribers" stroke="#10b981" strokeWidth={2} fill="url(#subscribersGradientChannel)" />
