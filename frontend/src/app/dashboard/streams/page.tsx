@@ -5,8 +5,6 @@ import { useRouter } from "next/navigation"
 import {
     Search,
     Plus,
-    Play,
-    Video,
     BarChart3,
     History,
 } from "lucide-react"
@@ -21,13 +19,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select"
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+
 import { accountsApi } from "@/lib/api/accounts"
 import { VideoToLiveList, ResourceDashboardCard } from "@/components/streams"
 import type { YouTubeAccount } from "@/types"
@@ -80,27 +72,13 @@ export default function StreamsPage() {
                             <BarChart3 className="mr-2 h-4 w-4" />
                             Analytics
                         </Button>
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button
-                                    className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white shadow-lg shadow-red-500/25"
-                                >
-                                    <Plus className="mr-2 h-4 w-4" />
-                                    New Stream
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => router.push("/dashboard/streams/create-video-live")}>
-                                    <Video className="mr-2 h-4 w-4" />
-                                    Video-to-Live (24/7)
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem onClick={() => router.push("/dashboard/streams/create-playlist")}>
-                                    <Play className="mr-2 h-4 w-4" />
-                                    Playlist Stream
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
+                        <Button
+                            className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white shadow-lg shadow-red-500/25"
+                            onClick={() => router.push("/dashboard/streams/create-video-live")}
+                        >
+                            <Plus className="mr-2 h-4 w-4" />
+                            New Stream
+                        </Button>
                     </div>
                 </div>
 

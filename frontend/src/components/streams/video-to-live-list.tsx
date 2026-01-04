@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react"
 import { useRouter } from "next/navigation"
-import { Search, Plus, Video, RefreshCw } from "lucide-react"
+import { Search, Video, RefreshCw } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -164,14 +164,6 @@ export function VideoToLiveList({ accountId, showResourceDashboard = true }: Vid
                             >
                                 <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
                             </Button>
-
-                            <Button
-                                className="bg-gradient-to-r from-purple-500 to-blue-600 hover:from-purple-600 hover:to-blue-700 text-white"
-                                onClick={() => router.push("/dashboard/streams/create-video-live")}
-                            >
-                                <Plus className="mr-2 h-4 w-4" />
-                                New Video-to-Live
-                            </Button>
                         </div>
                     </div>
                 </CardContent>
@@ -183,18 +175,11 @@ export function VideoToLiveList({ accountId, showResourceDashboard = true }: Vid
                     <CardContent className="py-12 text-center">
                         <Video className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
                         <h3 className="text-lg font-semibold mb-2">No Video-to-Live streams found</h3>
-                        <p className="text-muted-foreground mb-4">
+                        <p className="text-muted-foreground">
                             {searchQuery || statusFilter !== "all"
                                 ? "Try adjusting your filters"
                                 : "Stream pre-recorded videos as live content 24/7"}
                         </p>
-                        <Button
-                            className="bg-gradient-to-r from-purple-500 to-blue-600 hover:from-purple-600 hover:to-blue-700 text-white"
-                            onClick={() => router.push("/dashboard/streams/create-video-live")}
-                        >
-                            <Plus className="mr-2 h-4 w-4" />
-                            Create Video-to-Live Stream
-                        </Button>
                     </CardContent>
                 </Card>
             ) : (
