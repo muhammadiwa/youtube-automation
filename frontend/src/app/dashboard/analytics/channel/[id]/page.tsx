@@ -122,6 +122,7 @@ export default function ChannelAnalyticsPage() {
     const [metrics, setMetrics] = useState<ChannelDetailedMetrics | null>(null);
     const [viewsData, setViewsData] = useState<TimeSeriesData[]>([]);
     const [subscribersData, setSubscribersData] = useState<TimeSeriesData[]>([]);
+    const [topVideos, setTopVideos] = useState<TopVideoData[]>([]);
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
 
@@ -140,7 +141,7 @@ export default function ChannelAnalyticsPage() {
             const granularity = period === "7d" ? "day" : period === "30d" ? "day" : period === "90d" ? "week" : "month";
             const { start_date, end_date } = getDateRange(period);
 
-            const [accountData, channelMetrics, views, subscribers] = await Promise.all([
+            const [accountData, channelMetrics, views, subscribers, topVideosResponse] = await Promise.all([
                 accountsApi.getAccount(accountId),
                 analyticsApi.getChannelDetailedMetrics(accountId, { period }).catch(() => null),
                 analyticsApi.getViewsTimeSeries({
@@ -155,9 +156,12 @@ export default function ChannelAnalyticsPage() {
                     end_date,
                     granularity,
                 }),
+                // Fetch top videos directly from YouTube Data API
+                analyticsApi.getChannelTopVideos(accountId, { limit: 10 }),
             ]);
 
             setAccount(accountData);
+            setTopVideos(topVideosResponse.videos || []);
 
             // If no metrics from API, use account data as fallback
             if (channelMetrics) {
@@ -321,8 +325,7 @@ export default function ChannelAnalyticsPage() {
         }))
         : [];
 
-    // Top videos from API
-    const topVideos: TopVideoData[] = metrics?.top_videos || [];
+    // topVideos is now loaded from state via getChannelTopVideos API
 
     const CustomTooltip = ({ active, payload, label }: any) => {
         if (active && payload && payload.length) {
@@ -564,68 +567,64 @@ export default function ChannelAnalyticsPage() {
                     </Card>
                 </div>
 
-                {/* Traffic Sources & Demographics */}
-                <div className="grid gap-6 lg:grid-cols-2">
-                    {/* Traffic Sources Pie Chart */}
-                    <Card className="border-0 bg-card shadow-lg">
-                        <CardHeader className="pb-4">
-                            <div className="flex items-center gap-2">
-                                <Globe className="h-5 w-5 text-purple-500" />
-                                <CardTitle className="text-lg">Traffic Sources</CardTitle>
-                            </div>
-                        </CardHeader>
-                        <CardContent>
-                            {trafficSourcesWithPercent.length > 0 ? (
-                                <div className="flex items-center gap-8">
-                                    <ResponsiveContainer width="50%" height={200}>
-                                        <PieChart>
-                                            <Pie
-                                                data={trafficSourcesWithPercent}
-                                                cx="50%"
-                                                cy="50%"
-                                                innerRadius={50}
-                                                outerRadius={80}
-                                                paddingAngle={2}
-                                                dataKey="value"
-                                            >
-                                                {trafficSourcesWithPercent.map((entry, index) => (
-                                                    <Cell key={`cell-${index}`} fill={entry.color} />
-                                                ))}
-                                            </Pie>
-                                            <Tooltip content={<PieTooltip />} />
-                                        </PieChart>
-                                    </ResponsiveContainer>
-                                    <div className="flex-1 space-y-2">
-                                        {trafficSourcesWithPercent.slice(0, 5).map((source) => (
-                                            <div key={source.name} className="flex items-center justify-between">
-                                                <div className="flex items-center gap-2">
-                                                    <div className="h-3 w-3 rounded-full" style={{ backgroundColor: source.color }} />
-                                                    <span className="text-sm">{source.name}</span>
-                                                </div>
-                                                <span className="text-sm font-medium">{source.percent}%</span>
-                                            </div>
-                                        ))}
+                {/* Traffic Sources & Demographics - Only show if data available */}
+                {(trafficSourcesWithPercent.length > 0 || demographicsData.length > 0) && (
+                    <div className="grid gap-6 lg:grid-cols-2">
+                        {/* Traffic Sources Pie Chart */}
+                        {trafficSourcesWithPercent.length > 0 && (
+                            <Card className="border-0 bg-card shadow-lg">
+                                <CardHeader className="pb-4">
+                                    <div className="flex items-center gap-2">
+                                        <Globe className="h-5 w-5 text-purple-500" />
+                                        <CardTitle className="text-lg">Traffic Sources</CardTitle>
                                     </div>
-                                </div>
-                            ) : (
-                                <div className="flex items-center justify-center h-[200px] text-muted-foreground">
-                                    No traffic source data available
-                                </div>
-                            )}
-                        </CardContent>
-                    </Card>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="flex items-center gap-8">
+                                        <ResponsiveContainer width="50%" height={200}>
+                                            <PieChart>
+                                                <Pie
+                                                    data={trafficSourcesWithPercent}
+                                                    cx="50%"
+                                                    cy="50%"
+                                                    innerRadius={50}
+                                                    outerRadius={80}
+                                                    paddingAngle={2}
+                                                    dataKey="value"
+                                                >
+                                                    {trafficSourcesWithPercent.map((entry, index) => (
+                                                        <Cell key={`cell-${index}`} fill={entry.color} />
+                                                    ))}
+                                                </Pie>
+                                                <Tooltip content={<PieTooltip />} />
+                                            </PieChart>
+                                        </ResponsiveContainer>
+                                        <div className="flex-1 space-y-2">
+                                            {trafficSourcesWithPercent.slice(0, 5).map((source) => (
+                                                <div key={source.name} className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="h-3 w-3 rounded-full" style={{ backgroundColor: source.color }} />
+                                                        <span className="text-sm">{source.name}</span>
+                                                    </div>
+                                                    <span className="text-sm font-medium">{source.percent}%</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        )}
 
-                    {/* Demographics Bar Chart */}
-                    <Card className="border-0 bg-card shadow-lg">
-                        <CardHeader className="pb-4">
-                            <div className="flex items-center gap-2">
-                                <Users className="h-5 w-5 text-amber-500" />
-                                <CardTitle className="text-lg">Demographics</CardTitle>
-                            </div>
-                        </CardHeader>
-                        <CardContent>
-                            {demographicsData.length > 0 ? (
-                                <>
+                        {/* Demographics Bar Chart */}
+                        {demographicsData.length > 0 && (
+                            <Card className="border-0 bg-card shadow-lg">
+                                <CardHeader className="pb-4">
+                                    <div className="flex items-center gap-2">
+                                        <Users className="h-5 w-5 text-amber-500" />
+                                        <CardTitle className="text-lg">Demographics</CardTitle>
+                                    </div>
+                                </CardHeader>
+                                <CardContent>
                                     <ResponsiveContainer width="100%" height={200}>
                                         <BarChart data={demographicsData} layout="vertical">
                                             <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#374151" : "#e5e7eb"} horizontal={false} />
@@ -646,15 +645,11 @@ export default function ChannelAnalyticsPage() {
                                             <span className="text-sm text-muted-foreground">Female</span>
                                         </div>
                                     </div>
-                                </>
-                            ) : (
-                                <div className="flex items-center justify-center h-[200px] text-muted-foreground">
-                                    No demographics data available
-                                </div>
-                            )}
-                        </CardContent>
-                    </Card>
-                </div>
+                                </CardContent>
+                            </Card>
+                        )}
+                    </div>
+                )}
 
                 {/* Top Videos Table */}
                 <Card className="border-0 bg-card shadow-lg">
@@ -664,12 +659,16 @@ export default function ChannelAnalyticsPage() {
                                 <Play className="h-5 w-5 text-red-500" />
                                 <CardTitle className="text-lg">Top Videos</CardTitle>
                             </div>
-                            <Link href={`/dashboard/videos?account=${accountId}`}>
+                            <a
+                                href={`https://studio.youtube.com/channel/${account?.channelId}/analytics/tab-reach_viewers`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                            >
                                 <Button variant="ghost" size="sm">
-                                    View All
+                                    View in YouTube Studio
                                     <ExternalLink className="h-4 w-4 ml-2" />
                                 </Button>
-                            </Link>
+                            </a>
                         </div>
                     </CardHeader>
                     <CardContent>
@@ -681,35 +680,56 @@ export default function ChannelAnalyticsPage() {
                                         <TableHead className="text-right">Views</TableHead>
                                         <TableHead className="text-right">Likes</TableHead>
                                         <TableHead className="text-right">Comments</TableHead>
-                                        <TableHead className="text-right">Avg. Duration</TableHead>
-                                        <TableHead className="text-right">Watch Time</TableHead>
+                                        <TableHead className="text-right">Duration</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {topVideos.map((video) => (
                                         <TableRow key={video.video_id}>
-                                            <TableCell className="font-medium max-w-[300px] truncate">
-                                                {video.title}
+                                            <TableCell>
+                                                <a
+                                                    href={`https://www.youtube.com/watch?v=${video.video_id}`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="flex items-center gap-3 hover:opacity-80 transition-opacity"
+                                                >
+                                                    {video.thumbnail_url && (
+                                                        <img
+                                                            src={video.thumbnail_url}
+                                                            alt={video.title}
+                                                            className="w-20 h-12 object-cover rounded"
+                                                        />
+                                                    )}
+                                                    <span className="font-medium max-w-[250px] truncate hover:text-primary">
+                                                        {video.title}
+                                                    </span>
+                                                </a>
                                             </TableCell>
                                             <TableCell className="text-right">{formatNumber(video.views)}</TableCell>
                                             <TableCell className="text-right">{formatNumber(video.likes)}</TableCell>
                                             <TableCell className="text-right">{formatNumber(video.comments)}</TableCell>
                                             <TableCell className="text-right">
-                                                {Math.floor(video.average_view_duration / 60)}:{Math.floor(video.average_view_duration % 60).toString().padStart(2, "0")}
+                                                {video.duration_seconds
+                                                    ? `${Math.floor(video.duration_seconds / 60)}:${(video.duration_seconds % 60).toString().padStart(2, "0")}`
+                                                    : "-"
+                                                }
                                             </TableCell>
-                                            <TableCell className="text-right">{formatWatchTime(video.watch_time_minutes)}</TableCell>
                                         </TableRow>
                                     ))}
                                 </TableBody>
                             </Table>
                         ) : (
-                            <div className="flex items-center justify-center h-[200px] text-muted-foreground">
-                                No video data available. Click Sync to fetch data from YouTube.
+                            <div className="flex flex-col items-center justify-center h-[200px] text-center">
+                                <Play className="h-8 w-8 text-muted-foreground/50 mb-2" />
+                                <p className="text-muted-foreground text-sm">No videos found</p>
+                                <p className="text-muted-foreground/70 text-xs mt-1">
+                                    This channel doesn't have any public videos yet
+                                </p>
                             </div>
                         )}
                     </CardContent>
                 </Card>
-            </div>
-        </DashboardLayout>
+            </div >
+        </DashboardLayout >
     );
 }

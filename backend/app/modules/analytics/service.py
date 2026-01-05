@@ -174,12 +174,17 @@ class AnalyticsService:
 
         # Calculate totals and changes
         total_views = sum(s.total_views for s in snapshots)
+        total_likes = sum(s.total_likes for s in snapshots)
+        total_comments = sum(s.total_comments for s in snapshots)
         subscriber_change = sum(s.subscriber_change for s in snapshots)
         views_change = sum(s.views_change for s in snapshots)
         watch_time = sum(s.watch_time_minutes for s in snapshots)
+        
+        # Calculate engagement rate from totals (not averaging percentages)
+        # Engagement = (likes + comments) / views * 100
         avg_engagement = (
-            sum(s.engagement_rate for s in snapshots) / len(snapshots)
-            if snapshots else 0.0
+            ((total_likes + total_comments) / total_views * 100)
+            if total_views > 0 else 0.0
         )
 
         return AccountMetrics(
@@ -398,6 +403,9 @@ class AnalyticsService:
         Returns:
             list[AIInsight]: Generated insights
         """
+        from app.core.datetime_utils import utcnow
+        import hashlib
+        
         # Get metrics for the period
         current_metrics = await self.snapshot_repo.get_aggregated_metrics(
             start_date, end_date, account_ids
@@ -412,6 +420,12 @@ class AnalyticsService:
         )
 
         insights = []
+        now = utcnow()
+
+        # Helper to generate unique ID
+        def generate_id(category: str, metric: str) -> str:
+            data = f"{category}-{metric}-{start_date}-{end_date}"
+            return hashlib.md5(data.encode()).hexdigest()[:12]
 
         # Subscriber growth insight
         sub_change_pct = calculate_percent_change(
@@ -419,8 +433,11 @@ class AnalyticsService:
             comparison_metrics["total_subscribers"],
         )
         if abs(sub_change_pct) > 5:
-            direction = "increased" if sub_change_pct > 0 else "decreased"
+            is_positive = sub_change_pct > 0
+            direction = "increased" if is_positive else "decreased"
             insights.append(AIInsight(
+                id=generate_id("growth", "subscribers"),
+                type="growth" if is_positive else "warning",
                 category="growth",
                 title=f"Subscriber Growth {direction.title()}",
                 description=(
@@ -429,12 +446,16 @@ class AnalyticsService:
                 ),
                 recommendation=(
                     "Continue creating engaging content to maintain growth momentum."
-                    if sub_change_pct > 0 else
+                    if is_positive else
                     "Consider analyzing your recent content to identify what resonates with your audience."
                 ),
                 confidence=0.85,
-                metric_change=sub_change_pct,
+                metric="subscribers",
                 metric_name="subscribers",
+                change_percentage=sub_change_pct,
+                metric_change=sub_change_pct,
+                priority="high" if abs(sub_change_pct) > 20 else "medium",
+                created_at=now,
             ))
 
         # Views insight
@@ -443,8 +464,11 @@ class AnalyticsService:
             comparison_metrics["total_views"],
         )
         if abs(views_change_pct) > 10:
-            direction = "increased" if views_change_pct > 0 else "decreased"
+            is_positive = views_change_pct > 0
+            direction = "increased" if is_positive else "decreased"
             insights.append(AIInsight(
+                id=generate_id("engagement", "views"),
+                type="trend" if is_positive else "warning",
                 category="engagement",
                 title=f"View Count {direction.title()}",
                 description=(
@@ -453,12 +477,16 @@ class AnalyticsService:
                 ),
                 recommendation=(
                     "Your content is gaining traction. Consider posting more frequently."
-                    if views_change_pct > 0 else
+                    if is_positive else
                     "Review your thumbnails and titles to improve click-through rates."
                 ),
                 confidence=0.80,
-                metric_change=views_change_pct,
+                metric="views",
                 metric_name="views",
+                change_percentage=views_change_pct,
+                metric_change=views_change_pct,
+                priority="high" if abs(views_change_pct) > 30 else "medium",
+                created_at=now,
             ))
 
         # Engagement insight
@@ -468,8 +496,11 @@ class AnalyticsService:
                 comparison_metrics["average_engagement_rate"]
             )
             if abs(engagement_change) > 0.5:
-                direction = "improved" if engagement_change > 0 else "declined"
+                is_positive = engagement_change > 0
+                direction = "improved" if is_positive else "declined"
                 insights.append(AIInsight(
+                    id=generate_id("engagement", "engagement_rate"),
+                    type="optimization" if is_positive else "recommendation",
                     category="engagement",
                     title=f"Engagement Rate {direction.title()}",
                     description=(
@@ -478,12 +509,16 @@ class AnalyticsService:
                     ),
                     recommendation=(
                         "Your audience is more engaged. Keep up the interactive content!"
-                        if engagement_change > 0 else
+                        if is_positive else
                         "Try adding more calls-to-action and engaging with comments."
                     ),
                     confidence=0.70,
-                    metric_change=engagement_change,
+                    metric="engagement_rate",
                     metric_name="engagement_rate",
+                    change_percentage=engagement_change,
+                    metric_change=engagement_change,
+                    priority="medium",
+                    created_at=now,
                 ))
 
         return insights
@@ -539,7 +574,7 @@ class AnalyticsService:
         Returns:
             dict: Detailed metrics including traffic sources, demographics, top videos
         """
-        # Get latest snapshot with detailed data
+        # Get all snapshots in the date range
         snapshots = await self.snapshot_repo.get_by_account_date_range(
             account_id, start_date, end_date
         )
@@ -551,11 +586,72 @@ class AnalyticsService:
                 "top_videos": [],
             }
 
-        # Get the most recent snapshot with detailed data
-        latest = snapshots[-1]
+        # Aggregate traffic sources from all snapshots
+        aggregated_traffic: dict[str, dict] = {}
+        for snapshot in snapshots:
+            if snapshot.traffic_sources:
+                for source, data in snapshot.traffic_sources.items():
+                    if source not in aggregated_traffic:
+                        aggregated_traffic[source] = {"views": 0, "watch_time_minutes": 0}
+                    aggregated_traffic[source]["views"] += data.get("views", 0)
+                    aggregated_traffic[source]["watch_time_minutes"] += data.get("watch_time_minutes", 0)
+
+        # Get the most recent demographics (demographics don't aggregate well)
+        latest_demographics = {}
+        for snapshot in reversed(snapshots):
+            if snapshot.demographics:
+                latest_demographics = snapshot.demographics
+                break
+
+        # Aggregate top videos - combine and sort by views
+        video_map: dict[str, dict] = {}
+        for snapshot in snapshots:
+            if snapshot.top_videos:
+                videos = snapshot.top_videos if isinstance(snapshot.top_videos, list) else []
+                for video in videos:
+                    video_id = video.get("video_id")
+                    if video_id:
+                        if video_id not in video_map:
+                            video_map[video_id] = {
+                                "video_id": video_id,
+                                "title": video.get("title", "Unknown"),
+                                "views": 0,
+                                "watch_time_minutes": 0,
+                                "average_view_duration": 0,
+                                "likes": 0,
+                                "comments": 0,
+                            }
+                        # Use max values for cumulative metrics
+                        video_map[video_id]["views"] = max(
+                            video_map[video_id]["views"], 
+                            video.get("views", 0)
+                        )
+                        video_map[video_id]["watch_time_minutes"] = max(
+                            video_map[video_id]["watch_time_minutes"],
+                            video.get("watch_time_minutes", 0)
+                        )
+                        video_map[video_id]["average_view_duration"] = video.get("average_view_duration", 0)
+                        video_map[video_id]["likes"] = max(
+                            video_map[video_id]["likes"],
+                            video.get("likes", 0)
+                        )
+                        video_map[video_id]["comments"] = max(
+                            video_map[video_id]["comments"],
+                            video.get("comments", 0)
+                        )
+                        # Keep the title from the most recent snapshot
+                        if video.get("title"):
+                            video_map[video_id]["title"] = video["title"]
+
+        # Sort top videos by views and take top 10
+        top_videos = sorted(
+            video_map.values(),
+            key=lambda x: x["views"],
+            reverse=True
+        )[:10]
 
         return {
-            "traffic_sources": latest.traffic_sources or {},
-            "demographics": latest.demographics or {},
-            "top_videos": latest.top_videos or [],
+            "traffic_sources": aggregated_traffic,
+            "demographics": latest_demographics,
+            "top_videos": top_videos,
         }

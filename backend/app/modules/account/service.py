@@ -10,6 +10,7 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.account.models import AccountStatus, YouTubeAccount
 from app.modules.account.oauth import OAuthError, OAuthStateStore, YouTubeOAuthClient
 from app.modules.account.repository import YouTubeAccountRepository

@@ -265,13 +265,6 @@ export default function AnalyticsPage() {
         return null;
     };
 
-    const periodLabels: Record<Period, string> = {
-        "7d": "Last 7 days",
-        "30d": "Last 30 days",
-        "90d": "Last 90 days",
-        "1y": "Last year",
-    };
-
     // Format date range for display
     const dateRangeLabel = `${dateRange.startLabel} - ${dateRange.endLabel}`;
 

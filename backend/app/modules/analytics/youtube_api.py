@@ -320,6 +320,134 @@ class YouTubeAnalyticsClient:
                 for item in data.get("items", [])
             }
 
+    async def get_top_videos_simple(
+        self,
+        channel_id: str,
+        max_results: int = 10,
+    ) -> list[dict]:
+        """Fetch top videos using YouTube Data API (simpler, no Analytics API needed).
+        
+        This method uses the standard YouTube Data API which is always available
+        when an account is connected. It fetches the most viewed videos from the channel.
+        
+        Args:
+            channel_id: YouTube channel ID
+            max_results: Maximum number of videos to return (default 10)
+            
+        Returns:
+            list[dict]: Top videos with statistics
+        """
+        async with httpx.AsyncClient() as client:
+            # Step 1: Search for videos from this channel, ordered by view count
+            search_response = await client.get(
+                f"{YOUTUBE_API_BASE}/search",
+                params={
+                    "part": "snippet",
+                    "channelId": channel_id,
+                    "type": "video",
+                    "order": "viewCount",
+                    "maxResults": max_results,
+                },
+                headers=self.headers,
+                timeout=30.0,
+            )
+
+            if search_response.status_code != 200:
+                logger.warning(f"Failed to search videos for channel {channel_id}: {search_response.text}")
+                return []
+
+            search_data = search_response.json()
+            video_items = search_data.get("items", [])
+            
+            if not video_items:
+                return []
+
+            # Extract video IDs
+            video_ids = [item["id"]["videoId"] for item in video_items if item.get("id", {}).get("videoId")]
+            
+            if not video_ids:
+                return []
+
+            # Step 2: Get detailed statistics for these videos
+            videos_response = await client.get(
+                f"{YOUTUBE_API_BASE}/videos",
+                params={
+                    "part": "snippet,statistics,contentDetails",
+                    "id": ",".join(video_ids),
+                },
+                headers=self.headers,
+                timeout=30.0,
+            )
+
+            if videos_response.status_code != 200:
+                logger.warning(f"Failed to get video details: {videos_response.text}")
+                return []
+
+            videos_data = videos_response.json()
+            
+            result = []
+            for item in videos_data.get("items", []):
+                snippet = item.get("snippet", {})
+                statistics = item.get("statistics", {})
+                content_details = item.get("contentDetails", {})
+                
+                # Parse duration (ISO 8601 format like PT4M13S)
+                duration_str = content_details.get("duration", "PT0S")
+                duration_seconds = self._parse_duration(duration_str)
+                
+                result.append({
+                    "video_id": item["id"],
+                    "title": snippet.get("title", "Unknown"),
+                    "thumbnail_url": snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
+                    "published_at": snippet.get("publishedAt", ""),
+                    "views": int(statistics.get("viewCount", 0)),
+                    "likes": int(statistics.get("likeCount", 0)),
+                    "comments": int(statistics.get("commentCount", 0)),
+                    "duration_seconds": duration_seconds,
+                    # These fields are not available from Data API, set to 0
+                    "watch_time_minutes": 0,
+                    "average_view_duration": 0,
+                })
+            
+            # Sort by views (should already be sorted, but ensure)
+            result.sort(key=lambda x: x["views"], reverse=True)
+            
+            return result
+
+    def _parse_duration(self, duration_str: str) -> int:
+        """Parse ISO 8601 duration string to seconds.
+        
+        Examples: PT4M13S -> 253, PT1H2M3S -> 3723, PT30S -> 30
+        """
+        import re
+        
+        if not duration_str or duration_str == "P0D":
+            return 0
+            
+        # Remove PT prefix
+        duration_str = duration_str.replace("PT", "").replace("P", "")
+        
+        hours = 0
+        minutes = 0
+        seconds = 0
+        
+        # Extract hours
+        hour_match = re.search(r"(\d+)H", duration_str)
+        if hour_match:
+            hours = int(hour_match.group(1))
+        
+        # Extract minutes
+        min_match = re.search(r"(\d+)M", duration_str)
+        if min_match:
+            minutes = int(min_match.group(1))
+        
+        # Extract seconds
+        sec_match = re.search(r"(\d+)S", duration_str)
+        if sec_match:
+            seconds = int(sec_match.group(1))
+        
+        return hours * 3600 + minutes * 60 + seconds
+
     def _empty_analytics_response(self) -> dict:
         """Return empty analytics response structure."""
         return {

@@ -200,20 +200,37 @@ class ChannelComparisonResponse(BaseModel):
 class ReportGenerationRequest(BaseModel):
     """Request schema for generating analytics report."""
 
-    title: str = Field(..., min_length=1, max_length=255)
-    report_type: str = Field(..., pattern="^(pdf|csv)$")
-    start_date: date
-    end_date: date
+    # Support both 'name' (frontend) and 'title' (original)
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    title: Optional[str] = Field(None, min_length=1, max_length=255)
+    # Support both 'format' (frontend) and 'report_type' (original)
+    format: Optional[str] = Field(None, pattern="^(pdf|csv|json)$")
+    report_type: Optional[str] = Field(None, pattern="^(pdf|csv|json)$")
+    # Support 'type' for report period type
+    type: Optional[str] = Field(None, pattern="^(daily|weekly|monthly|custom)$")
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
     account_ids: Optional[list[uuid.UUID]] = None  # None means all accounts
+    metrics: Optional[list[str]] = None  # List of metrics to include
     include_ai_insights: bool = True
 
     @field_validator("end_date")
     @classmethod
     def validate_date_range(cls, v: date, info) -> date:
+        if v is None:
+            return v
         start = info.data.get("start_date")
         if start and v < start:
             raise ValueError("end_date must be greater than or equal to start_date")
         return v
+    
+    def get_title(self) -> str:
+        """Get title from either 'name' or 'title' field."""
+        return self.name or self.title or "Analytics Report"
+    
+    def get_report_type(self) -> str:
+        """Get report type from either 'format' or 'report_type' field."""
+        return self.format or self.report_type or "pdf"
 
 
 class AnalyticsReportResponse(BaseModel):
@@ -241,13 +258,22 @@ class AnalyticsReportResponse(BaseModel):
 class AIInsight(BaseModel):
     """AI-generated insight for analytics."""
 
-    category: str  # 'growth', 'engagement', 'revenue', 'content', 'audience'
+    id: str = ""  # Unique identifier
+    type: str  # 'growth', 'optimization', 'warning', 'trend', 'recommendation'
     title: str
     description: str
     recommendation: Optional[str] = None
+    metric: Optional[str] = None  # metric name
+    change_percentage: Optional[float] = None  # percentage change
+    action_url: Optional[str] = None
+    action_label: Optional[str] = None
+    priority: str = "medium"  # 'high', 'medium', 'low'
+    created_at: Optional[datetime] = None
+    # Keep old fields for backward compatibility
+    category: Optional[str] = None  # deprecated, use 'type' instead
     confidence: float = 0.0  # 0.0 to 1.0
-    metric_change: Optional[float] = None
-    metric_name: Optional[str] = None
+    metric_change: Optional[float] = None  # deprecated, use 'change_percentage'
+    metric_name: Optional[str] = None  # deprecated, use 'metric'
 
 
 class AIInsightsResponse(BaseModel):
