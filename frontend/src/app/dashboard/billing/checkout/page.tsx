@@ -35,6 +35,7 @@ import {
     Percent,
 } from "lucide-react"
 import billingApi, { Plan, GatewayProvider, GatewayPublicInfo, PlanTier } from "@/lib/api/billing"
+import { LegalLink } from "@/components/legal-modal"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -728,13 +729,9 @@ function CheckoutContent() {
                                     />
                                     <Label htmlFor="terms" className="text-sm text-muted-foreground cursor-pointer leading-relaxed">
                                         I agree to the{" "}
-                                        <Link href="/terms" className="text-primary underline hover:no-underline">
-                                            Terms of Service
-                                        </Link>{" "}
+                                        <LegalLink type="terms" className="text-primary underline hover:no-underline" />{" "}
                                         and{" "}
-                                        <Link href="/privacy" className="text-primary underline hover:no-underline">
-                                            Privacy Policy
-                                        </Link>
+                                        <LegalLink type="privacy" className="text-primary underline hover:no-underline" />
                                     </Label>
                                 </div>
 

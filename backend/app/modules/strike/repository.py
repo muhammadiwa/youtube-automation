@@ -286,9 +286,13 @@ class StrikeAlertRepository:
         acknowledged: Optional[bool] = None,
         limit: int = 100,
         offset: int = 0,
+        account_ids: Optional[list[uuid.UUID]] = None,
     ) -> list[StrikeAlert]:
         """Get all alerts, optionally filtered by user's accounts."""
         query = select(StrikeAlert)
+        
+        if account_ids is not None:
+            query = query.where(StrikeAlert.account_id.in_(account_ids))
         
         if acknowledged is not None:
             query = query.where(StrikeAlert.acknowledged == acknowledged)
@@ -302,9 +306,13 @@ class StrikeAlertRepository:
         self,
         user_id: Optional[uuid.UUID] = None,
         acknowledged: Optional[bool] = None,
+        account_ids: Optional[list[uuid.UUID]] = None,
     ) -> int:
         """Count all alerts."""
         query = select(func.count(StrikeAlert.id))
+        
+        if account_ids is not None:
+            query = query.where(StrikeAlert.account_id.in_(account_ids))
         
         if acknowledged is not None:
             query = query.where(StrikeAlert.acknowledged == acknowledged)

@@ -229,10 +229,26 @@ interface LegalLinkProps {
     type: "terms" | "privacy"
     className?: string
     children?: React.ReactNode
+    asPage?: boolean // If true, link to separate page instead of modal
 }
 
-export function LegalLink({ type, className, children }: LegalLinkProps) {
+export function LegalLink({ type, className, children, asPage = false }: LegalLinkProps) {
     const [isOpen, setIsOpen] = useState(false)
+
+    // If asPage is true, render as a regular link to the page
+    if (asPage) {
+        const href = type === "terms" ? "/terms" : "/privacy"
+        return (
+            <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={className || "text-red-600 dark:text-red-400 hover:underline"}
+            >
+                {children || (type === "terms" ? "Terms of Service" : "Privacy Policy")}
+            </a>
+        )
+    }
 
     return (
         <>
