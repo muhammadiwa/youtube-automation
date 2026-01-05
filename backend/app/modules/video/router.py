@@ -104,6 +104,7 @@ async def upload_video(
     scheduled_publish_at: Optional[str] = Form(None),
     thumbnail: Optional[UploadFile] = File(None),  # Optional thumbnail
     file: UploadFile = File(...),
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Upload a video file with streaming support.
@@ -124,6 +125,21 @@ async def upload_video(
     )
     from app.modules.video.models import VideoVisibility
     from datetime import datetime
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify account belongs to current user
+    result = await db.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account not found or not authorized",
+        )
 
     service = VideoService(db)
     file_path = None
@@ -215,12 +231,29 @@ async def upload_video(
 async def bulk_upload(
     account_id: uuid.UUID = Form(...),
     csv_file: UploadFile = File(...),
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Bulk upload videos from CSV.
 
     Requirements: 3.5
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify account belongs to current user
+    result = await db.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account not found or not authorized",
+        )
+    
     service = VideoService(db)
 
     # Read CSV content
@@ -256,9 +289,14 @@ class BulkDeleteResponse(BaseModel):
 @router.post("/bulk-delete", response_model=BulkDeleteResponse)
 async def bulk_delete_videos(
     request: BulkDeleteRequest,
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Bulk delete multiple videos and their associated files."""
+    from sqlalchemy import select
+    from app.modules.video.models import Video
+    from app.modules.account.models import YouTubeAccount
+    
     service = VideoService(db)
     
     success_count = 0
@@ -267,6 +305,17 @@ async def bulk_delete_videos(
     
     for video_id in request.videoIds:
         try:
+            # Verify video belongs to current user
+            result = await db.execute(
+                select(Video)
+                .join(YouTubeAccount, Video.account_id == YouTubeAccount.id)
+                .where(Video.id == video_id, YouTubeAccount.user_id == current_user.id)
+            )
+            if not result.scalar_one_or_none():
+                failed_count += 1
+                results.append({"videoId": str(video_id), "success": False, "error": "Video not found or not authorized"})
+                continue
+            
             await service.delete_video(video_id)
             success_count += 1
             results.append({"videoId": str(video_id), "success": True})
@@ -650,9 +699,26 @@ async def import_youtube_video(
 @router.get("/{video_id}", response_model=VideoResponse)
 async def get_video(
     video_id: uuid.UUID,
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get video by ID."""
+    from sqlalchemy import select
+    from app.modules.video.models import Video
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify video belongs to current user
+    result = await db.execute(
+        select(Video)
+        .join(YouTubeAccount, Video.account_id == YouTubeAccount.id)
+        .where(Video.id == video_id, YouTubeAccount.user_id == current_user.id)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found or not authorized",
+        )
+    
     service = VideoService(db)
 
     try:
@@ -665,12 +731,29 @@ async def get_video(
 @router.get("/{video_id}/progress", response_model=UploadProgressResponse)
 async def get_upload_progress(
     video_id: uuid.UUID,
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get upload progress for a video.
 
     Requirements: 3.1
     """
+    from sqlalchemy import select
+    from app.modules.video.models import Video
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify video belongs to current user
+    result = await db.execute(
+        select(Video)
+        .join(YouTubeAccount, Video.account_id == YouTubeAccount.id)
+        .where(Video.id == video_id, YouTubeAccount.user_id == current_user.id)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found or not authorized",
+        )
+    
     service = VideoService(db)
 
     try:
@@ -684,6 +767,7 @@ async def get_upload_progress(
 async def upload_thumbnail(
     video_id: uuid.UUID,
     thumbnail: UploadFile = File(...),
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Upload custom thumbnail for a video.
@@ -693,7 +777,22 @@ async def upload_thumbnail(
     """
     import os
     import tempfile
+    from sqlalchemy import select
+    from app.modules.video.models import Video
+    from app.modules.account.models import YouTubeAccount
     from app.modules.video.tasks import upload_thumbnail_task
+
+    # Verify video belongs to current user
+    result = await db.execute(
+        select(Video)
+        .join(YouTubeAccount, Video.account_id == YouTubeAccount.id)
+        .where(Video.id == video_id, YouTubeAccount.user_id == current_user.id)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found or not authorized",
+        )
 
     service = VideoService(db)
 
@@ -747,9 +846,26 @@ async def get_videos_by_account(
     status: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get all videos for an account."""
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify account belongs to current user
+    result = await db.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account not found or not authorized",
+        )
+    
     service = VideoService(db)
 
     video_status = None
@@ -772,12 +888,29 @@ async def get_videos_by_account(
 async def update_metadata(
     video_id: uuid.UUID,
     request: VideoMetadataUpdate,
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Update video metadata.
 
     Requirements: 4.1, 4.5
     """
+    from sqlalchemy import select
+    from app.modules.video.models import Video
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify video belongs to current user
+    result = await db.execute(
+        select(Video)
+        .join(YouTubeAccount, Video.account_id == YouTubeAccount.id)
+        .where(Video.id == video_id, YouTubeAccount.user_id == current_user.id)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found or not authorized",
+        )
+    
     service = VideoService(db)
 
     try:
@@ -790,12 +923,30 @@ async def update_metadata(
 @router.post("/bulk-update", response_model=list[VideoResponse])
 async def bulk_update_metadata(
     request: BulkMetadataUpdate,
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Bulk update metadata for multiple videos.
 
     Requirements: 4.4
     """
+    from sqlalchemy import select
+    from app.modules.video.models import Video
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify all videos belong to current user
+    for video_id in request.video_ids:
+        result = await db.execute(
+            select(Video)
+            .join(YouTubeAccount, Video.account_id == YouTubeAccount.id)
+            .where(Video.id == video_id, YouTubeAccount.user_id == current_user.id)
+        )
+        if not result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Video {video_id} not found or not authorized",
+            )
+    
     service = VideoService(db)
     videos = await service.bulk_update_metadata(request)
     return videos
@@ -805,12 +956,29 @@ async def bulk_update_metadata(
 async def apply_template(
     video_id: uuid.UUID,
     request: ApplyTemplateRequest,
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Apply template to video.
 
     Requirements: 4.2
     """
+    from sqlalchemy import select
+    from app.modules.video.models import Video
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify video belongs to current user
+    result = await db.execute(
+        select(Video)
+        .join(YouTubeAccount, Video.account_id == YouTubeAccount.id)
+        .where(Video.id == video_id, YouTubeAccount.user_id == current_user.id)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found or not authorized",
+        )
+    
     service = VideoService(db)
 
     try:
@@ -825,12 +993,29 @@ async def apply_template(
 @router.post("/{video_id}/sync-stats", response_model=VideoResponse)
 async def sync_video_stats(
     video_id: uuid.UUID,
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Sync video statistics from YouTube.
 
     Fetches current view count, like count, and comment count from YouTube API.
     """
+    from sqlalchemy import select
+    from app.modules.video.models import Video
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify video belongs to current user
+    result = await db.execute(
+        select(Video)
+        .join(YouTubeAccount, Video.account_id == YouTubeAccount.id)
+        .where(Video.id == video_id, YouTubeAccount.user_id == current_user.id)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found or not authorized",
+        )
+    
     service = VideoService(db)
 
     try:
@@ -848,6 +1033,7 @@ async def sync_video_stats(
 @router.post("/{video_id}/extract-duration", response_model=VideoResponse)
 async def extract_video_duration(
     video_id: uuid.UUID,
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Extract and update video duration using ffprobe.
@@ -856,6 +1042,21 @@ async def extract_video_duration(
     Only works for videos with local file_path.
     """
     from app.modules.video.upload_handler import get_video_duration
+    from sqlalchemy import select
+    from app.modules.video.models import Video
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify video belongs to current user
+    result = await db.execute(
+        select(Video)
+        .join(YouTubeAccount, Video.account_id == YouTubeAccount.id)
+        .where(Video.id == video_id, YouTubeAccount.user_id == current_user.id)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found or not authorized",
+        )
 
     service = VideoService(db)
 
@@ -902,12 +1103,29 @@ async def extract_video_duration(
 async def schedule_publish(
     video_id: uuid.UUID,
     request: SchedulePublishRequest,
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Schedule video for publishing.
 
     Requirements: 4.3
     """
+    from sqlalchemy import select
+    from app.modules.video.models import Video
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify video belongs to current user
+    result = await db.execute(
+        select(Video)
+        .join(YouTubeAccount, Video.account_id == YouTubeAccount.id)
+        .where(Video.id == video_id, YouTubeAccount.user_id == current_user.id)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found or not authorized",
+        )
+    
     service = VideoService(db)
 
     try:
@@ -920,12 +1138,29 @@ async def schedule_publish(
 @router.post("/{video_id}/publish", response_model=VideoResponse)
 async def publish_video(
     video_id: uuid.UUID,
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Publish video immediately.
 
     Requirements: 4.3
     """
+    from sqlalchemy import select
+    from app.modules.video.models import Video
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify video belongs to current user
+    result = await db.execute(
+        select(Video)
+        .join(YouTubeAccount, Video.account_id == YouTubeAccount.id)
+        .where(Video.id == video_id, YouTubeAccount.user_id == current_user.id)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found or not authorized",
+        )
+    
     service = VideoService(db)
 
     try:
@@ -938,9 +1173,26 @@ async def publish_video(
 @router.delete("/{video_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_video(
     video_id: uuid.UUID,
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a video and its associated files."""
+    from sqlalchemy import select
+    from app.modules.video.models import Video
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify video belongs to current user
+    result = await db.execute(
+        select(Video)
+        .join(YouTubeAccount, Video.account_id == YouTubeAccount.id)
+        .where(Video.id == video_id, YouTubeAccount.user_id == current_user.id)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found or not authorized",
+        )
+    
     service = VideoService(db)
 
     try:

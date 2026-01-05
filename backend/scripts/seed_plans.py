@@ -10,8 +10,12 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, text
 from app.core.database import async_session_maker
+
+# Import all models to ensure relationships are resolved
+from app.modules.auth.models import User
+from app.modules.account.models import YouTubeAccount
 from app.modules.billing.models import Plan
 
 

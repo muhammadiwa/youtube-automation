@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db as get_async_session
+from app.modules.auth.jwt import get_current_user
 from app.modules.strike.service import (
     StrikeService,
     StrikeServiceError,
@@ -53,12 +54,22 @@ async def get_all_alerts(
     unread_only: bool = False,
     page: int = 1,
     page_size: int = 10,
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Get all strike alerts for the current user.
 
     Requirements: 20.2
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
+    # Get user's account IDs
+    result = await session.execute(
+        select(YouTubeAccount.id).where(YouTubeAccount.user_id == current_user.id)
+    )
+    user_account_ids = [row[0] for row in result.fetchall()]
+    
     service = StrikeService(session)
     # Get alerts - if unread_only, filter by acknowledged=False
     acknowledged = False if unread_only else None
@@ -66,9 +77,10 @@ async def get_all_alerts(
         acknowledged=acknowledged,
         limit=page_size,
         offset=(page - 1) * page_size,
+        account_ids=user_account_ids,
     )
-    total = await service.alert_repository.count_all(acknowledged=acknowledged)
-    unread_count = await service.alert_repository.count_all(acknowledged=False)
+    total = await service.alert_repository.count_all(acknowledged=acknowledged, account_ids=user_account_ids)
+    unread_count = await service.alert_repository.count_all(acknowledged=False, account_ids=user_account_ids)
     
     return {
         "items": [StrikeAlertResponse.model_validate(a) for a in alerts],
@@ -165,14 +177,23 @@ async def dismiss_alert(
 
 @router.get("/summaries", response_model=AllAccountsSummary)
 async def get_all_accounts_summary(
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Get strike summary for all connected accounts.
 
-    Returns overview of strikes across all YouTube accounts.
+    Returns overview of strikes across all YouTube accounts owned by current user.
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
     service = StrikeService(session)
-    accounts = await service.account_repository.get_all()
+    
+    # Get only user's accounts
+    result = await session.execute(
+        select(YouTubeAccount).where(YouTubeAccount.user_id == current_user.id)
+    )
+    accounts = result.scalars().all()
     
     summaries = []
     total_active = 0
@@ -202,14 +223,23 @@ async def get_all_accounts_summary(
 
 @router.post("/sync-all", response_model=SyncAllResult)
 async def sync_all_accounts(
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ):
-    """Sync strikes for all connected accounts.
+    """Sync strikes for all connected accounts owned by current user.
 
     Fetches current strike status from YouTube for all accounts.
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
     service = StrikeService(session)
-    accounts = await service.account_repository.get_all()
+    
+    # Get only user's accounts
+    result = await session.execute(
+        select(YouTubeAccount).where(YouTubeAccount.user_id == current_user.id)
+    )
+    accounts = result.scalars().all()
     
     synced = 0
     failed = 0
@@ -248,12 +278,29 @@ async def sync_all_accounts(
 async def get_account_strikes(
     account_id: uuid.UUID,
     include_expired: bool = False,
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Get all strikes for a YouTube account.
 
     Requirements: 20.1, 20.4
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify account belongs to current user
+    result = await session.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account not found or not authorized",
+        )
+    
     service = StrikeService(session)
     try:
         strikes = await service.get_account_strikes(account_id, include_expired)
@@ -270,12 +317,29 @@ async def get_account_strikes(
 @router.get("/account/{account_id}/summary", response_model=StrikeSummary)
 async def get_account_strike_summary(
     account_id: uuid.UUID,
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Get strike summary for a YouTube account.
 
     Requirements: 20.1
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify account belongs to current user
+    result = await session.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account not found or not authorized",
+        )
+    
     service = StrikeService(session)
     try:
         return await service.get_strike_summary(account_id)
@@ -286,12 +350,29 @@ async def get_account_strike_summary(
 @router.get("/account/{account_id}/timeline", response_model=AccountStrikeTimeline)
 async def get_account_strike_timeline(
     account_id: uuid.UUID,
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Get strike timeline for a YouTube account.
 
     Requirements: 20.4
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify account belongs to current user
+    result = await session.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account not found or not authorized",
+        )
+    
     service = StrikeService(session)
     try:
         return await service.get_account_strike_timeline(account_id)
@@ -302,12 +383,16 @@ async def get_account_strike_timeline(
 @router.get("/{strike_id}", response_model=StrikeResponse)
 async def get_strike(
     strike_id: uuid.UUID,
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Get strike by ID.
 
     Requirements: 20.1
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
     service = StrikeService(session)
     strike = await service.get_strike(strike_id)
     if not strike:
@@ -315,19 +400,59 @@ async def get_strike(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Strike {strike_id} not found",
         )
+    
+    # Verify strike's account belongs to current user
+    result = await session.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == strike.account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this strike",
+        )
+    
     return StrikeResponse.model_validate(strike)
 
 
 @router.get("/{strike_id}/timeline", response_model=StrikeTimeline)
 async def get_strike_timeline(
     strike_id: uuid.UUID,
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Get timeline for a specific strike.
 
     Requirements: 20.4
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
     service = StrikeService(session)
+    
+    # First get the strike to verify ownership
+    strike = await service.get_strike(strike_id)
+    if not strike:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Strike {strike_id} not found",
+        )
+    
+    # Verify strike's account belongs to current user
+    result = await session.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == strike.account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this strike",
+        )
+    
     try:
         return await service.get_strike_timeline(strike_id)
     except StrikeNotFoundError as e:
@@ -337,12 +462,29 @@ async def get_strike_timeline(
 @router.post("/", response_model=StrikeResponse, status_code=status.HTTP_201_CREATED)
 async def create_strike(
     request: StrikeCreate,
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Create a new strike record (manual entry).
 
     Requirements: 20.1
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify account belongs to current user
+    result = await session.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == request.account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account not found or not authorized",
+        )
+    
     service = StrikeService(session)
     try:
         strike = await service.create_strike(request)
@@ -360,12 +502,29 @@ async def create_strike(
 @router.post("/account/{account_id}/sync", response_model=StrikeSyncResult)
 async def sync_strikes(
     account_id: uuid.UUID,
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Sync strike status from YouTube for an account.
 
     Requirements: 20.1
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify account belongs to current user
+    result = await session.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account not found or not authorized",
+        )
+    
     service = StrikeService(session)
     try:
         result = await service.sync_strikes(account_id)
@@ -394,13 +553,39 @@ async def sync_strikes_async(account_id: uuid.UUID):
 async def submit_appeal(
     strike_id: uuid.UUID,
     appeal_reason: str,
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Submit an appeal for a strike.
 
     Requirements: 20.4
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
     service = StrikeService(session)
+    
+    # First get the strike to verify ownership
+    strike = await service.get_strike(strike_id)
+    if not strike:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Strike {strike_id} not found",
+        )
+    
+    # Verify strike's account belongs to current user
+    result = await session.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == strike.account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this strike",
+        )
+    
     try:
         strike = await service.submit_appeal(strike_id, appeal_reason)
         return StrikeResponse.model_validate(strike)
@@ -415,13 +600,39 @@ async def update_appeal_status(
     strike_id: uuid.UUID,
     appeal_status: AppealStatus,
     appeal_response: Optional[str] = None,
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Update appeal status for a strike.
 
     Requirements: 20.4
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
     service = StrikeService(session)
+    
+    # First get the strike to verify ownership
+    strike = await service.get_strike(strike_id)
+    if not strike:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Strike {strike_id} not found",
+        )
+    
+    # Verify strike's account belongs to current user
+    result = await session.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == strike.account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this strike",
+        )
+    
     try:
         strike = await service.update_appeal_status(
             strike_id, appeal_status, appeal_response
@@ -439,12 +650,29 @@ async def update_appeal_status(
 async def get_paused_streams(
     account_id: uuid.UUID,
     include_resumed: bool = False,
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Get paused streams for an account.
 
     Requirements: 20.3, 20.5
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify account belongs to current user
+    result = await session.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account not found or not authorized",
+        )
+    
     service = StrikeService(session)
     paused_streams = await service.get_paused_streams(account_id, include_resumed)
     return PausedStreamListResponse(
@@ -500,12 +728,29 @@ async def resume_all_paused_streams(
 async def get_account_alerts(
     account_id: uuid.UUID,
     acknowledged: Optional[bool] = None,
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Get strike alerts for an account.
 
     Requirements: 20.2
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify account belongs to current user
+    result = await session.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account not found or not authorized",
+        )
+    
     service = StrikeService(session)
     alerts = await service.alert_repository.get_by_account_id(
         account_id, acknowledged=acknowledged

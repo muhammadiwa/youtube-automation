@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.modules.auth.jwt import get_current_user
 from app.modules.analytics.service import (
     AnalyticsService,
     InvalidDateRangeError,
@@ -55,6 +56,7 @@ def _parse_period_to_dates(period: str) -> tuple[date, date]:
 async def get_analytics_overview(
     account_id: Optional[str] = Query(None, description="Filter by account ID"),
     period: str = Query("30d", description="Period: 7d, 30d, 90d, 1y"),
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get analytics overview for dashboard.
@@ -69,15 +71,43 @@ async def get_analytics_overview(
     from app.modules.account.models import YouTubeAccount
     
     service = AnalyticsService(db)
+    user_id = current_user.id
     
     # Parse period to dates
     start_date, end_date = _parse_period_to_dates(period)
     
-    # Parse account ID if provided
-    account_ids = None
+    # Get all user's account IDs first
+    account_result = await db.execute(
+        select(YouTubeAccount.id).where(
+            YouTubeAccount.user_id == user_id,
+            YouTubeAccount.status == "active"
+        )
+    )
+    user_account_ids = [row[0] for row in account_result.fetchall()]
+    
+    # If no accounts, return zeros
+    if not user_account_ids:
+        return AnalyticsOverviewResponse(
+            total_views=0,
+            total_subscribers=0,
+            total_watch_time=0,
+            views_change=0,
+            subscribers_change=0,
+            watch_time_change=0,
+            period=period,
+        )
+    
+    # Parse account ID if provided and verify ownership
+    account_ids = user_account_ids  # Default to all user's accounts
     if account_id:
         try:
-            account_ids = [uuid.UUID(account_id)]
+            parsed_id = uuid.UUID(account_id)
+            if parsed_id not in user_account_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Account not found or not authorized",
+                )
+            account_ids = [parsed_id]
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -85,18 +115,18 @@ async def get_analytics_overview(
             )
     
     try:
-        # Get dashboard metrics
-        user_id = uuid.uuid4()  # Placeholder - in production from auth
+        # Get dashboard metrics for current user's accounts only
         metrics = await service.get_dashboard_metrics(
             user_id, start_date, end_date, account_ids
         )
         
         # If no data from snapshots, try to get from account stats
         if metrics.total_views == 0 and metrics.total_subscribers == 0:
-            # Query accounts directly
-            query = select(YouTubeAccount).where(YouTubeAccount.status == "active")
-            if account_ids:
-                query = query.where(YouTubeAccount.id.in_(account_ids))
+            # Query accounts directly - filter by current user
+            query = select(YouTubeAccount).where(
+                YouTubeAccount.status == "active",
+                YouTubeAccount.id.in_(account_ids)
+            )
             
             result = await db.execute(query)
             accounts = result.scalars().all()
@@ -154,6 +184,7 @@ async def get_views_timeseries(
     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
     granularity: str = Query("day", description="Granularity: hour, day, week, month"),
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get views time series data for charts.
@@ -167,6 +198,20 @@ async def get_views_timeseries(
     from app.modules.account.models import YouTubeAccount
     
     service = AnalyticsService(db)
+    user_id = current_user.id
+    
+    # Get all user's account IDs first
+    account_result = await db.execute(
+        select(YouTubeAccount.id).where(
+            YouTubeAccount.user_id == user_id,
+            YouTubeAccount.status == "active"
+        )
+    )
+    user_account_ids = [row[0] for row in account_result.fetchall()]
+    
+    # If no accounts, return empty
+    if not user_account_ids:
+        return []
     
     # Parse dates
     if start_date and end_date:
@@ -182,18 +227,24 @@ async def get_views_timeseries(
         end = date.today()
         start = end - timedelta(days=30)
     
-    # Parse account ID
-    account_ids = None
+    # Parse account ID and verify ownership
+    account_ids = user_account_ids  # Default to all user's accounts
     if account_id:
         try:
-            account_ids = [uuid.UUID(account_id)]
+            parsed_id = uuid.UUID(account_id)
+            if parsed_id not in user_account_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Account not found or not authorized",
+                )
+            account_ids = [parsed_id]
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid account ID format",
             )
     
-    # Get snapshots for the date range
+    # Get snapshots for the date range - filtered by user's accounts
     snapshots = await service.get_snapshots_by_date_range(start, end, account_ids)
     
     # Aggregate by date
@@ -204,11 +255,12 @@ async def get_views_timeseries(
             views_by_date[snapshot_date] = 0
         views_by_date[snapshot_date] += snapshot.total_views
     
-    # If no snapshots, get current view count from accounts
+    # If no snapshots, get current view count from accounts - filter by user
     if not views_by_date:
-        query = select(YouTubeAccount).where(YouTubeAccount.status == "active")
-        if account_ids:
-            query = query.where(YouTubeAccount.id.in_(account_ids))
+        query = select(YouTubeAccount).where(
+            YouTubeAccount.status == "active",
+            YouTubeAccount.id.in_(account_ids)
+        )
         
         result = await db.execute(query)
         accounts = result.scalars().all()
@@ -280,6 +332,7 @@ async def get_subscribers_timeseries(
     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
     granularity: str = Query("day", description="Granularity: hour, day, week, month"),
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get subscribers time series data for charts.
@@ -293,6 +346,20 @@ async def get_subscribers_timeseries(
     from app.modules.account.models import YouTubeAccount
     
     service = AnalyticsService(db)
+    user_id = current_user.id
+    
+    # Get all user's account IDs first
+    account_result = await db.execute(
+        select(YouTubeAccount.id).where(
+            YouTubeAccount.user_id == user_id,
+            YouTubeAccount.status == "active"
+        )
+    )
+    user_account_ids = [row[0] for row in account_result.fetchall()]
+    
+    # If no accounts, return empty
+    if not user_account_ids:
+        return []
     
     # Parse dates
     if start_date and end_date:
@@ -308,18 +375,24 @@ async def get_subscribers_timeseries(
         end = date.today()
         start = end - timedelta(days=30)
     
-    # Parse account ID
-    account_ids = None
+    # Parse account ID and verify ownership
+    account_ids = user_account_ids  # Default to all user's accounts
     if account_id:
         try:
-            account_ids = [uuid.UUID(account_id)]
+            parsed_id = uuid.UUID(account_id)
+            if parsed_id not in user_account_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Account not found or not authorized",
+                )
+            account_ids = [parsed_id]
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid account ID format",
             )
     
-    # Get snapshots for the date range
+    # Get snapshots for the date range - filtered by user's accounts
     snapshots = await service.get_snapshots_by_date_range(start, end, account_ids)
     
     # Aggregate by date - use subscriber_count (total) not subscriber_change
@@ -330,11 +403,12 @@ async def get_subscribers_timeseries(
             subscribers_by_date[snapshot_date] = 0
         subscribers_by_date[snapshot_date] += snapshot.subscriber_count
     
-    # If no snapshots, get current subscriber count from accounts
+    # If no snapshots, get current subscriber count from accounts - filter by user
     if not subscribers_by_date:
-        query = select(YouTubeAccount).where(YouTubeAccount.status == "active")
-        if account_ids:
-            query = query.where(YouTubeAccount.id.in_(account_ids))
+        query = select(YouTubeAccount).where(
+            YouTubeAccount.status == "active",
+            YouTubeAccount.id.in_(account_ids)
+        )
         
         result = await db.execute(query)
         accounts = result.scalars().all()
@@ -407,22 +481,43 @@ async def get_dashboard_metrics(
     account_ids: Optional[str] = Query(
         None, description="Comma-separated account IDs"
     ),
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    # user_id would come from auth dependency in production
 ):
     """Get aggregated dashboard metrics with period comparison.
 
     Requirements: 17.1, 17.2
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
     service = AnalyticsService(db)
-
-    # Parse account IDs if provided
-    parsed_account_ids = None
+    user_id = current_user.id
+    
+    # Get all user's account IDs first
+    account_result = await db.execute(
+        select(YouTubeAccount.id).where(
+            YouTubeAccount.user_id == user_id,
+            YouTubeAccount.status == "active"
+        )
+    )
+    user_account_ids = [row[0] for row in account_result.fetchall()]
+    
+    # Parse account IDs if provided and verify ownership
+    parsed_account_ids = user_account_ids  # Default to all user's accounts
     if account_ids:
         try:
-            parsed_account_ids = [
+            requested_ids = [
                 uuid.UUID(aid.strip()) for aid in account_ids.split(",")
             ]
+            # Verify all requested accounts belong to user
+            for req_id in requested_ids:
+                if req_id not in user_account_ids:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="One or more accounts not found or not authorized",
+                    )
+            parsed_account_ids = requested_ids
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -430,8 +525,7 @@ async def get_dashboard_metrics(
             )
 
     try:
-        # In production, user_id would come from auth
-        user_id = uuid.uuid4()  # Placeholder
+        # Get metrics for current authenticated user's accounts only
         return await service.get_dashboard_metrics(
             user_id, start_date, end_date, parsed_account_ids
         )
@@ -447,12 +541,30 @@ async def get_account_metrics(
     account_id: uuid.UUID,
     start_date: date = Query(...),
     end_date: date = Query(...),
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get metrics for a specific account.
 
     Requirements: 17.1, 17.2
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify account belongs to current user
+    result = await db.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    account = result.scalar_one_or_none()
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found or not authorized",
+        )
+    
     service = AnalyticsService(db)
     return await service.get_account_metrics(account_id, start_date, end_date)
 
@@ -460,6 +572,7 @@ async def get_account_metrics(
 @router.post("/compare", response_model=ChannelComparisonResponse)
 async def compare_channels(
     request: ChannelComparisonRequest,
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Compare metrics across multiple channels.
@@ -468,6 +581,20 @@ async def compare_channels(
     """
     from sqlalchemy import select
     from app.modules.account.models import YouTubeAccount
+    
+    # Verify all accounts belong to current user
+    account_result = await db.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id.in_(request.account_ids),
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    user_accounts = account_result.scalars().all()
+    if len(user_accounts) != len(request.account_ids):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="One or more accounts not found or not authorized",
+        )
     
     service = AnalyticsService(db)
     try:
@@ -509,12 +636,16 @@ async def get_snapshots(
     start_date: date = Query(...),
     end_date: date = Query(...),
     account_ids: Optional[str] = Query(None),
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get analytics snapshots within a date range.
 
     Requirements: 17.2
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
     service = AnalyticsService(db)
 
     parsed_account_ids = None
@@ -528,6 +659,26 @@ async def get_snapshots(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid account ID format",
             )
+        
+        # Verify accounts belong to current user
+        account_result = await db.execute(
+            select(YouTubeAccount).where(
+                YouTubeAccount.id.in_(parsed_account_ids),
+                YouTubeAccount.user_id == current_user.id
+            )
+        )
+        user_accounts = account_result.scalars().all()
+        if len(user_accounts) != len(parsed_account_ids):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="One or more accounts not found or not authorized",
+            )
+    else:
+        # Get all user's account IDs
+        account_result = await db.execute(
+            select(YouTubeAccount.id).where(YouTubeAccount.user_id == current_user.id)
+        )
+        parsed_account_ids = [row[0] for row in account_result.fetchall()]
 
     return await service.get_snapshots_by_date_range(
         start_date, end_date, parsed_account_ids
@@ -537,17 +688,36 @@ async def get_snapshots(
 @router.post("/reports", response_model=AnalyticsReportResponse)
 async def create_report(
     request: ReportGenerationRequest,
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new analytics report.
 
     Requirements: 17.3, 17.4
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
     service = AnalyticsService(db)
 
+    # Verify accounts belong to current user if specified
+    if request.account_ids:
+        account_result = await db.execute(
+            select(YouTubeAccount).where(
+                YouTubeAccount.id.in_(request.account_ids),
+                YouTubeAccount.user_id == current_user.id
+            )
+        )
+        user_accounts = account_result.scalars().all()
+        if len(user_accounts) != len(request.account_ids):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="One or more accounts not found or not authorized",
+            )
+
     try:
-        # In production, user_id would come from auth
-        user_id = uuid.uuid4()  # Placeholder
+        # Create report for current authenticated user
+        user_id = current_user.id
         report = await service.create_report(
             user_id=user_id,
             title=request.title,
@@ -568,6 +738,7 @@ async def create_report(
 @router.get("/reports/{report_id}", response_model=AnalyticsReportResponse)
 async def get_report(
     report_id: uuid.UUID,
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a report by ID.
@@ -576,7 +747,14 @@ async def get_report(
     """
     service = AnalyticsService(db)
     try:
-        return await service.get_report(report_id)
+        report = await service.get_report(report_id)
+        # Verify report belongs to current user
+        if report.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to access this report",
+            )
+        return report
     except ReportNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -587,6 +765,7 @@ async def get_report(
 @router.get("/reports", response_model=list[AnalyticsReportResponse])
 async def get_user_reports(
     limit: int = Query(50, ge=1, le=100),
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get reports for the current user.
@@ -594,8 +773,7 @@ async def get_user_reports(
     Requirements: 17.3
     """
     service = AnalyticsService(db)
-    # In production, user_id would come from auth
-    user_id = uuid.uuid4()  # Placeholder
+    user_id = current_user.id
     return await service.get_user_reports(user_id, limit)
 
 
@@ -604,12 +782,16 @@ async def get_ai_insights(
     start_date: date = Query(...),
     end_date: date = Query(...),
     account_ids: Optional[str] = Query(None),
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get AI-powered insights for analytics data.
 
     Requirements: 17.4
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
     service = AnalyticsService(db)
 
     parsed_account_ids = None
@@ -623,6 +805,26 @@ async def get_ai_insights(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid account ID format",
             )
+        
+        # Verify accounts belong to current user
+        account_result = await db.execute(
+            select(YouTubeAccount).where(
+                YouTubeAccount.id.in_(parsed_account_ids),
+                YouTubeAccount.user_id == current_user.id
+            )
+        )
+        user_accounts = account_result.scalars().all()
+        if len(user_accounts) != len(parsed_account_ids):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="One or more accounts not found or not authorized",
+            )
+    else:
+        # Get all user's account IDs
+        account_result = await db.execute(
+            select(YouTubeAccount.id).where(YouTubeAccount.user_id == current_user.id)
+        )
+        parsed_account_ids = [row[0] for row in account_result.fetchall()]
 
     from app.core.datetime_utils import utcnow
     insights = await service.generate_ai_insights(
@@ -641,6 +843,7 @@ async def get_ai_insights(
 async def get_ai_insights_simple(
     account_id: Optional[str] = Query(None, description="Filter by account ID"),
     limit: int = Query(5, ge=1, le=20),
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get AI-powered insights for dashboard (simplified endpoint).
@@ -650,6 +853,9 @@ async def get_ai_insights_simple(
 
     Requirements: 17.4
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
     service = AnalyticsService(db)
     
     # Default to last 30 days
@@ -660,11 +866,30 @@ async def get_ai_insights_simple(
     if account_id:
         try:
             parsed_account_ids = [uuid.UUID(account_id)]
+            
+            # Verify account belongs to current user
+            account_result = await db.execute(
+                select(YouTubeAccount).where(
+                    YouTubeAccount.id == parsed_account_ids[0],
+                    YouTubeAccount.user_id == current_user.id
+                )
+            )
+            if not account_result.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Account not found or not authorized",
+                )
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid account ID format",
             )
+    else:
+        # Get all user's account IDs
+        account_result = await db.execute(
+            select(YouTubeAccount.id).where(YouTubeAccount.user_id == current_user.id)
+        )
+        parsed_account_ids = [row[0] for row in account_result.fetchall()]
 
     insights = await service.generate_ai_insights(
         start_date, end_date, parsed_account_ids
@@ -676,6 +901,7 @@ async def get_ai_insights_simple(
 @router.post("/sync/{account_id}")
 async def trigger_account_sync(
     account_id: uuid.UUID,
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Trigger manual analytics sync for a specific account.
@@ -685,29 +911,68 @@ async def trigger_account_sync(
 
     Requirements: 17.1
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify account belongs to current user
+    result = await db.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    account = result.scalar_one_or_none()
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found or not authorized",
+        )
+    
     service = AnalyticsService(db)
     return await service.trigger_sync(account_id)
 
 
 @router.post("/sync")
 async def trigger_all_accounts_sync(
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Trigger manual analytics sync for all accounts.
+    """Trigger manual analytics sync for all user's accounts.
     
     This queues background tasks to fetch the latest analytics data
-    from YouTube for all active accounts.
+    from YouTube for all active accounts owned by the current user.
 
     Requirements: 17.1
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
+    # Get all user's account IDs
+    result = await db.execute(
+        select(YouTubeAccount.id).where(
+            YouTubeAccount.user_id == current_user.id,
+            YouTubeAccount.status == "active"
+        )
+    )
+    account_ids = [row[0] for row in result.fetchall()]
+    
     service = AnalyticsService(db)
-    return await service.trigger_sync_all()
+    results = []
+    for account_id in account_ids:
+        try:
+            sync_result = await service.trigger_sync(account_id)
+            results.append({"account_id": str(account_id), "status": "queued", "result": sync_result})
+        except Exception as e:
+            results.append({"account_id": str(account_id), "status": "error", "error": str(e)})
+    
+    return {"synced_accounts": len(results), "results": results}
 
 
 @router.get("/channel/{account_id}/metrics")
 async def get_channel_metrics(
     account_id: uuid.UUID,
     period: str = Query("30d", description="Period: 7d, 30d, 90d, 1y"),
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get detailed channel metrics including traffic sources and demographics.
@@ -719,6 +984,19 @@ async def get_channel_metrics(
     """
     from sqlalchemy import select
     from app.modules.account.models import YouTubeAccount
+    
+    # Verify account belongs to current user
+    verify_result = await db.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not verify_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found or not authorized",
+        )
     
     service = AnalyticsService(db)
     

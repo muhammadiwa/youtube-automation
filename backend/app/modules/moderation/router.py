@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session
+from app.modules.auth.jwt import get_current_user
 from app.modules.moderation.models import ModerationActionType, RuleType, SeverityLevel
 from app.modules.moderation.service import ModerationService
 from app.modules.moderation.schemas import (
@@ -56,6 +57,7 @@ class ModerationStatusResponse(BaseModel):
 @router.post("/live/start", response_model=ModerationStatusResponse)
 async def start_live_moderation(
     request: StartModerationRequest,
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Start live chat moderation for a broadcast.
@@ -68,6 +70,22 @@ async def start_live_moderation(
     
     Requirements: 12.1, 12.2, 12.3, 12.4
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify account belongs to current user
+    result = await session.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == request.account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account not found or not authorized",
+        )
+    
     try:
         worker = await start_moderation_for_broadcast(
             account_id=request.account_id,
@@ -90,12 +108,29 @@ async def start_live_moderation(
 async def stop_live_moderation(
     account_id: uuid.UUID = Query(..., description="YouTube account ID"),
     broadcast_id: str = Query(..., description="YouTube broadcast ID"),
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Stop live chat moderation for a broadcast.
     
     Requirements: 12.1
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify account belongs to current user
+    result = await session.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account not found or not authorized",
+        )
+    
     stopped = await stop_moderation_for_broadcast(account_id, broadcast_id)
     if stopped:
         return ModerationStatusResponse(
@@ -161,14 +196,50 @@ async def get_moderation_rules(
     enabled_only: bool = Query(False, description="Only return enabled rules"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(10, ge=1, le=100, description="Items per page"),
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Get moderation rules with pagination.
     
     Requirements: 12.1
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
+    # If account_id provided, verify it belongs to current user
+    if account_id:
+        result = await session.execute(
+            select(YouTubeAccount).where(
+                YouTubeAccount.id == account_id,
+                YouTubeAccount.user_id == current_user.id
+            )
+        )
+        if not result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account not found or not authorized",
+            )
+    else:
+        # Get all user's account IDs
+        result = await session.execute(
+            select(YouTubeAccount.id).where(YouTubeAccount.user_id == current_user.id)
+        )
+        user_account_ids = [row[0] for row in result.fetchall()]
+        if not user_account_ids:
+            return PaginatedRulesResponse(
+                items=[],
+                total=0,
+                page=page,
+                page_size=page_size,
+                total_pages=0,
+            )
+    
     service = ModerationService(session)
     rules = await service.get_rules(account_id, enabled_only)
+    
+    # Filter rules to only show user's accounts
+    if not account_id:
+        rules = [r for r in rules if r.account_id in user_account_ids]
     
     # Apply pagination
     total = len(rules)
@@ -189,12 +260,29 @@ async def get_moderation_rules(
 @router.post("/rules", response_model=ModerationRuleResponse)
 async def create_moderation_rule(
     data: ModerationRuleCreate,
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Create a new moderation rule.
     
     Requirements: 12.1
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify account belongs to current user
+    result = await session.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == data.account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account not found or not authorized",
+        )
+    
     service = ModerationService(session)
     
     # Check for duplicate rule (same name for same account)
@@ -229,12 +317,41 @@ async def create_moderation_rule(
 async def update_moderation_rule(
     rule_id: uuid.UUID,
     data: ModerationRuleUpdate,
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Update a moderation rule.
     
     Requirements: 12.1
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    from app.modules.moderation.models import ModerationRule
+    
+    # Get the rule first to verify ownership
+    rule_result = await session.execute(
+        select(ModerationRule).where(ModerationRule.id == rule_id)
+    )
+    rule = rule_result.scalar_one_or_none()
+    if not rule:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Rule not found",
+        )
+    
+    # Verify rule's account belongs to current user
+    account_result = await session.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == rule.account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not account_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to modify this rule",
+        )
+    
     service = ModerationService(session)
     update_data = data.model_dump(exclude_unset=True)
     
@@ -252,9 +369,38 @@ async def update_moderation_rule(
 @router.delete("/rules/{rule_id}")
 async def delete_moderation_rule(
     rule_id: uuid.UUID,
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Delete a moderation rule."""
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    from app.modules.moderation.models import ModerationRule
+    
+    # Get the rule first to verify ownership
+    rule_result = await session.execute(
+        select(ModerationRule).where(ModerationRule.id == rule_id)
+    )
+    rule = rule_result.scalar_one_or_none()
+    if not rule:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Rule not found",
+        )
+    
+    # Verify rule's account belongs to current user
+    account_result = await session.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == rule.account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not account_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to delete this rule",
+        )
+    
     service = ModerationService(session)
     deleted = await service.delete_rule(rule_id)
     if not deleted:
@@ -402,14 +548,51 @@ async def get_custom_commands(
     enabled_only: bool = Query(False),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(10, ge=1, le=100, description="Items per page"),
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Get custom commands with pagination.
     
     Requirements: 12.4
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
+    # If account_id provided, verify it belongs to current user
+    user_account_ids = []
+    if account_id:
+        result = await session.execute(
+            select(YouTubeAccount).where(
+                YouTubeAccount.id == account_id,
+                YouTubeAccount.user_id == current_user.id
+            )
+        )
+        if not result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account not found or not authorized",
+            )
+    else:
+        # Get all user's account IDs
+        result = await session.execute(
+            select(YouTubeAccount.id).where(YouTubeAccount.user_id == current_user.id)
+        )
+        user_account_ids = [row[0] for row in result.fetchall()]
+        if not user_account_ids:
+            return PaginatedCommandsResponse(
+                items=[],
+                total=0,
+                page=page,
+                page_size=page_size,
+                total_pages=0,
+            )
+    
     service = ModerationService(session)
     commands = await service.get_commands(account_id, enabled_only)
+    
+    # Filter commands to only show user's accounts
+    if not account_id:
+        commands = [c for c in commands if c.account_id in user_account_ids]
     
     # Apply pagination
     total = len(commands)
@@ -430,12 +613,29 @@ async def get_custom_commands(
 @router.post("/commands", response_model=CustomCommandResponse)
 async def create_custom_command(
     data: CustomCommandCreate,
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Create a custom command.
     
     Requirements: 12.4
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
+    # Verify account belongs to current user
+    result = await session.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == data.account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account not found or not authorized",
+        )
+    
     service = ModerationService(session)
     
     # Check for duplicate command (same trigger for same account)
@@ -467,12 +667,41 @@ async def create_custom_command(
 async def update_custom_command(
     command_id: uuid.UUID,
     data: CustomCommandUpdate,
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Update a custom command.
     
     Requirements: 12.4
     """
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    from app.modules.moderation.models import CustomCommand
+    
+    # Get the command first to verify ownership
+    cmd_result = await session.execute(
+        select(CustomCommand).where(CustomCommand.id == command_id)
+    )
+    command = cmd_result.scalar_one_or_none()
+    if not command:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Command not found",
+        )
+    
+    # Verify command's account belongs to current user
+    account_result = await session.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == command.account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not account_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to modify this command",
+        )
+    
     service = ModerationService(session)
     update_data = data.model_dump(exclude_unset=True)
     
@@ -490,9 +719,38 @@ async def update_custom_command(
 @router.delete("/commands/{command_id}")
 async def delete_custom_command(
     command_id: uuid.UUID,
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Delete a custom command."""
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    from app.modules.moderation.models import CustomCommand
+    
+    # Get the command first to verify ownership
+    cmd_result = await session.execute(
+        select(CustomCommand).where(CustomCommand.id == command_id)
+    )
+    command = cmd_result.scalar_one_or_none()
+    if not command:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Command not found",
+        )
+    
+    # Verify command's account belongs to current user
+    account_result = await session.execute(
+        select(YouTubeAccount).where(
+            YouTubeAccount.id == command.account_id,
+            YouTubeAccount.user_id == current_user.id
+        )
+    )
+    if not account_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to delete this command",
+        )
+    
     service = ModerationService(session)
     deleted = await service.delete_command(command_id)
     if not deleted:
@@ -559,13 +817,30 @@ async def get_moderation_logs(
     end_date: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Get moderation logs.
     
     Requirements: 12.5
     """
-    if not account_id:
+    from sqlalchemy import select
+    from app.modules.account.models import YouTubeAccount
+    
+    # If account_id provided, verify it belongs to current user
+    if account_id:
+        result = await session.execute(
+            select(YouTubeAccount).where(
+                YouTubeAccount.id == account_id,
+                YouTubeAccount.user_id == current_user.id
+            )
+        )
+        if not result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account not found or not authorized",
+            )
+    else:
         return {
             "items": [],
             "total": 0,
