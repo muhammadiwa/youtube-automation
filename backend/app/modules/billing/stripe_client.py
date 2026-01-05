@@ -14,6 +14,7 @@ from stripe import Customer, Subscription as StripeSubscription, PaymentMethod a
 from stripe import Invoice as StripeInvoice, PaymentIntent
 
 from app.core.config import settings
+from app.core.datetime_utils import utcnow, to_naive_utc
 
 
 # Configure Stripe API key
@@ -609,8 +610,8 @@ class StripeClient:
             amount_paid=inv.amount_paid,
             amount_due=inv.amount_due,
             currency=inv.currency,
-            period_start=datetime.fromtimestamp(inv.period_start) if inv.period_start else datetime.utcnow(),
-            period_end=datetime.fromtimestamp(inv.period_end) if inv.period_end else datetime.utcnow(),
+            period_start=datetime.fromtimestamp(inv.period_start) if inv.period_start else to_naive_utc(utcnow()),
+            period_end=datetime.fromtimestamp(inv.period_end) if inv.period_end else to_naive_utc(utcnow()),
             invoice_pdf=inv.invoice_pdf,
             hosted_invoice_url=inv.hosted_invoice_url,
             payment_intent_id=inv.payment_intent if isinstance(inv.payment_intent, str) else (inv.payment_intent.id if inv.payment_intent else None),

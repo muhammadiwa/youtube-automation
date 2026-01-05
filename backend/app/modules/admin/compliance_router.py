@@ -5,7 +5,6 @@ Requirements: 15.1, 15.2 - Compliance & Data Management
 """
 
 import uuid
-from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -14,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.admin.middleware import (
     verify_admin_access,
     require_permission,
@@ -280,7 +280,8 @@ async def download_data_export(
         expires_at = export_request.expires_at
         if expires_at.tzinfo is not None:
             expires_at = expires_at.replace(tzinfo=None)
-        if expires_at < datetime.utcnow():
+        now_naive = to_naive_utc(utcnow())
+        if expires_at < now_naive:
             raise HTTPException(
                 status_code=status.HTTP_410_GONE,
                 detail="Data export has expired",
@@ -314,7 +315,7 @@ async def download_data_export(
             "requested_at": safe_isoformat(export_request.requested_at),
             "completed_at": safe_isoformat(export_request.completed_at),
             "expires_at": safe_isoformat(export_request.expires_at),
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": to_naive_utc(utcnow()).isoformat(),
         },
         "personal_data": {
             "id": str(user.id),

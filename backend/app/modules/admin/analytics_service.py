@@ -13,6 +13,7 @@ from collections import defaultdict
 from sqlalchemy import select, func, and_, or_, extract, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.admin.analytics_schemas import (
     PlatformMetricsResponse,
     PeriodComparison,
@@ -69,7 +70,7 @@ class AdminAnalyticsService:
         from app.modules.billing.models import Subscription, SubscriptionStatus, Plan
         
         if not end_date:
-            end_date = datetime.utcnow()
+            end_date = to_naive_utc(utcnow())
         if not start_date:
             start_date = end_date - timedelta(days=30)
         
@@ -293,7 +294,7 @@ class AdminAnalyticsService:
         from app.modules.billing.models import Subscription, SubscriptionStatus
         
         if not end_date:
-            end_date = datetime.utcnow()
+            end_date = to_naive_utc(utcnow())
         if not start_date:
             start_date = end_date - timedelta(days=90)
         
@@ -428,7 +429,7 @@ class AdminAnalyticsService:
         """
         from app.modules.auth.models import User
         
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         
         # Active streams
         _, active_streams = await self._get_stream_counts()
@@ -520,7 +521,7 @@ class AdminAnalyticsService:
         from app.modules.auth.models import User
         
         if not end_date:
-            end_date = datetime.utcnow()
+            end_date = to_naive_utc(utcnow())
         if not start_date:
             start_date = end_date - timedelta(days=180)  # 6 months
         
@@ -628,7 +629,7 @@ class AdminAnalyticsService:
         from app.modules.billing.models import Subscription, SubscriptionStatus
         
         if not end_date:
-            end_date = datetime.utcnow()
+            end_date = to_naive_utc(utcnow())
         if not start_date:
             start_date = end_date - timedelta(days=30)
         
@@ -930,7 +931,7 @@ class AdminAnalyticsService:
         from app.modules.auth.models import User
         
         if not end_date:
-            end_date = datetime.utcnow()
+            end_date = to_naive_utc(utcnow())
         if not start_date:
             start_date = end_date - timedelta(days=30)
         
@@ -1019,7 +1020,7 @@ class AdminAnalyticsService:
         from app.modules.auth.models import User
         
         if not end_date:
-            end_date = datetime.utcnow()
+            end_date = to_naive_utc(utcnow())
         if not start_date:
             start_date = end_date - timedelta(days=30)
         
@@ -1252,7 +1253,7 @@ class AdminAnalyticsService:
         """
         from app.modules.admin.models import DashboardExport, ExportStatus, ExportFormat
         
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         
         # Create export record
         export = DashboardExport(
@@ -1295,8 +1296,8 @@ class AdminAnalyticsService:
             export.file_path = file_path
             export.file_size = file_size
             export.download_url = download_url
-            export.completed_at = datetime.utcnow()
-            export.expires_at = datetime.utcnow() + timedelta(hours=24)
+            export.completed_at = to_naive_utc(utcnow())
+            export.expires_at = to_naive_utc(utcnow()) + timedelta(hours=24)
             
             await self.session.commit()
             
@@ -1344,7 +1345,7 @@ class AdminAnalyticsService:
         """
         export_data = {
             "export_info": {
-                "generated_at": datetime.utcnow().isoformat(),
+                "generated_at": to_naive_utc(utcnow()).isoformat(),
                 "start_date": start_date.isoformat() if start_date else None,
                 "end_date": end_date.isoformat() if end_date else None,
                 "metrics_included": metrics,
@@ -1601,7 +1602,7 @@ class AdminAnalyticsService:
         import os
         
         file_size = len(content)
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = to_naive_utc(utcnow()).strftime("%Y%m%d_%H%M%S")
         file_name = f"dashboard_export_{timestamp}.{file_ext}"
         file_path = f"exports/admin/{admin_id}/{export_id}/{file_name}"
         
@@ -1661,3 +1662,4 @@ class AdminAnalyticsService:
             completed_at=export.completed_at,
             file_size=export.file_size,
         )
+

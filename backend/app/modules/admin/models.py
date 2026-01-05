@@ -16,6 +16,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.core.database import Base
+from app.core.datetime_utils import utcnow, to_naive_utc
 
 
 class DiscountType(str, Enum):
@@ -435,7 +436,7 @@ class ContentReport(Base):
             notes: Optional review notes
         """
         self.reviewed_by = admin_id
-        self.reviewed_at = datetime.utcnow()
+        self.reviewed_at = to_naive_utc(utcnow())
         self.status = status.value
         if notes:
             self.review_notes = notes
@@ -1094,7 +1095,7 @@ class TrialCode(Base):
             bool: True if code is valid
         """
         if current_date is None:
-            current_date = datetime.utcnow()
+            current_date = utcnow()
         
         # Check if code is active
         if not self.is_active:
@@ -1744,7 +1745,7 @@ class DeletionRequest(Base):
         Returns:
             int: Days remaining (0 if past scheduled date)
         """
-        now = datetime.utcnow()
+        now = utcnow()
         if self.scheduled_for.tzinfo:
             from datetime import timezone
             now = datetime.now(timezone.utc)

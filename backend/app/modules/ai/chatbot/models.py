@@ -15,6 +15,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.core.database import Base
+from app.core.datetime_utils import utcnow, to_naive_utc
 
 
 class PersonalityType(str, Enum):
@@ -144,7 +145,7 @@ class ChatbotConfig(Base):
             paused_by: Channel ID of who paused the bot
         """
         self.is_paused = True
-        self.paused_at = datetime.utcnow()
+        self.paused_at = to_naive_utc(utcnow())
         self.paused_by = paused_by
 
     def resume(self) -> None:
@@ -231,7 +232,7 @@ class ChatbotTrigger(Base):
     def increment_trigger_count(self) -> None:
         """Increment trigger count and update last triggered time."""
         self.trigger_count += 1
-        self.last_triggered_at = datetime.utcnow()
+        self.last_triggered_at = to_naive_utc(utcnow())
 
     def __repr__(self) -> str:
         return f"<ChatbotTrigger(id={self.id}, name={self.name}, type={self.trigger_type})>"
@@ -317,7 +318,7 @@ class ChatbotInteractionLog(Base):
         self.was_responded = True
         self.response_content = response_content
         self.response_message_id = response_message_id
-        self.processing_completed_at = datetime.utcnow()
+        self.processing_completed_at = to_naive_utc(utcnow())
         if self.processing_started_at:
             delta = self.processing_completed_at - self.processing_started_at
             self.response_time_ms = delta.total_seconds() * 1000
@@ -332,7 +333,7 @@ class ChatbotInteractionLog(Base):
         """
         self.was_declined = True
         self.decline_reason = reason
-        self.processing_completed_at = datetime.utcnow()
+        self.processing_completed_at = to_naive_utc(utcnow())
         if self.processing_started_at:
             delta = self.processing_completed_at - self.processing_started_at
             self.response_time_ms = delta.total_seconds() * 1000

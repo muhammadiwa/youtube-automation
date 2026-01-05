@@ -5,13 +5,14 @@ Requirements: 27.1, 27.2, 27.3, 27.4, 27.5, 28.1, 28.3, 28.4, 28.5
 """
 
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.billing.service import BillingService
 from app.modules.billing.schemas import (
     PlanTier,
@@ -811,13 +812,13 @@ async def send_test_billing_notification(
             user_id=user_id,
             plan_name="Pro",
             billing_cycle="monthly",
-            expires_at=datetime.utcnow() + timedelta(days=30),
+            expires_at=to_naive_utc(utcnow()) + timedelta(days=30),
         )
     elif notification_type == "subscription_expiring":
         await notification_service.notify_subscription_expiring(
             user_id=user_id,
             plan_name="Pro",
-            expires_at=datetime.utcnow() + timedelta(days=3),
+            expires_at=to_naive_utc(utcnow()) + timedelta(days=3),
             days_remaining=3,
         )
     elif notification_type == "subscription_expired":

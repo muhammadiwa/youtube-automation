@@ -4,7 +4,7 @@ Implements encrypted token storage for OAuth credentials as per Requirements 2.1
 """
 
 import uuid
-from datetime import datetime
+from datetime import timedelta
 from enum import Enum
 from typing import Optional
 
@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from app.core.database import Base
 from app.core.encryption import decrypt_token, encrypt_token, is_encrypted
+from app.core.datetime_utils import utcnow, to_naive_utc, datetime
 
 if TYPE_CHECKING:
     from app.modules.auth.models import User
@@ -175,7 +176,7 @@ class YouTubeAccount(Base):
         """
         if self.token_expires_at is None:
             return True
-        return datetime.utcnow() >= self.token_expires_at.replace(tzinfo=None)
+        return to_naive_utc(utcnow()) >= self.token_expires_at.replace(tzinfo=None)
 
     def is_token_expiring_soon(self, hours: int = 24) -> bool:
         """Check if the token is expiring within the specified hours.
@@ -188,8 +189,7 @@ class YouTubeAccount(Base):
         """
         if self.token_expires_at is None:
             return True
-        from datetime import timedelta
-        expiry_threshold = datetime.utcnow() + timedelta(hours=hours)
+        expiry_threshold = to_naive_utc(utcnow()) + timedelta(hours=hours)
         return self.token_expires_at.replace(tzinfo=None) <= expiry_threshold
 
     @property
@@ -251,3 +251,4 @@ class YouTubeAccount(Base):
 
     def __repr__(self) -> str:
         return f"<YouTubeAccount(id={self.id}, channel={self.channel_title}, status={self.status})>"
+

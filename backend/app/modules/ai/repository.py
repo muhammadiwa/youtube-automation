@@ -11,6 +11,7 @@ from typing import Optional
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.ai.models import AIFeedback, AIUserPreferences, ThumbnailLibrary
 
 
@@ -142,7 +143,7 @@ class AIPreferencesRepository:
                 existing.brand_keywords = brand_keywords
             if avoid_keywords is not None:
                 existing.avoid_keywords = avoid_keywords
-            existing.updated_at = datetime.utcnow()
+            existing.updated_at = to_naive_utc(utcnow())
             await self.session.flush()
             return existing
 

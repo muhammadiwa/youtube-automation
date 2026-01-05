@@ -12,6 +12,7 @@ from typing import Optional
 
 from app.core.config import settings
 from app.core.alerting import alert_manager, AlertSeverity, AlertThreshold
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.admin.system_schemas import (
     AdminHealthStatus,
     ComponentStatus,
@@ -83,7 +84,7 @@ class AdminSystemService:
         
         return AdminSystemHealthResponse(
             overall_status=overall_status,
-            timestamp=datetime.utcnow(),
+            timestamp=to_naive_utc(utcnow()),
             version=getattr(settings, 'VERSION', '1.0.0'),
             uptime_seconds=time.time() - _app_start_time,
             components=components,
@@ -126,7 +127,7 @@ class AdminSystemService:
             status=ComponentStatus.HEALTHY,
             message="API is responding",
             latency_ms=0.0,
-            last_check=datetime.utcnow(),
+            last_check=to_naive_utc(utcnow()),
             details={"version": getattr(settings, 'VERSION', '1.0.0')},
         )
     
@@ -162,7 +163,7 @@ class AdminSystemService:
                 status=status,
                 message=message,
                 latency_ms=round(latency, 2),
-                last_check=datetime.utcnow(),
+                last_check=to_naive_utc(utcnow()),
                 details={"type": "postgresql"},
                 suggested_action=suggested_action,
             )
@@ -175,7 +176,7 @@ class AdminSystemService:
                 status=ComponentStatus.DOWN,
                 message=f"Database connection failed: {str(e)}",
                 latency_ms=round(latency, 2),
-                last_check=datetime.utcnow(),
+                last_check=to_naive_utc(utcnow()),
                 suggested_action="Check database server status and connection settings",
             )
     
@@ -217,7 +218,7 @@ class AdminSystemService:
                 status=status,
                 message=message,
                 latency_ms=round(latency, 2),
-                last_check=datetime.utcnow(),
+                last_check=to_naive_utc(utcnow()),
                 details={
                     "used_memory_human": info.get("used_memory_human", "unknown"),
                 },
@@ -232,7 +233,7 @@ class AdminSystemService:
                 status=ComponentStatus.DOWN,
                 message=f"Redis connection failed: {str(e)}",
                 latency_ms=round(latency, 2),
-                last_check=datetime.utcnow(),
+                last_check=to_naive_utc(utcnow()),
                 suggested_action="Check Redis server status and connection settings",
             )
     
@@ -260,7 +261,7 @@ class AdminSystemService:
                     status=ComponentStatus.DOWN,
                     message="No workers responding",
                     latency_ms=round(latency, 2),
-                    last_check=datetime.utcnow(),
+                    last_check=to_naive_utc(utcnow()),
                     suggested_action="Start Celery workers or check broker connection",
                 )
             
@@ -285,7 +286,7 @@ class AdminSystemService:
                 status=status,
                 message=message,
                 latency_ms=round(latency, 2),
-                last_check=datetime.utcnow(),
+                last_check=to_naive_utc(utcnow()),
                 details={"worker_count": worker_count, "active_count": active_count},
                 suggested_action=suggested_action,
             )
@@ -298,7 +299,7 @@ class AdminSystemService:
                 status=ComponentStatus.DOWN,
                 message=f"Worker check failed: {str(e)}",
                 latency_ms=round(latency, 2),
-                last_check=datetime.utcnow(),
+                last_check=to_naive_utc(utcnow()),
                 suggested_action="Check Celery broker connection and worker processes",
             )
     
@@ -320,7 +321,7 @@ class AdminSystemService:
                 status=ComponentStatus.HEALTHY,
                 message="Agents service available",
                 latency_ms=round(latency, 2),
-                last_check=datetime.utcnow(),
+                last_check=to_naive_utc(utcnow()),
                 details={"type": "streaming_agents"},
             )
         except Exception as e:
@@ -332,7 +333,7 @@ class AdminSystemService:
                 status=ComponentStatus.DEGRADED,
                 message=f"Agents check failed: {str(e)}",
                 latency_ms=round(latency, 2),
-                last_check=datetime.utcnow(),
+                last_check=to_naive_utc(utcnow()),
                 suggested_action="Check agent service status",
             )
 
@@ -393,7 +394,7 @@ class AdminSystemService:
             logger.error(f"Failed to get job queue status: {e}")
         
         return AdminJobQueueResponse(
-            timestamp=datetime.utcnow(),
+            timestamp=to_naive_utc(utcnow()),
             total_depth=total_depth,
             total_processing=total_processing,
             total_failed=total_failed,
@@ -452,7 +453,7 @@ class AdminSystemService:
                     current_jobs=current_jobs,
                     completed_jobs=worker_stats.get('total', {}).get('tasks', 0),
                     failed_jobs=0,  # Would need tracking
-                    last_heartbeat=datetime.utcnow(),
+                    last_heartbeat=to_naive_utc(utcnow()),
                     started_at=None,
                     hostname=worker_name.split('@')[1] if '@' in worker_name else None,
                 )
@@ -468,7 +469,7 @@ class AdminSystemService:
         utilization = (current_load / total_capacity * 100) if total_capacity > 0 else 0
         
         return AdminWorkerStatusResponse(
-            timestamp=datetime.utcnow(),
+            timestamp=to_naive_utc(utcnow()),
             total_workers=total_workers,
             active_workers=active_workers,
             idle_workers=idle_workers,
@@ -539,7 +540,7 @@ class AdminSystemService:
                 status="restarting",
                 message=f"Worker {worker_id} restart initiated" + (" (graceful)" if graceful else " (forced)"),
                 jobs_reassigned=0,  # Would need to track this
-                restarted_at=datetime.utcnow(),
+                restarted_at=to_naive_utc(utcnow()),
             )
             
         except Exception as e:
@@ -549,7 +550,7 @@ class AdminSystemService:
                 status="failed",
                 message=f"Failed to restart worker: {str(e)}",
                 jobs_reassigned=0,
-                restarted_at=datetime.utcnow(),
+                restarted_at=to_naive_utc(utcnow()),
             )
     
     async def get_error_alerts(self, limit: int = 50) -> AdminErrorAlertsResponse:

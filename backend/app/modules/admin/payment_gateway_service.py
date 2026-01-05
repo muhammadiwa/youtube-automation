@@ -37,6 +37,7 @@ from app.modules.payment_gateway.models import (
 )
 from app.modules.payment_gateway.interface import encrypt_credential, ValidationResult
 from app.modules.payment_gateway.service import PaymentGatewayFactory, GatewayManagerService
+from app.core.datetime_utils import utcnow, to_naive_utc
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +169,7 @@ class AdminPaymentGatewayService:
         return GatewayStatusUpdateResponse(
             provider=provider,
             is_enabled=data.is_enabled,
-            updated_at=datetime.utcnow(),
+            updated_at=to_naive_utc(utcnow()),
             message=message,
         )
     
@@ -231,7 +232,7 @@ class AdminPaymentGatewayService:
         return GatewaySetDefaultResponse(
             provider=provider,
             is_default=True,
-            updated_at=datetime.utcnow(),
+            updated_at=to_naive_utc(utcnow()),
             message=f"Gateway {provider} is now the default payment gateway",
         )
     
@@ -316,7 +317,7 @@ class AdminPaymentGatewayService:
             provider=provider,
             credentials_valid=credentials_valid,
             sandbox_mode=data.sandbox_mode,
-            updated_at=datetime.utcnow(),
+            updated_at=to_naive_utc(utcnow()),
             message=validation_message,
         )
     
@@ -447,7 +448,7 @@ class AdminPaymentGatewayService:
             success_rate=stats.success_rate,
             suggested_action=suggested_action,
             alternative_gateways=alternatives,
-            created_at=datetime.utcnow(),
+            created_at=to_naive_utc(utcnow()),
         )
         
         return False, alert
@@ -584,7 +585,7 @@ class AdminPaymentGatewayService:
     
     async def _calculate_volume_24h(self, provider: str) -> float:
         """Calculate transaction volume in last 24 hours."""
-        cutoff = datetime.utcnow() - timedelta(hours=24)
+        cutoff = to_naive_utc(utcnow()) - timedelta(hours=24)
         
         result = await self.session.execute(
             select(func.sum(PaymentTransaction.amount))

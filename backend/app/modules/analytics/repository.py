@@ -144,12 +144,55 @@ class AnalyticsRepository:
         Returns:
             dict: Aggregated metrics
         """
-        query = select(
+        # For cumulative metrics (subscriber_count, total_videos), we need the latest snapshot per account
+        # For period metrics (views, likes, comments, watch_time), we sum across the period
+        
+        # First, get the latest snapshot for each account in the date range
+        from sqlalchemy import distinct
+        from sqlalchemy.orm import aliased
+        
+        # Subquery to get latest snapshot date per account
+        latest_subquery = (
+            select(
+                AnalyticsSnapshot.account_id,
+                sql_func.max(AnalyticsSnapshot.snapshot_date).label("latest_date")
+            )
+            .where(
+                and_(
+                    AnalyticsSnapshot.snapshot_date >= start_date,
+                    AnalyticsSnapshot.snapshot_date <= end_date,
+                )
+            )
+            .group_by(AnalyticsSnapshot.account_id)
+        )
+        
+        if account_ids:
+            latest_subquery = latest_subquery.where(AnalyticsSnapshot.account_id.in_(account_ids))
+        
+        latest_subquery = latest_subquery.subquery()
+        
+        # Get cumulative metrics from latest snapshots only
+        cumulative_query = select(
             sql_func.sum(AnalyticsSnapshot.subscriber_count).label("total_subscribers"),
+            sql_func.sum(AnalyticsSnapshot.total_videos).label("total_videos"),
+        ).select_from(
+            AnalyticsSnapshot
+        ).join(
+            latest_subquery,
+            and_(
+                AnalyticsSnapshot.account_id == latest_subquery.c.account_id,
+                AnalyticsSnapshot.snapshot_date == latest_subquery.c.latest_date
+            )
+        )
+        
+        cumulative_result = await self.session.execute(cumulative_query)
+        cumulative_row = cumulative_result.one()
+        
+        # Get period metrics by summing across all snapshots in the range
+        period_query = select(
             sql_func.sum(AnalyticsSnapshot.subscriber_change).label("subscriber_change"),
             sql_func.sum(AnalyticsSnapshot.total_views).label("total_views"),
             sql_func.sum(AnalyticsSnapshot.views_change).label("views_change"),
-            sql_func.sum(AnalyticsSnapshot.total_videos).label("total_videos"),
             sql_func.sum(AnalyticsSnapshot.total_likes).label("total_likes"),
             sql_func.sum(AnalyticsSnapshot.total_comments).label("total_comments"),
             sql_func.avg(AnalyticsSnapshot.engagement_rate).label("avg_engagement_rate"),
@@ -161,22 +204,24 @@ class AnalyticsRepository:
                 AnalyticsSnapshot.snapshot_date <= end_date,
             )
         )
+        
         if account_ids:
-            query = query.where(AnalyticsSnapshot.account_id.in_(account_ids))
-
-        result = await self.session.execute(query)
-        row = result.one()
+            period_query = period_query.where(AnalyticsSnapshot.account_id.in_(account_ids))
+        
+        period_result = await self.session.execute(period_query)
+        period_row = period_result.one()
+        
         return {
-            "total_subscribers": row.total_subscribers or 0,
-            "subscriber_change": row.subscriber_change or 0,
-            "total_views": row.total_views or 0,
-            "views_change": row.views_change or 0,
-            "total_videos": row.total_videos or 0,
-            "total_likes": row.total_likes or 0,
-            "total_comments": row.total_comments or 0,
-            "average_engagement_rate": float(row.avg_engagement_rate or 0),
-            "total_watch_time_minutes": row.total_watch_time or 0,
-            "total_revenue": float(row.total_revenue or 0),
+            "total_subscribers": cumulative_row.total_subscribers or 0,
+            "subscriber_change": period_row.subscriber_change or 0,
+            "total_views": period_row.total_views or 0,
+            "views_change": period_row.views_change or 0,
+            "total_videos": cumulative_row.total_videos or 0,
+            "total_likes": period_row.total_likes or 0,
+            "total_comments": period_row.total_comments or 0,
+            "average_engagement_rate": float(period_row.avg_engagement_rate or 0),
+            "total_watch_time_minutes": period_row.total_watch_time or 0,
+            "total_revenue": float(period_row.total_revenue or 0),
         }
 
     async def get_latest_snapshot_per_account(

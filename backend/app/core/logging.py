@@ -9,11 +9,11 @@ import sys
 import traceback
 import json
 import uuid
-from datetime import datetime
 from typing import Optional, Any
 from contextvars import ContextVar
 
 from app.core.tracing import get_trace_id, get_span_id
+from app.core.datetime_utils import utcnow, to_naive_utc
 
 # Context variable for correlation ID
 correlation_id_var: ContextVar[Optional[str]] = ContextVar("correlation_id", default=None)
@@ -76,7 +76,7 @@ class StructuredFormatter(logging.Formatter):
             JSON formatted log string
         """
         log_data = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": to_naive_utc(utcnow()).isoformat() + "Z",
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
@@ -262,3 +262,4 @@ def log_info(
     """
     extra["correlation_id"] = get_correlation_id()
     logger.info(message, extra=extra)
+

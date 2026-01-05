@@ -17,6 +17,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.alerting import alert_manager, AlertSeverity, AlertThreshold
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.admin.quota_schemas import (
     QuotaDashboardResponse,
     UserQuotaUsage,
@@ -140,7 +141,7 @@ class AdminQuotaService:
         high_usage_users.sort(key=lambda u: u.highest_usage_percent, reverse=True)
         
         return QuotaDashboardResponse(
-            timestamp=datetime.utcnow(),
+            timestamp=to_naive_utc(utcnow()),
             total_daily_quota_used=total_quota_used,
             total_daily_quota_limit=total_quota_limit,
             platform_usage_percent=round(platform_usage_percent, 2),
@@ -215,7 +216,7 @@ class AdminQuotaService:
         )
         
         alert_info = QuotaAlertInfo(
-            id=f"quota_{account_id}_{datetime.utcnow().timestamp()}",
+            id=f"quota_{account_id}_{utcnow().timestamp()}",
             user_id=account.user_id,
             user_email=user.email if user else "unknown",
             account_id=account_id,
@@ -223,7 +224,7 @@ class AdminQuotaService:
             usage_percent=round(usage_percent, 2),
             quota_used=quota_used,
             quota_limit=quota_limit,
-            triggered_at=datetime.utcnow(),
+            triggered_at=to_naive_utc(utcnow()),
             notified=True,
         )
         
@@ -275,7 +276,7 @@ class AdminQuotaService:
                     usage_percent=round(usage_percent, 2),
                     quota_used=account.daily_quota_used,
                     quota_limit=DEFAULT_DAILY_QUOTA_LIMIT,
-                    triggered_at=datetime.utcnow(),
+                    triggered_at=to_naive_utc(utcnow()),
                     notified=True,
                 )
                 alerts.append(alert)
@@ -289,7 +290,7 @@ class AdminQuotaService:
         alerts.sort(key=lambda a: a.usage_percent, reverse=True)
         
         return QuotaAlertsResponse(
-            timestamp=datetime.utcnow(),
+            timestamp=to_naive_utc(utcnow()),
             alerts=alerts,
             total_alerts=len(alerts),
             critical_count=critical_count,

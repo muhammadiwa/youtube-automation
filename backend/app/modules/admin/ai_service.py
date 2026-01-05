@@ -10,6 +10,7 @@ from typing import Optional
 from sqlalchemy import select, func, and_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.admin.models import SystemConfig, ConfigCategory
 from app.modules.admin.ai_schemas import (
     AIDashboardMetrics,
@@ -201,7 +202,7 @@ class AdminAIService:
         """
         # Default to current month
         if end_date is None:
-            end_date = datetime.utcnow()
+            end_date = to_naive_utc(utcnow())
         if start_date is None:
             start_date = end_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
@@ -373,7 +374,7 @@ class AdminAIService:
         
         config.value["limits_by_plan"] = limits_data
         config.updated_by = admin_id
-        config.updated_at = datetime.utcnow()
+        config.updated_at = to_naive_utc(utcnow())
         
         await self.db.commit()
         await self.db.refresh(config)
@@ -415,7 +416,7 @@ class AdminAIService:
                 config.value[field] = value
         
         config.updated_by = admin_id
-        config.updated_at = datetime.utcnow()
+        config.updated_at = to_naive_utc(utcnow())
         
         await self.db.commit()
         await self.db.refresh(config)
@@ -550,7 +551,7 @@ class AdminAIService:
         throttle_at = config.value.get("throttle_at_percentage", 90)
         
         # Get current month spend
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         
         current_spend = await self._get_current_month_spend(month_start, now)
@@ -640,7 +641,7 @@ class AdminAIService:
                 config.value[field] = value
         
         config.updated_by = admin_id
-        config.updated_at = datetime.utcnow()
+        config.updated_at = to_naive_utc(utcnow())
         
         await self.db.commit()
         await self.db.refresh(config)
@@ -677,7 +678,7 @@ class AdminAIService:
                     current_spend_usd=status.current_spend_usd,
                     monthly_budget_usd=status.monthly_budget_usd,
                     message=f"AI budget has reached {threshold}% ({status.current_spend_usd:.2f} USD of {status.monthly_budget_usd:.2f} USD)",
-                    created_at=datetime.utcnow(),
+                    created_at=to_naive_utc(utcnow()),
                     acknowledged=False,
                 )
                 alerts.append(alert)
@@ -756,7 +757,7 @@ class AdminAIService:
         
         config.value["features"] = features_data
         config.updated_by = admin_id
-        config.updated_at = datetime.utcnow()
+        config.updated_at = to_naive_utc(utcnow())
         
         await self.db.commit()
         await self.db.refresh(config)
@@ -798,7 +799,7 @@ class AdminAIService:
         previous_value = config.value.copy()
         config.value["default_model"] = data.default_model
         config.updated_by = admin_id
-        config.updated_at = datetime.utcnow()
+        config.updated_at = to_naive_utc(utcnow())
         
         await self.db.commit()
         await self.db.refresh(config)
@@ -811,3 +812,4 @@ class AdminAIService:
             updated_at=config.updated_at,
             message=f"Default AI model updated to '{data.default_model}'",
         )
+

@@ -17,7 +17,6 @@ import subprocess
 import shutil
 import json
 import gzip
-from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
 import logging
@@ -26,6 +25,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.admin.models import Backup, BackupStatus, BackupType
 
 logger = logging.getLogger(__name__)
@@ -126,7 +126,7 @@ class BackupWorker:
     
     def _get_backup_path(self, backup_id: uuid.UUID, backup_type: str) -> Path:
         """Get the path for a backup file."""
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = to_naive_utc(utcnow()).strftime("%Y%m%d_%H%M%S")
         filename = f"backup_{backup_type}_{backup_id}_{timestamp}"
         return self.BACKUP_BASE_DIR / filename
     
@@ -297,7 +297,7 @@ class BackupWorker:
             backup_manifest = {
                 "backup_id": str(backup.id),
                 "backup_type": backup.backup_type,
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": to_naive_utc(utcnow()).isoformat(),
                 "tables": []
             }
             
@@ -397,7 +397,7 @@ class BackupWorker:
             
             file_manifest = {
                 "backup_id": str(backup.id),
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": to_naive_utc(utcnow()).isoformat(),
                 "directories": []
             }
             
@@ -468,7 +468,7 @@ class BackupWorker:
             
             config_manifest = {
                 "backup_id": str(backup.id),
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": to_naive_utc(utcnow()).isoformat(),
                 "files": []
             }
             
@@ -522,7 +522,7 @@ class BackupWorker:
             
             # Update status to in progress
             backup.status = BackupStatus.IN_PROGRESS.value
-            backup.started_at = datetime.utcnow()
+            backup.started_at = to_naive_utc(utcnow())
             backup.location = str(backup_path)
             await self.session.commit()
             
@@ -558,7 +558,7 @@ class BackupWorker:
                 "backup_type": backup.backup_type,
                 "name": backup.name,
                 "description": backup.description,
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": to_naive_utc(utcnow()).isoformat(),
                 "initiated_by": str(backup.initiated_by) if backup.initiated_by else None,
                 "components": {
                     "database": db_success,
@@ -582,7 +582,7 @@ class BackupWorker:
             backup.progress = 100
             backup.size_bytes = total_size
             backup.checksum = checksum
-            backup.completed_at = datetime.utcnow()
+            backup.completed_at = to_naive_utc(utcnow())
             await self.session.commit()
             
             logger.info(f"Backup {backup.id} completed successfully. Size: {total_size} bytes")
@@ -771,7 +771,7 @@ class BackupWorker:
             
             # Update backup as verified
             backup.is_verified = True
-            backup.verified_at = datetime.utcnow()
+            backup.verified_at = to_naive_utc(utcnow())
             backup.status = BackupStatus.VERIFIED.value
             await self.session.commit()
             
@@ -780,3 +780,4 @@ class BackupWorker:
             
         except Exception as e:
             return False, str(e)
+

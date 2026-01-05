@@ -12,6 +12,7 @@ from typing import Optional
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.account.models import YouTubeAccount, AccountStatus
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,7 @@ class TokenExpiryAlert:
     expires_at: Optional[datetime]
     hours_until_expiry: int
     alert_type: str = "token_expiry"
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: to_naive_utc(utcnow()))
     
     def to_dict(self) -> dict:
         """Convert alert to dictionary."""
@@ -95,7 +96,7 @@ def check_token_expiry(
     Returns:
         TokenExpiryAlert if alert should be generated, None otherwise
     """
-    now = datetime.utcnow()
+    now = to_naive_utc(utcnow())
     
     # If expiry is unknown, generate alert
     if token_expires_at is None:
@@ -144,7 +145,7 @@ async def check_expiring_tokens(session: AsyncSession) -> int:
     notification_service = NotificationIntegrationService(session)
     notifications_sent = 0
     
-    now = datetime.utcnow()
+    now = to_naive_utc(utcnow())
     
     # Check for tokens expiring in 24, 12, and 6 hours
     reminder_hours = [24, 12, 6]
@@ -198,7 +199,7 @@ async def check_expired_tokens(session: AsyncSession) -> int:
     notification_service = NotificationIntegrationService(session)
     notifications_sent = 0
     
-    now = datetime.utcnow()
+    now = to_naive_utc(utcnow())
     
     # Find accounts with expired tokens that are still marked as active
     result = await session.execute(
@@ -298,8 +299,9 @@ async def run_account_tasks(session: AsyncSession) -> dict:
         "expiring_token_notifications": expiring_notifications,
         "expired_token_notifications": expired_notifications,
         "quota_warning_notifications": quota_notifications,
-        "run_at": datetime.utcnow().isoformat(),
+        "run_at": to_naive_utc(utcnow()).isoformat(),
     }
     
     logger.info(f"Account tasks completed: {summary}")
     return summary
+

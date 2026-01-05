@@ -8,7 +8,7 @@ from jose import JWTError, jwt
 from pydantic import BaseModel
 
 from app.core.config import settings
-from app.core.datetime_utils import utcnow
+from app.core.datetime_utils import utcnow, to_naive_utc
 
 
 class TokenPayload(BaseModel):
@@ -147,10 +147,14 @@ def decode_token(token: str) -> TokenPayload | None:
     """
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+        # Convert timestamps to naive UTC datetime for consistency
+        exp_dt = datetime.fromtimestamp(payload["exp"], tz=None)
+        iat_dt = datetime.fromtimestamp(payload["iat"], tz=None)
+        
         return TokenPayload(
             sub=payload["sub"],
-            exp=datetime.utcfromtimestamp(payload["exp"]),
-            iat=datetime.utcfromtimestamp(payload["iat"]),
+            exp=exp_dt,
+            iat=iat_dt,
             type=payload["type"],
             jti=payload["jti"],
         )
@@ -181,8 +185,8 @@ def validate_token(token: str, expected_type: str = "access") -> TokenPayload | 
     if TokenBlacklist.is_blacklisted(payload.jti):
         return None
 
-    # Check expiration
-    if payload.exp < utcnow():
+    # Check expiration (compare naive datetimes)
+    if payload.exp < to_naive_utc(utcnow()):
         return None
 
     return payload

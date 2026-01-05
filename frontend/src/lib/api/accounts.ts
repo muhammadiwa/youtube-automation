@@ -82,7 +82,17 @@ export const accountsApi = {
         try {
             const params = filters ? { ...filters } as Record<string, string | number | boolean | undefined> : undefined
 
+            // DEBUG: Log authentication status
+            const hasToken = !!apiClient.getAccessToken()
+            const userId = apiClient.getUserId()
+            console.log("[accountsApi] 🔍 Fetching accounts...")
+            console.log("[accountsApi] Auth token:", hasToken ? "✓ Present" : "✗ Missing")
+            console.log("[accountsApi] User ID:", userId || "✗ Missing")
+            console.log("[accountsApi] Filters:", params)
+
             const response = await apiClient.get<BackendYouTubeAccount[] | { items: BackendYouTubeAccount[] } | { accounts: BackendYouTubeAccount[] }>("/accounts", params)
+
+            console.log("[accountsApi] ✓ Response received:", response)
 
             // Handle different response formats and transform
             let accounts: BackendYouTubeAccount[] = []
@@ -96,9 +106,31 @@ export const accountsApi = {
                 }
             }
 
+            console.log("[accountsApi] ✓ Parsed accounts:", accounts.length)
+
             return accounts.map(transformAccount)
         } catch (error) {
-            console.error("[accountsApi.getAccounts] Failed to fetch accounts:", error)
+            console.error("[accountsApi.getAccounts] ✗ Failed to fetch accounts:", error)
+
+            // Log detailed error info
+            if (error && typeof error === 'object') {
+                const apiError = error as any
+                console.error("[accountsApi] Error details:", {
+                    status: apiError.status,
+                    message: apiError.message,
+                    code: apiError.code,
+                })
+
+                // Specific error messages
+                if (apiError.status === 401) {
+                    console.error("[accountsApi] ⚠️ Authentication failed! Please login again.")
+                } else if (apiError.status === 403) {
+                    console.error("[accountsApi] ⚠️ Access forbidden! Check user permissions.")
+                } else if (apiError.status === 404) {
+                    console.error("[accountsApi] ⚠️ Endpoint not found! Check API URL.")
+                }
+            }
+
             return []
         }
     },

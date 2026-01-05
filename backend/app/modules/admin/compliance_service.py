@@ -33,6 +33,7 @@ from app.modules.admin.compliance_schemas import (
     ProcessDeletionResponse,
     CancelDeletionResponse,
 )
+from app.core.datetime_utils import utcnow, to_naive_utc
 
 
 class AuditLogNotFoundError(Exception):
@@ -377,7 +378,7 @@ class AdminComplianceService:
         
         # In production, this would upload to S3/storage and return a signed URL
         download_url = f"/admin/audit-logs/download/{export_id}.{format}"
-        expires_at = datetime.utcnow() + timedelta(hours=24)
+        expires_at = to_naive_utc(utcnow()) + timedelta(hours=24)
         
         return AuditLogExportResponse(
             export_id=export_id,
@@ -386,7 +387,7 @@ class AdminComplianceService:
             file_size_bytes=file_size,
             download_url=download_url,
             expires_at=expires_at,
-            created_at=datetime.utcnow(),
+            created_at=to_naive_utc(utcnow()),
         )
     
     async def get_security_dashboard(self) -> SecurityDashboardResponse:
@@ -398,7 +399,7 @@ class AdminComplianceService:
         Returns:
             SecurityDashboardResponse: Security dashboard data
         """
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         day_ago = now - timedelta(days=1)
         week_ago = now - timedelta(days=7)
         
@@ -612,7 +613,7 @@ class AdminComplianceService:
         
         # Update status to processing
         request.status = ExportStatus.PROCESSING.value
-        request.processed_at = datetime.utcnow()
+        request.processed_at = to_naive_utc(utcnow())
         request.processed_by = admin_id
         
         await self.session.commit()
@@ -620,9 +621,9 @@ class AdminComplianceService:
         # Generate the export - in production this could be async for large datasets
         # Mark as completed with download URL
         request.status = ExportStatus.COMPLETED.value
-        request.completed_at = datetime.utcnow()
+        request.completed_at = to_naive_utc(utcnow())
         request.download_url = f"/compliance/exports/{request_id}/download"
-        request.expires_at = datetime.utcnow() + timedelta(days=7)
+        request.expires_at = to_naive_utc(utcnow()) + timedelta(days=7)
         request.file_size = 0  # Will be calculated when downloaded
         
         await self.session.commit()
@@ -698,7 +699,7 @@ class AdminComplianceService:
         
         total_pages = (total + page_size - 1) // page_size if total > 0 else 1
         
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         items = []
         for r in requests:
             # Get user info
@@ -711,7 +712,8 @@ class AdminComplianceService:
             scheduled = r.scheduled_for
             if scheduled.tzinfo is not None:
                 scheduled = scheduled.replace(tzinfo=None)
-            days_remaining = max(0, (scheduled - now).days)
+            now_naive = to_naive_utc(utcnow())
+            days_remaining = max(0, (scheduled - now_naive).days)
             
             items.append(DeletionRequestStatus(
                 id=r.id,
@@ -781,7 +783,7 @@ class AdminComplianceService:
         # Update status to scheduled (with 30-day grace period)
         if request.status == DeletionRequestStatusEnum.PENDING.value:
             request.status = DeletionRequestStatusEnum.SCHEDULED.value
-            request.processed_at = datetime.utcnow()
+            request.processed_at = to_naive_utc(utcnow())
             request.processed_by = admin_id
             
             await self.session.commit()
@@ -813,7 +815,7 @@ class AdminComplianceService:
         
         # If already scheduled, process the deletion
         request.status = DeletionRequestStatusEnum.COMPLETED.value
-        request.completed_at = datetime.utcnow()
+        request.completed_at = to_naive_utc(utcnow())
         
         await self.session.commit()
         await self.session.refresh(request)
@@ -883,7 +885,7 @@ class AdminComplianceService:
         
         # Cancel the request
         request.status = DeletionRequestStatusEnum.CANCELLED.value
-        request.cancelled_at = datetime.utcnow()
+        request.cancelled_at = to_naive_utc(utcnow())
         request.cancelled_by = admin_id
         request.cancellation_reason = reason
         
@@ -1148,10 +1150,10 @@ class AdminTermsOfServiceService:
         # Activate the new terms
         terms.status = TermsOfServiceStatus.ACTIVE.value
         terms.activated_by = admin_id
-        terms.activated_at = datetime.utcnow()
+        terms.activated_at = to_naive_utc(utcnow())
         
         if not terms.effective_date:
-            terms.effective_date = datetime.utcnow()
+            terms.effective_date = to_naive_utc(utcnow())
         
         await self.session.commit()
         await self.session.refresh(terms)
@@ -1336,9 +1338,9 @@ class AdminComplianceReportService:
         
         # Simulate completion
         report.status = ComplianceReportStatus.COMPLETED.value
-        report.completed_at = datetime.utcnow()
+        report.completed_at = to_naive_utc(utcnow())
         report.download_url = f"/admin/compliance/reports/{report.id}/download"
-        report.expires_at = datetime.utcnow() + timedelta(days=30)
+        report.expires_at = to_naive_utc(utcnow()) + timedelta(days=30)
         report.file_size = 1024 * 100  # Simulated 100KB
         
         await self.session.commit()
@@ -1464,3 +1466,4 @@ class AdminComplianceReportService:
             page_size=page_size,
             total_pages=total_pages,
         )
+

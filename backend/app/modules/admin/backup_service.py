@@ -14,6 +14,7 @@ from typing import Optional
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.admin.models import (
     Backup, BackupSchedule, BackupRestore,
     BackupType, BackupStatus, RestoreStatus,
@@ -244,12 +245,12 @@ class AdminBackupService:
             CreateBackupResponse: Created backup
         """
         # Generate backup name if not provided
-        name = data.name or f"Manual Backup - {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}"
+        name = data.name or f"Manual Backup - {to_naive_utc(utcnow()).strftime('%Y-%m-%d %H:%M:%S')}"
         
         # Calculate expiration if retention is set
         expires_at = None
         if data.retention_days:
-            expires_at = datetime.utcnow() + timedelta(days=data.retention_days)
+            expires_at = to_naive_utc(utcnow()) + timedelta(days=data.retention_days)
         
         backup = Backup(
             backup_type=data.backup_type,
@@ -417,7 +418,7 @@ class AdminBackupService:
     
     def _calculate_next_run(self, frequency: str) -> datetime:
         """Calculate next run time based on frequency."""
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         
         if frequency == "hourly":
             return now + timedelta(hours=1)
@@ -534,7 +535,7 @@ class AdminBackupService:
         # Create pre-restore snapshot
         pre_snapshot = Backup(
             backup_type=BackupType.FULL.value,
-            name=f"Pre-restore Snapshot - {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}",
+            name=f"Pre-restore Snapshot - {to_naive_utc(utcnow()).strftime('%Y-%m-%d %H:%M:%S')}",
             description=f"Automatic snapshot before restore from backup {restore.backup_id}",
             status=BackupStatus.PENDING.value,
             progress=0,
@@ -549,7 +550,7 @@ class AdminBackupService:
         # Update restore with approval
         restore.status = RestoreStatus.APPROVED.value
         restore.approved_by = admin_id
-        restore.approved_at = datetime.utcnow()
+        restore.approved_at = to_naive_utc(utcnow())
         restore.pre_restore_snapshot_id = pre_snapshot.id
         
         await self.session.commit()
@@ -572,7 +573,7 @@ class AdminBackupService:
         
         # Start the actual restore process
         restore.status = RestoreStatus.IN_PROGRESS.value
-        restore.started_at = datetime.utcnow()
+        restore.started_at = to_naive_utc(utcnow())
         await self.session.commit()
         
         # Get the backup to restore from
@@ -590,7 +591,7 @@ class AdminBackupService:
             
             if success:
                 restore.status = RestoreStatus.COMPLETED.value
-                restore.completed_at = datetime.utcnow()
+                restore.completed_at = to_naive_utc(utcnow())
             else:
                 restore.status = RestoreStatus.FAILED.value
                 restore.error_message = error
@@ -775,7 +776,7 @@ class AdminBackupService:
             # Calculate exponential backoff delay
             delay_seconds = 60 * (2 ** backup.retry_count)  # 1min, 2min, 4min, etc.
             backup.retry_count += 1
-            backup.next_retry_at = datetime.utcnow() + timedelta(seconds=delay_seconds)
+            backup.next_retry_at = to_naive_utc(utcnow()) + timedelta(seconds=delay_seconds)
             backup.status = BackupStatus.PENDING.value
         else:
             # Max retries exceeded, mark as failed
@@ -785,3 +786,4 @@ class AdminBackupService:
             # AdminAlertService.send_backup_failure_alert(backup)
         
         await self.session.commit()
+

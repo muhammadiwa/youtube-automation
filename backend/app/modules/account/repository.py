@@ -5,12 +5,13 @@ Requirements: 2.1, 2.2, 25.1
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.account.models import AccountStatus, YouTubeAccount
 
 
@@ -68,7 +69,7 @@ class YouTubeAccountRepository:
             has_live_streaming_enabled=has_live_streaming_enabled,
             token_expires_at=token_expires_at,
             status=AccountStatus.ACTIVE.value,
-            last_sync_at=datetime.utcnow(),
+            last_sync_at=to_naive_utc(utcnow()),
         )
         # Set tokens through properties to ensure encryption
         account.access_token = access_token
@@ -145,12 +146,12 @@ class YouTubeAccountRepository:
             list[YouTubeAccount]: Accounts with expiring tokens
         """
         from datetime import timedelta
-        threshold = datetime.utcnow() + timedelta(hours=hours)
+        threshold = to_naive_utc(utcnow()) + timedelta(hours=hours)
         result = await self.session.execute(
             select(YouTubeAccount)
             .where(YouTubeAccount.status == AccountStatus.ACTIVE.value)
             .where(YouTubeAccount.token_expires_at <= threshold)
-            .where(YouTubeAccount.token_expires_at > datetime.utcnow())
+            .where(YouTubeAccount.token_expires_at > to_naive_utc(utcnow()))
         )
         return list(result.scalars().all())
 
@@ -243,7 +244,7 @@ class YouTubeAccountRepository:
         if strike_count is not None:
             account.strike_count = strike_count
 
-        account.last_sync_at = datetime.utcnow()
+        account.last_sync_at = to_naive_utc(utcnow())
         await self.session.flush()
         return account
 
@@ -289,7 +290,7 @@ class YouTubeAccountRepository:
             YouTubeAccount: Updated account instance
         """
         account.daily_quota_used = 0
-        account.quota_reset_at = datetime.utcnow()
+        account.quota_reset_at = to_naive_utc(utcnow())
         await self.session.flush()
         return account
 
@@ -398,6 +399,7 @@ class YouTubeAccountRepository:
         if default_stream_id is not None:
             account.default_stream_id = default_stream_id
         
-        account.last_sync_at = datetime.utcnow()
+        account.last_sync_at = to_naive_utc(utcnow())
         await self.session.flush()
         return account
+

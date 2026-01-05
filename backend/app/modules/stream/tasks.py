@@ -5,7 +5,7 @@ Requirements: 6.1, 6.4, 6.5
 """
 
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Optional
 
 from celery import Task

@@ -8,11 +8,11 @@ import shutil
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import BinaryIO, Optional, Union
 
 from app.core.config import settings
+from app.core.datetime_utils import utcnow, to_naive_utc
 
 
 @dataclass
@@ -455,7 +455,7 @@ class Storage:
             Generated key
         """
         if include_date:
-            date_prefix = datetime.utcnow().strftime("%Y/%m/%d")
+            date_prefix = to_naive_utc(utcnow()).strftime("%Y/%m/%d")
             return f"{prefix}/{date_prefix}/{filename}"
         return f"{prefix}/{filename}"
 
@@ -550,3 +550,4 @@ class StorageService:
 
 # Global storage service instance
 storage_service = StorageService()
+

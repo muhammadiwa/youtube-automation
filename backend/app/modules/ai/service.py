@@ -10,6 +10,8 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow
+
 from app.modules.ai.openai_client import OpenAIClient, get_openai_client, OpenAIClientError
 from app.modules.ai.prompts import (
     TITLE_GENERATION_SYSTEM,
@@ -154,7 +156,7 @@ class AIService:
 
             return TitleGenerationResponse(
                 suggestions=suggestions[:self.REQUIRED_TITLE_COUNT],
-                generated_at=datetime.utcnow(),
+                generated_at=utcnow(),
             )
 
         except OpenAIClientError as e:
@@ -214,7 +216,7 @@ class AIService:
 
             return DescriptionGenerationResponse(
                 suggestion=suggestion,
-                generated_at=datetime.utcnow(),
+                generated_at=utcnow(),
             )
 
         except OpenAIClientError as e:
@@ -279,7 +281,7 @@ class AIService:
 
             return TagSuggestionResponse(
                 suggestions=suggestions,
-                generated_at=datetime.utcnow(),
+                generated_at=utcnow(),
             )
 
         except OpenAIClientError as e:
@@ -373,7 +375,7 @@ class AIService:
 
             return ThumbnailGenerationResponse(
                 thumbnails=thumbnails[:self.REQUIRED_THUMBNAIL_COUNT],
-                generated_at=datetime.utcnow(),
+                generated_at=utcnow(),
             )
 
         except OpenAIClientError as e:
@@ -443,7 +445,7 @@ class AIService:
             updated_at = prefs.updated_at
         else:
             preferences = AIPreferences()
-            updated_at = datetime.utcnow()
+            updated_at = utcnow()
 
         return AIPreferencesResponse(
             user_id=user_id,

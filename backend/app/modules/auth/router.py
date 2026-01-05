@@ -106,6 +106,7 @@ async def login(
         HTTPException: If credentials are invalid
     """
     from app.core.geolocation import get_client_ip
+    from app.modules.auth.service import AuthenticationError
     
     service = AuthService(db)
     client_ip = get_client_ip(request)
@@ -125,6 +126,11 @@ async def login(
             token_type=result["token_type"],
             requires_2fa=result.get("requires_2fa", False),
             temp_token=result.get("temp_token"),
+        )
+    except AuthenticationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
         )
     except ValueError as e:
         raise HTTPException(
@@ -155,11 +161,18 @@ async def refresh_token(
     Raises:
         HTTPException: If refresh token is invalid
     """
+    from app.modules.auth.service import AuthenticationError
+    
     service = AuthService(db)
     
     try:
         result = await service.refresh_token(data.refresh_token)
         return TokenResponse(**result)
+    except AuthenticationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -232,9 +245,18 @@ async def enable_2fa(
     Returns:
         TwoFactorSetupResponse: TOTP secret, QR code, and backup codes
     """
+    from app.modules.auth.service import AuthenticationError
+    
     service = AuthService(db)
-    result = await service.enable_2fa(current_user.id)
-    return TwoFactorSetupResponse(**result)
+    
+    try:
+        result = await service.enable_2fa(current_user.id)
+        return TwoFactorSetupResponse(**result)
+    except AuthenticationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
 
 
 @router.post(
@@ -260,11 +282,18 @@ async def verify_2fa_setup(
     Raises:
         HTTPException: If code is invalid
     """
+    from app.modules.auth.service import AuthenticationError
+    
     service = AuthService(db)
     
     try:
         result = await service.verify_2fa_setup(current_user.id, data.code)
         return result
+    except AuthenticationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -303,6 +332,7 @@ async def verify_2fa_login(
         HTTPException: If code or temp token is invalid
     """
     from app.core.geolocation import get_client_ip
+    from app.modules.auth.service import AuthenticationError
     
     service = AuthService(db)
     client_ip = get_client_ip(request)
@@ -313,6 +343,11 @@ async def verify_2fa_login(
         
         result = await service.verify_2fa_login(data.temp_token, data.code, client_ip)
         return TokenResponse(**result)
+    except AuthenticationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -341,10 +376,17 @@ async def disable_2fa(
     Raises:
         HTTPException: If code is invalid
     """
+    from app.modules.auth.service import AuthenticationError
+    
     service = AuthService(db)
     
     try:
         await service.disable_2fa(current_user.id, data.code)
+    except AuthenticationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

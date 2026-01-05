@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.admin.middleware import (
     verify_admin_access,
     require_permission,
@@ -243,7 +244,7 @@ async def check_gateway_health(
                 success_rate=stats.success_rate if stats else 100.0,
                 suggested_action=None,
                 alternative_gateways=[],
-                created_at=datetime.utcnow(),
+                created_at=to_naive_utc(utcnow()),
             )
         
         return alert

@@ -12,6 +12,8 @@ from sqlalchemy import select, func, or_, and_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.datetime_utils import utcnow, to_naive_utc
+
 # Import models to ensure SQLAlchemy relationships are resolved
 from app.modules.account.models import YouTubeAccount  # noqa: F401
 
@@ -343,7 +345,7 @@ class AdminSupportService:
         # Set resolved_at if status is resolved or closed
         resolved_at = None
         if new_status in [TicketStatus.RESOLVED.value, TicketStatus.CLOSED.value]:
-            ticket.resolved_at = datetime.utcnow()
+            ticket.resolved_at = to_naive_utc(utcnow())
             resolved_at = ticket.resolved_at
         elif old_status in [TicketStatus.RESOLVED.value, TicketStatus.CLOSED.value]:
             # Reopening ticket
@@ -558,7 +560,7 @@ class AdminSupportService:
         broadcast.status = BroadcastStatus.SENT.value
         broadcast.sent_count = sent_count
         broadcast.failed_count = failed_count
-        broadcast.sent_at = datetime.utcnow()
+        broadcast.sent_at = to_naive_utc(utcnow())
         
         await self.session.commit()
         

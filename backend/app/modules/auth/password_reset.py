@@ -2,10 +2,10 @@
 
 import secrets
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import NamedTuple
 
-from app.core.datetime_utils import utcnow
+from app.core.datetime_utils import utcnow, datetime
 
 
 class PasswordResetToken(NamedTuple):

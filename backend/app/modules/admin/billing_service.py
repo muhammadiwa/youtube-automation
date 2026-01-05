@@ -12,6 +12,7 @@ from decimal import Decimal
 from sqlalchemy import select, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.billing.models import (
     Subscription,
     Invoice,
@@ -470,7 +471,7 @@ class AdminBillingService:
             new_price = new_plan_obj.price_monthly / 100
         
         # Calculate remaining days
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         total_days = (subscription.current_period_end - subscription.current_period_start).days
         remaining_days = max(0, (subscription.current_period_end - now).days)
         
@@ -636,7 +637,7 @@ class AdminBillingService:
                 await self.subscription_repo.update_subscription(
                     transaction.subscription_id,
                     status=SubscriptionStatus.CANCELED.value,
-                    canceled_at=datetime.utcnow(),
+                    canceled_at=to_naive_utc(utcnow()),
                 )
         
         # Log audit
@@ -664,7 +665,7 @@ class AdminBillingService:
             currency=transaction.currency,
             status="completed",
             gateway=transaction.gateway_provider,
-            processed_at=datetime.utcnow(),
+            processed_at=to_naive_utc(utcnow()),
         )
 
     # ==================== Revenue Analytics (4.5) ====================
@@ -689,7 +690,7 @@ class AdminBillingService:
             Revenue analytics data (all amounts in USD)
         """
         if not end_date:
-            end_date = datetime.utcnow()
+            end_date = to_naive_utc(utcnow())
         if not start_date:
             start_date = end_date - timedelta(days=30)
         
@@ -860,3 +861,4 @@ class AdminBillingService:
             )
             for gateway, data in gateway_revenue.items()
         ]
+

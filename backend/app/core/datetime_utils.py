@@ -6,7 +6,7 @@ All datetime operations should use these utilities to ensure:
 3. No more "offset-naive vs offset-aware" errors
 
 Usage:
-    from app.core.datetime_utils import utcnow, ensure_utc, to_utc_timestamp
+    from app.core.datetime_utils import utcnow, ensure_utc, to_utc_timestamp, datetime
 
     # Get current time
     now = utcnow()
@@ -19,6 +19,26 @@ Usage:
 
 from datetime import datetime, timezone, timedelta
 from typing import Optional
+
+# Export datetime class for type hints
+__all__ = [
+    'datetime',
+    'timezone', 
+    'timedelta',
+    'utcnow',
+    'ensure_utc',
+    'to_naive_utc',
+    'is_in_future',
+    'is_in_past',
+    'seconds_until',
+    'seconds_since',
+    'hours_since',
+    'add_hours',
+    'add_days',
+    'start_of_day',
+    'end_of_day',
+    'to_iso_utc',
+]
 
 
 def utcnow() -> datetime:

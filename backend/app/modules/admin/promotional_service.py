@@ -35,6 +35,7 @@ from app.modules.admin.promotional_schemas import (
     TopReferrer,
 )
 from app.modules.admin.audit import AdminAuditService, AdminAuditEvent
+from app.core.datetime_utils import utcnow, to_naive_utc
 
 logger = logging.getLogger(__name__)
 
@@ -368,7 +369,7 @@ class AdminPromotionalService:
         # Check if code is valid using the model method
         if not discount_code.is_valid():
             # Determine specific reason
-            now = datetime.utcnow()
+            now = to_naive_utc(utcnow())
             if not discount_code.is_active:
                 message = "Discount code is inactive"
             elif now < discount_code.valid_from:
@@ -546,7 +547,7 @@ class AdminPromotionalService:
         # Update config
         config.value = validated.model_dump()
         config.updated_by = admin_id
-        config.updated_at = datetime.utcnow()
+        config.updated_at = to_naive_utc(utcnow())
         
         await self.session.commit()
         await self.session.refresh(config)
@@ -631,14 +632,15 @@ class AdminPromotionalService:
         previous_trial_end = subscription.trial_end
         
         # Calculate new trial end
-        if subscription.trial_end and subscription.trial_end > datetime.utcnow():
+        now = to_naive_utc(utcnow())
+        if subscription.trial_end and subscription.trial_end > now:
             # Extend from current trial end
             new_trial_end = subscription.trial_end + timedelta(days=data.days)
         else:
             # Start new trial from now
-            new_trial_end = datetime.utcnow() + timedelta(days=data.days)
+            new_trial_end = now + timedelta(days=data.days)
             if not subscription.trial_start:
-                subscription.trial_start = datetime.utcnow()
+                subscription.trial_start = now
         
         subscription.trial_end = new_trial_end
         
@@ -671,7 +673,7 @@ class AdminPromotionalService:
             new_trial_end=new_trial_end,
             days_extended=data.days,
             reason=data.reason,
-            extended_at=datetime.utcnow(),
+            extended_at=to_naive_utc(utcnow()),
             extended_by=admin_id,
             message=f"Trial extended by {data.days} days successfully"
         )
@@ -836,7 +838,7 @@ class AdminPromotionalService:
             PromotionAnalyticsResponse with analytics data
         """
         if end_date is None:
-            end_date = datetime.utcnow()
+            end_date = to_naive_utc(utcnow())
         if start_date is None:
             start_date = end_date - timedelta(days=30)
         
@@ -888,7 +890,7 @@ class AdminPromotionalService:
         total = total_result.scalar() or 0
         
         # Active discount codes
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         active_result = await self.session.execute(
             select(func.count()).select_from(DiscountCode).where(
                 and_(
@@ -935,7 +937,7 @@ class AdminPromotionalService:
         total = total_result.scalar() or 0
         
         # Active trial codes
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         active_result = await self.session.execute(
             select(func.count()).select_from(TrialCode).where(
                 and_(

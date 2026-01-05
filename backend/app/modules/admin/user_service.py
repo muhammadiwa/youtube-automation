@@ -11,6 +11,8 @@ from typing import Optional
 from sqlalchemy import select, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
+
 from app.modules.admin.schemas import (
     UserFilters,
     UserSummary,
@@ -89,7 +91,7 @@ class AdminUserService:
         suspended = total - active
         
         # Get new users this month
-        now = datetime.utcnow()
+        now = utcnow()
         first_day_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         new_this_month_query = select(func.count(User.id)).where(
             User.created_at >= first_day_of_month
@@ -346,7 +348,7 @@ class AdminUserService:
         return UserSuspendResponse(
             user_id=user_id,
             status="suspended",
-            suspended_at=datetime.utcnow(),
+            suspended_at=to_naive_utc(utcnow()),
             reason=reason,
             jobs_paused=jobs_paused,
             notification_sent=notification_sent,
@@ -406,7 +408,7 @@ class AdminUserService:
         return UserActivateResponse(
             user_id=user_id,
             status="active",
-            activated_at=datetime.utcnow(),
+            activated_at=to_naive_utc(utcnow()),
             jobs_resumed=jobs_resumed,
         )
 
@@ -443,7 +445,7 @@ class AdminUserService:
         
         # Create impersonation session
         session_id = uuid.uuid4()
-        expires_at = datetime.utcnow() + timedelta(hours=1)  # 1 hour session
+        expires_at = utcnow() + timedelta(hours=1)  # 1 hour session
         
         # Create access token for impersonation
         access_token = create_access_token(
@@ -515,7 +517,7 @@ class AdminUserService:
         
         # Generate reset token
         reset_token = secrets.token_urlsafe(32)
-        expires_at = datetime.utcnow() + timedelta(hours=24)
+        expires_at = utcnow() + timedelta(hours=24)
         
         # Send password reset email
         reset_link_sent = await self._send_password_reset_email(user, reset_token)

@@ -101,7 +101,7 @@ class YouTubeAccountService:
             raise OAuthError("No refresh token received. Please revoke access and try again.")
 
         # Calculate token expiration
-        token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+        token_expires_at = to_naive_utc(utcnow()) + timedelta(seconds=expires_in)
 
         # Fetch channel information
         channel_info = await self.oauth_client.get_channel_info(access_token)
@@ -492,7 +492,7 @@ class YouTubeAccountService:
 
             access_token = token_response["access_token"]
             expires_in = token_response.get("expires_in", 3600)
-            token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+            token_expires_at = to_naive_utc(utcnow()) + timedelta(seconds=expires_in)
 
             # Update tokens (refresh_token may or may not be returned)
             new_refresh_token = token_response.get("refresh_token")
@@ -535,3 +535,4 @@ class YouTubeAccountService:
 
 # Alias for backward compatibility
 AccountService = YouTubeAccountService
+

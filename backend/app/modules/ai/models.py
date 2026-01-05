@@ -11,6 +11,7 @@ from enum import Enum
 from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, Text, ForeignKey, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 
 from app.core.database import Base
 
@@ -55,7 +56,7 @@ class AILog(Base):
     error_message = Column(Text, nullable=True)
     
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False, index=True)
 
     # Relationships
     user = relationship("User", backref="ai_logs")
@@ -73,7 +74,7 @@ class AIFeedback(Base):
     was_selected = Column(Boolean, nullable=False, default=False)
     user_modification = Column(Text, nullable=True)
     rating = Column(Integer, nullable=True)  # 1-5
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
 
     # Relationships
     user = relationship("User", backref="ai_feedback")
@@ -93,8 +94,8 @@ class AIUserPreferences(Base):
     brand_colors = Column(JSON, nullable=True)  # List of hex colors
     brand_keywords = Column(JSON, nullable=True)  # List of keywords
     avoid_keywords = Column(JSON, nullable=True)  # List of keywords to avoid
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
     user = relationship("User", backref="ai_preferences")
@@ -116,7 +117,7 @@ class ThumbnailLibrary(Base):
     elements = Column(JSON, nullable=True)  # Thumbnail elements metadata
     tags = Column(JSON, nullable=True)  # Tags for searching
     is_generated = Column(Boolean, default=True)  # AI generated vs uploaded
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
 
     # Relationships
     user = relationship("User", backref="thumbnails")

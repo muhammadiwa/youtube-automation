@@ -10,6 +10,8 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc, ensure_utc
+
 from app.modules.billing.models import (
     Subscription,
     UsageRecord,
@@ -232,7 +234,7 @@ class BillingService:
         if not subscription:
             return None
 
-        days_until_expiry = (subscription.current_period_end - datetime.utcnow()).days
+        days_until_expiry = (ensure_utc(subscription.current_period_end) - utcnow()).days
         
         # Determine available upgrades
         tier_order = [PlanTier.FREE, PlanTier.BASIC, PlanTier.PRO, PlanTier.ENTERPRISE]
@@ -368,7 +370,7 @@ class BillingService:
         if not subscription:
             return None
         
-        period_end = datetime.utcnow() + timedelta(days=period_days)
+        period_end = to_naive_utc(utcnow()) + timedelta(days=period_days)
         updated = await self.subscription_repo.reactivate_subscription(
             subscription.id,
             plan_tier,
@@ -415,7 +417,7 @@ class BillingService:
                 preserve_until = datetime.fromisoformat(preserve_until_str)
             previous_tier = subscription.custom_limits.get("previous_tier")
         
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         days_remaining = 0
         data_at_risk = False
         
@@ -902,7 +904,7 @@ class BillingService:
         csv_buffer.close()
         
         # Generate filename
-        generated_at = datetime.utcnow()
+        generated_at = utcnow()
         filename = f"usage_export_{user_id.hex[:8]}_{start_date.isoformat()}_{end_date.isoformat()}_{generated_at.strftime('%Y%m%d%H%M%S')}.csv"
         
         # Upload to storage
@@ -980,7 +982,7 @@ class BillingService:
             raise ValueError("User has no subscription")
 
         # Generate invoice number
-        invoice_number = f"INV-{user_id.hex[:8].upper()}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        invoice_number = f"INV-{user_id.hex[:8].upper()}-{utcnow().strftime('%Y%m%d%H%M%S')}"
 
         # Calculate line items based on plan
         line_items = [
@@ -1594,7 +1596,7 @@ class StripePaymentService:
                 status=stripe_inv.status,
                 amount_paid=stripe_inv.amount_paid,
                 amount_due=stripe_inv.amount_due,
-                paid_at=datetime.utcnow() if stripe_inv.status == "paid" else None,
+                paid_at=to_naive_utc(utcnow()) if stripe_inv.status == "paid" else None,
                 invoice_pdf_url=stripe_inv.invoice_pdf,
                 hosted_invoice_url=stripe_inv.hosted_invoice_url,
                 payment_intent_id=stripe_inv.payment_intent_id,

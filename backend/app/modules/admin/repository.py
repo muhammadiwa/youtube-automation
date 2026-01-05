@@ -10,6 +10,7 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.admin.models import Admin, AdminRole, DEFAULT_PERMISSIONS
 from app.modules.auth.models import User
 
@@ -158,7 +159,7 @@ class AdminRepository:
         Returns:
             Admin: Updated admin instance
         """
-        admin.last_login_at = datetime.utcnow()
+        admin.last_login_at = to_naive_utc(utcnow())
         await self.session.flush()
         return admin
 

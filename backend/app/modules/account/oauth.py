@@ -6,13 +6,14 @@ Requirements: 2.1, 2.2
 
 import secrets
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional
 from urllib.parse import urlencode
 
 import httpx
 
 from app.core.config import settings
+from app.core.datetime_utils import utcnow, to_naive_utc
 
 
 # OAuth2 endpoints
@@ -51,7 +52,7 @@ class OAuthStateStore:
             str: Generated state parameter
         """
         state = secrets.token_urlsafe(32)
-        expires_at = datetime.utcnow() + timedelta(minutes=expires_minutes)
+        expires_at = to_naive_utc(utcnow()) + timedelta(minutes=expires_minutes)
         
         cls._states[state] = {
             "user_id": user_id,
@@ -78,7 +79,7 @@ class OAuthStateStore:
             
         state_data = cls._states.pop(state)
         
-        if datetime.utcnow() > state_data["expires_at"]:
+        if to_naive_utc(utcnow()) > state_data["expires_at"]:
             return None
             
         return state_data["user_id"]
@@ -86,7 +87,7 @@ class OAuthStateStore:
     @classmethod
     def _cleanup_expired(cls) -> None:
         """Remove expired states."""
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         expired = [
             s for s, data in cls._states.items()
             if now > data["expires_at"]
@@ -331,3 +332,4 @@ class YouTubeOAuthClient:
                 "resolution": cdn.get("resolution"),
                 "frame_rate": cdn.get("frameRate"),
             }
+

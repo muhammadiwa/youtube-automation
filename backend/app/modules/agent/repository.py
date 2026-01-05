@@ -10,6 +10,7 @@ from typing import Optional
 from sqlalchemy import select, update, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.agent.models import (
     Agent,
     AgentJob,
@@ -48,7 +49,7 @@ class AgentRepository:
             max_capacity=max_capacity,
             agent_metadata=metadata,
             status=AgentStatus.HEALTHY.value,
-            last_heartbeat=datetime.utcnow(),
+            last_heartbeat=to_naive_utc(utcnow()),
         )
         self.session.add(agent)
         await self.session.flush()
@@ -102,7 +103,7 @@ class AgentRepository:
         if not agent:
             return None
         
-        agent.last_heartbeat = datetime.utcnow()
+        agent.last_heartbeat = to_naive_utc(utcnow())
         agent.current_load = current_load
         agent.status = AgentStatus.HEALTHY.value
         
@@ -134,7 +135,7 @@ class AgentRepository:
         
         Requirements: 21.2 - Mark unhealthy after 60s missed heartbeat
         """
-        threshold_time = datetime.utcnow() - timedelta(seconds=threshold_seconds)
+        threshold_time = utcnow() - timedelta(seconds=threshold_seconds)
         
         query = select(Agent).where(
             and_(
@@ -248,7 +249,7 @@ class AgentJobRepository:
         
         job.agent_id = agent_id
         job.status = JobStatus.PROCESSING.value
-        job.started_at = datetime.utcnow()
+        job.started_at = to_naive_utc(utcnow())
         job.attempts += 1
         
         await self.session.flush()
@@ -272,7 +273,7 @@ class AgentJobRepository:
         job.status = status.value
         job.result = result
         job.error = error
-        job.completed_at = datetime.utcnow()
+        job.completed_at = to_naive_utc(utcnow())
         
         await self.session.flush()
         return job
@@ -317,7 +318,7 @@ class AgentJobRepository:
         
         job.status = JobStatus.DLQ.value
         job.error = error
-        job.completed_at = datetime.utcnow()
+        job.completed_at = to_naive_utc(utcnow())
         
         await self.session.flush()
         return job

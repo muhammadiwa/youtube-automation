@@ -29,6 +29,7 @@ from app.modules.admin.config_schemas import (
     BrandingConfig, BrandingConfigUpdate,
     ResourceUsage, ResourceLimitWarning, ResourceLimitCheckResult,
 )
+from app.core.datetime_utils import utcnow, to_naive_utc
 
 # Type variable for config models
 T = TypeVar('T')
@@ -309,7 +310,7 @@ class GlobalConfigService:
         # Update config
         config.value = validated.model_dump()
         config.updated_by = admin_id
-        config.updated_at = datetime.utcnow()
+        config.updated_at = to_naive_utc(utcnow())
         
         # Mark the JSON column as modified to ensure SQLAlchemy persists the change
         flag_modified(config, "value")
@@ -807,7 +808,7 @@ class GlobalConfigService:
                 setattr(plan, field, value)
         
         # Update timestamp
-        plan.updated_at = datetime.utcnow()
+        plan.updated_at = to_naive_utc(utcnow())
         
         await self.db.commit()
         await self.db.refresh(plan)
@@ -855,7 +856,7 @@ class GlobalConfigService:
         return {
             "message": f"Plan '{plan_slug}' deleted successfully",
             "deleted_by": str(admin_id),
-            "deleted_at": datetime.utcnow().isoformat()
+            "deleted_at": to_naive_utc(utcnow()).isoformat()
         }
 
     # ==================== Email Template Config (Requirements 27.1-27.5) ====================
@@ -952,7 +953,7 @@ class GlobalConfigService:
         # Update config
         config.value = {"templates": templates_data}
         config.updated_by = admin_id
-        config.updated_at = datetime.utcnow()
+        config.updated_at = to_naive_utc(utcnow())
         
         # Mark the JSON column as modified
         flag_modified(config, "value")
@@ -1125,7 +1126,7 @@ class GlobalConfigService:
         # Update config
         config.value = {"flags": flags_data}
         config.updated_by = admin_id
-        config.updated_at = datetime.utcnow()
+        config.updated_at = to_naive_utc(utcnow())
         
         # Mark the JSON column as modified
         flag_modified(config, "value")
