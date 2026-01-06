@@ -190,6 +190,29 @@ class BillingService:
 
     # ==================== Subscription Management (28.1, 28.4) ====================
 
+    async def ensure_free_subscription(
+        self,
+        user_id: uuid.UUID,
+    ) -> SubscriptionResponse:
+        """Ensure user has a subscription, create FREE if not exists.
+        
+        This is called during registration and when accessing billing features.
+        """
+        existing = await self.subscription_repo.get_by_user_id(user_id)
+        if existing:
+            return self._subscription_to_response(existing)
+        
+        # Create FREE subscription
+        subscription = await self.subscription_repo.create_subscription(
+            user_id=user_id,
+            plan_tier=PlanTier.FREE.value,
+        )
+        
+        # Initialize usage aggregates for the billing period
+        await self._initialize_usage_aggregates(subscription)
+        
+        return self._subscription_to_response(subscription)
+
     async def create_subscription(
         self,
         user_id: uuid.UUID,
@@ -539,33 +562,222 @@ class BillingService:
         
         Requirements: 27.1 - Display breakdown of usage
         """
+        from sqlalchemy import select, func as sql_func
+        from app.modules.account.models import YouTubeAccount
+        from app.modules.video.models import Video
+        from app.modules.stream.models import LiveEvent, LiveEventStatus
+        from app.modules.stream.stream_job_models import StreamJob, StreamJobStatus
+        
         subscription = await self.subscription_repo.get_by_user_id(user_id)
         if not subscription:
-            raise ValueError("User has no subscription")
+            # Auto-create FREE subscription if not exists
+            await self.ensure_free_subscription(user_id)
+            subscription = await self.subscription_repo.get_by_user_id(user_id)
+        
+        if not subscription:
+            raise ValueError("Failed to create subscription for user")
 
         billing_start = subscription.current_period_start.date()
         billing_end = subscription.current_period_end.date()
-
-        aggregates = await self.usage_repo.get_user_aggregates(user_id, billing_start)
-
+        
+        # Get plan limits from database
+        plan = await self.plan_repo.get_by_slug(subscription.plan_tier)
+        
+        # Get real-time counts from database
+        # 1. Count connected accounts (status = active) - ALL accounts, not per period
+        accounts_result = await self.session.execute(
+            select(sql_func.count(YouTubeAccount.id))
+            .where(YouTubeAccount.user_id == user_id)
+            .where(YouTubeAccount.status == "active")
+        )
+        accounts_count = accounts_result.scalar() or 0
+        
+        # 2. Count videos uploaded this billing period
+        # Note: Videos can be uploaded without account_id (library videos)
+        # So we count by user_id directly, not via account join
+        videos_result = await self.session.execute(
+            select(sql_func.count(Video.id))
+            .where(Video.user_id == user_id)
+            .where(Video.created_at >= subscription.current_period_start)
+        )
+        videos_count = videos_result.scalar() or 0
+        
+        # 3. Count streams created this billing period (LiveEvent + StreamJob)
+        # 3a. LiveEvent streams
+        live_events_result = await self.session.execute(
+            select(sql_func.count(LiveEvent.id))
+            .join(YouTubeAccount, LiveEvent.account_id == YouTubeAccount.id)
+            .where(YouTubeAccount.user_id == user_id)
+            .where(LiveEvent.created_at >= subscription.current_period_start)
+        )
+        live_events_count = live_events_result.scalar() or 0
+        
+        # 3b. StreamJob (Video-to-Live) streams
+        stream_jobs_result = await self.session.execute(
+            select(sql_func.count(StreamJob.id))
+            .where(StreamJob.user_id == user_id)
+            .where(StreamJob.created_at >= subscription.current_period_start)
+        )
+        stream_jobs_count = stream_jobs_result.scalar() or 0
+        
+        streams_count = live_events_count + stream_jobs_count
+        
+        # 4. Count concurrent streams (currently running) - real-time, no period filter
+        # 4a. LiveEvent with status LIVE
+        concurrent_live_result = await self.session.execute(
+            select(sql_func.count(LiveEvent.id))
+            .join(YouTubeAccount, LiveEvent.account_id == YouTubeAccount.id)
+            .where(YouTubeAccount.user_id == user_id)
+            .where(LiveEvent.status == LiveEventStatus.LIVE.value)
+        )
+        concurrent_live_count = concurrent_live_result.scalar() or 0
+        
+        # 4b. StreamJob with status RUNNING
+        concurrent_jobs_result = await self.session.execute(
+            select(sql_func.count(StreamJob.id))
+            .where(StreamJob.user_id == user_id)
+            .where(StreamJob.status == StreamJobStatus.RUNNING.value)
+        )
+        concurrent_jobs_count = concurrent_jobs_result.scalar() or 0
+        
+        concurrent_count = concurrent_live_count + concurrent_jobs_count
+        
+        # Get plan limits (use plan from database if available, otherwise use subscription limits)
+        if plan:
+            accounts_limit = plan.max_accounts
+            videos_limit = plan.max_videos_per_month
+            streams_limit = plan.max_streams_per_month
+            concurrent_limit = plan.concurrent_streams
+            storage_limit = plan.max_storage_gb
+            bandwidth_limit = plan.max_bandwidth_gb
+        else:
+            limits = subscription.get_limits()
+            accounts_limit = limits.get("connected_accounts", 1)
+            videos_limit = limits.get("max_videos_per_month", 5)
+            streams_limit = limits.get("max_streams_per_month", 0)
+            concurrent_limit = limits.get("concurrent_streams", 1)
+            storage_limit = limits.get("storage_gb", 1)
+            bandwidth_limit = limits.get("bandwidth_gb", 5)
+        
+        # Helper function to calculate percentage
+        def calc_percent(used: float, limit: float) -> float:
+            if limit == -1 or limit == 0:
+                return 0.0
+            return min((used / limit) * 100, 100.0)
+        
+        # Helper function to get warning threshold
+        def get_warning(percent: float) -> int | None:
+            if percent >= 90:
+                return 90
+            elif percent >= 75:
+                return 75
+            elif percent >= 50:
+                return 50
+            return None
+        
+        # Build metrics list with real-time data
         metrics = []
         total_warnings = 0
+        
+        # Accounts metric
+        accounts_percent = calc_percent(accounts_count, accounts_limit)
+        accounts_warning = get_warning(accounts_percent)
+        if accounts_warning:
+            total_warnings += 1
+        metrics.append(UsageMetric(
+            resource_type="accounts",
+            used=float(accounts_count),
+            limit=float(accounts_limit),
+            percent=accounts_percent,
+            is_unlimited=accounts_limit == -1,
+            warning_threshold_reached=accounts_warning,
+        ))
+        
+        # Videos per month metric
+        videos_percent = calc_percent(videos_count, videos_limit)
+        videos_warning = get_warning(videos_percent)
+        if videos_warning:
+            total_warnings += 1
+        metrics.append(UsageMetric(
+            resource_type="videos_per_month",
+            used=float(videos_count),
+            limit=float(videos_limit),
+            percent=videos_percent,
+            is_unlimited=videos_limit == -1,
+            warning_threshold_reached=videos_warning,
+        ))
+        
+        # Streams per month metric
+        streams_percent = calc_percent(streams_count, streams_limit)
+        streams_warning = get_warning(streams_percent)
+        if streams_warning:
+            total_warnings += 1
+        metrics.append(UsageMetric(
+            resource_type="streams_per_month",
+            used=float(streams_count),
+            limit=float(streams_limit),
+            percent=streams_percent,
+            is_unlimited=streams_limit == -1,
+            warning_threshold_reached=streams_warning,
+        ))
+        
+        # Concurrent streams metric
+        concurrent_percent = calc_percent(concurrent_count, concurrent_limit)
+        concurrent_warning = get_warning(concurrent_percent)
+        if concurrent_warning:
+            total_warnings += 1
+        metrics.append(UsageMetric(
+            resource_type="concurrent_streams",
+            used=float(concurrent_count),
+            limit=float(concurrent_limit),
+            percent=concurrent_percent,
+            is_unlimited=concurrent_limit == -1,
+            warning_threshold_reached=concurrent_warning,
+        ))
+        
+        # Calculate storage from video file sizes (in GB)
+        storage_result = await self.session.execute(
+            select(sql_func.coalesce(sql_func.sum(Video.file_size), 0))
+            .where(Video.user_id == user_id)
+            .where(Video.file_size.isnot(None))
+        )
+        total_bytes = storage_result.scalar() or 0
+        storage_used = total_bytes / (1024 * 1024 * 1024)  # Convert bytes to GB
+        
+        # Bandwidth - for now use aggregates (needs proper tracking implementation)
+        aggregates = await self.usage_repo.get_user_aggregates(user_id, billing_start)
+        bandwidth_used = 0.0
         for agg in aggregates:
-            is_unlimited = agg.limit_value == -1
-            percent = 0.0 if is_unlimited else agg.get_usage_percent()
-            warning_threshold = agg.get_warning_threshold_reached()
-            
-            if warning_threshold:
-                total_warnings += 1
-
-            metrics.append(UsageMetric(
-                resource_type=agg.resource_type,
-                used=agg.total_used,
-                limit=agg.limit_value,
-                percent=percent,
-                is_unlimited=is_unlimited,
-                warning_threshold_reached=warning_threshold,
-            ))
+            if agg.resource_type == "bandwidth_gb":
+                bandwidth_used = agg.total_used
+        
+        # Storage metric
+        storage_percent = calc_percent(storage_used, storage_limit)
+        storage_warning = get_warning(storage_percent)
+        if storage_warning:
+            total_warnings += 1
+        metrics.append(UsageMetric(
+            resource_type="storage_gb",
+            used=round(storage_used, 2),
+            limit=float(storage_limit),
+            percent=storage_percent,
+            is_unlimited=storage_limit == -1,
+            warning_threshold_reached=storage_warning,
+        ))
+        
+        # Bandwidth metric
+        bandwidth_percent = calc_percent(bandwidth_used, bandwidth_limit)
+        bandwidth_warning = get_warning(bandwidth_percent)
+        if bandwidth_warning:
+            total_warnings += 1
+        metrics.append(UsageMetric(
+            resource_type="bandwidth_gb",
+            used=round(bandwidth_used, 2),
+            limit=float(bandwidth_limit),
+            percent=bandwidth_percent,
+            is_unlimited=bandwidth_limit == -1,
+            warning_threshold_reached=bandwidth_warning,
+        ))
 
         return UsageDashboardResponse(
             user_id=user_id,

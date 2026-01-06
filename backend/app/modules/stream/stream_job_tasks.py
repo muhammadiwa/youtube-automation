@@ -28,6 +28,16 @@ from app.modules.stream.stream_job_repository import (
     StreamJobRepository,
     StreamJobHealthRepository,
 )
+
+
+def _run_async(coro):
+    """Run async coroutine in Celery task context.
+    
+    Uses asyncio.run() which creates a fresh event loop for each task.
+    Combined with NullPool in celery_session_maker, this avoids
+    connection pool conflicts across different event loops.
+    """
+    return asyncio.run(coro)
 from app.modules.stream.ffmpeg_builder import (
     FFmpegCommandBuilder,
     FFmpegOutputParser,
@@ -62,19 +72,11 @@ def start_ffmpeg_worker(self, job_id: str) -> dict:
     logger.info(f"Starting FFmpeg worker for job {job_id}")
     
     try:
-        # Run async code in sync context
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(_start_ffmpeg_worker_async(job_id))
-        loop.close()
-        return result
+        return _run_async(_start_ffmpeg_worker_async(job_id))
     except Exception as e:
         logger.error(f"Failed to start FFmpeg worker for job {job_id}: {e}")
         # Update job status to failed
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(_update_job_status(job_id, StreamJobStatus.FAILED, str(e)))
-        loop.close()
+        _run_async(_update_job_status(job_id, StreamJobStatus.FAILED, str(e)))
         raise
 
 
@@ -184,11 +186,7 @@ def stop_ffmpeg_worker(self, job_id: str) -> dict:
     logger.info(f"Stopping FFmpeg worker for job {job_id}")
     
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(_stop_ffmpeg_worker_async(job_id))
-        loop.close()
-        return result
+        return _run_async(_stop_ffmpeg_worker_async(job_id))
     except Exception as e:
         logger.error(f"Failed to stop FFmpeg worker for job {job_id}: {e}")
         raise
@@ -344,10 +342,7 @@ def restart_ffmpeg_worker(self, job_id: str) -> dict:
     
     try:
         # Update status to starting
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(_update_job_status(job_id, StreamJobStatus.STARTING))
-        loop.close()
+        _run_async(_update_job_status(job_id, StreamJobStatus.STARTING))
         
         # Start worker
         return start_ffmpeg_worker(job_id)
@@ -355,12 +350,9 @@ def restart_ffmpeg_worker(self, job_id: str) -> dict:
         logger.error(f"Failed to restart FFmpeg worker for job {job_id}: {e}")
         
         # Mark as failed after max retries
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(_update_job_status(
+        _run_async(_update_job_status(
             job_id, StreamJobStatus.FAILED, f"Failed to restart: {e}"
         ))
-        loop.close()
         raise
 
 
@@ -382,12 +374,7 @@ def check_scheduled_streams() -> dict:
     """
     logger.debug("Checking scheduled streams")
     
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    result = loop.run_until_complete(_check_scheduled_streams_async())
-    loop.close()
-    
-    return result
+    return _run_async(_check_scheduled_streams_async())
 
 
 async def _check_scheduled_streams_async() -> dict:
@@ -443,12 +430,8 @@ def collect_health_metrics() -> dict:
     """
     logger.debug("Collecting health metrics for active streams")
     
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    result = loop.run_until_complete(_collect_health_metrics_async())
-    loop.close()
-    
-    return result
+    # Use asyncio.run() for fresh event loop - avoids event loop conflicts
+    return asyncio.run(_collect_health_metrics_async())
 
 
 async def _collect_health_metrics_async() -> dict:
@@ -887,10 +870,7 @@ def auto_detect_and_start_moderation(self, job_id: str) -> dict:
     logger.info(f"Auto-detecting broadcast for job {job_id} (attempt {self.request.retries + 1})")
     
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(_auto_detect_and_start_moderation_async(job_id))
-        loop.close()
+        result = _run_async(_auto_detect_and_start_moderation_async(job_id))
         
         if result.get("status") == "not_found":
             # Retry with exponential backoff

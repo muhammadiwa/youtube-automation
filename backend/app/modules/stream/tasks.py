@@ -4,6 +4,7 @@ Implements stream scheduling, auto-start/stop, and auto-restart on disconnection
 Requirements: 6.1, 6.4, 6.5
 """
 
+import asyncio
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional
@@ -29,6 +30,16 @@ from app.modules.stream.repository import (
     StreamHealthLogRepository,
 )
 from app.modules.account.repository import YouTubeAccountRepository
+
+
+def _run_async(coro):
+    """Run async coroutine in Celery task context.
+    
+    Uses asyncio.run() which creates a fresh event loop for each task.
+    Combined with NullPool in celery_session_maker, this avoids
+    connection pool conflicts across different event loops.
+    """
+    return asyncio.run(coro)
 
 
 # Stream-specific retry configuration
@@ -192,8 +203,7 @@ def check_scheduled_streams(self: BaseTaskWithRetry) -> dict:
     Returns:
         dict: Summary of processed streams
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(_check_scheduled_streams_async())
+    return _run_async(_check_scheduled_streams_async())
 
 
 async def _check_scheduled_streams_async() -> dict:
@@ -241,8 +251,7 @@ def start_stream_task(self: BaseTaskWithRetry, event_id: str) -> dict:
     Returns:
         dict: Result of stream start operation
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(_start_stream_async(event_id))
+    return _run_async(_start_stream_async(event_id))
 
 
 async def _start_stream_async(event_id: str) -> dict:
@@ -307,8 +316,7 @@ def stop_stream_task(self: BaseTaskWithRetry, event_id: str, reason: str = "sche
     Returns:
         dict: Result of stream stop operation
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(_stop_stream_async(event_id, reason))
+    return _run_async(_stop_stream_async(event_id, reason))
 
 
 async def _stop_stream_async(event_id: str, reason: str) -> dict:
@@ -359,10 +367,7 @@ def handle_stream_disconnection(
     Returns:
         dict: Result of disconnection handling
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
-        _handle_disconnection_async(event_id, session_id, error)
-    )
+    return _run_async(_handle_disconnection_async(event_id, session_id, error))
 
 
 async def _handle_disconnection_async(event_id: str, session_id: str, error: Optional[str]) -> dict:
@@ -454,10 +459,7 @@ def restart_stream_task(self: BaseTaskWithRetry, event_id: str, session_id: str)
     Returns:
         dict: Result of restart operation
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
-        _restart_stream_async(event_id, session_id)
-    )
+    return _run_async(_restart_stream_async(event_id, session_id))
 
 
 async def _restart_stream_async(event_id: str, session_id: str) -> dict:
@@ -501,8 +503,7 @@ def check_stream_end_times(self: BaseTaskWithRetry) -> dict:
     Returns:
         dict: Summary of processed streams
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(_check_stream_end_times_async())
+    return _run_async(_check_stream_end_times_async())
 
 
 async def _check_stream_end_times_async() -> dict:
@@ -763,10 +764,7 @@ def collect_stream_health_metrics(self: BaseTaskWithRetry, session_id: str) -> d
     Returns:
         dict: Collected metrics and status
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
-        _collect_health_metrics_async(session_id)
-    )
+    return _run_async(_collect_health_metrics_async(session_id))
 
 
 async def _collect_health_metrics_async(session_id: str) -> dict:
@@ -904,8 +902,7 @@ def check_active_streams_health(self: BaseTaskWithRetry) -> dict:
     Returns:
         dict: Summary of health checks
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(_check_active_streams_health_async())
+    return _run_async(_check_active_streams_health_async())
 
 
 async def _check_active_streams_health_async() -> dict:
@@ -957,10 +954,7 @@ def attempt_stream_reconnection(
     Returns:
         dict: Reconnection result
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
-        _attempt_reconnection_async(event_id, session_id, attempt)
-    )
+    return _run_async(_attempt_reconnection_async(event_id, session_id, attempt))
 
 
 async def _attempt_reconnection_async(event_id: str, session_id: str, attempt: int) -> dict:
@@ -1044,10 +1038,7 @@ def trigger_stream_failover(
     Returns:
         dict: Failover result
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
-        _trigger_failover_async(event_id, session_id)
-    )
+    return _run_async(_trigger_failover_async(event_id, session_id))
 
 
 async def _trigger_failover_async(event_id: str, session_id: str) -> dict:
@@ -1106,10 +1097,7 @@ def cleanup_old_health_logs(
     Returns:
         dict: Cleanup result
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
-        _cleanup_old_health_logs_async(retention_days)
-    )
+    return _run_async(_cleanup_old_health_logs_async(retention_days))
 
 
 async def _cleanup_old_health_logs_async(retention_days: int) -> dict:

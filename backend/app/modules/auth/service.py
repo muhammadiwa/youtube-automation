@@ -81,6 +81,16 @@ class AuthService:
             name=name,
             validate_password=True,
         )
+        
+        # Auto-create FREE subscription for new user
+        try:
+            from app.modules.billing.service import BillingService
+            billing_service = BillingService(self.session)
+            await billing_service.ensure_free_subscription(user.id)
+        except Exception as e:
+            # Log error but don't fail registration
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to create free subscription for user {user.id}: {e}")
 
         return user
 
