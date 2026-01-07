@@ -744,12 +744,46 @@ class BillingService:
         total_bytes = storage_result.scalar() or 0
         storage_used = total_bytes / (1024 * 1024 * 1024)  # Convert bytes to GB
         
-        # Bandwidth - for now use aggregates (needs proper tracking implementation)
-        aggregates = await self.usage_repo.get_user_aggregates(user_id, billing_start)
-        bandwidth_used = 0.0
-        for agg in aggregates:
-            if agg.resource_type == "bandwidth_gb":
-                bandwidth_used = agg.total_used
+        # Calculate bandwidth from stream jobs in current billing period
+        # Bandwidth = bitrate (kbps) * duration (seconds) / 8 / 1024 / 1024 = GB
+        # We use target_bitrate * total_duration_seconds for completed/stopped streams
+        bandwidth_result = await self.session.execute(
+            select(
+                sql_func.coalesce(
+                    sql_func.sum(
+                        StreamJob.target_bitrate * StreamJob.total_duration_seconds / 8 / 1024 / 1024
+                    ), 
+                    0
+                )
+            )
+            .where(StreamJob.user_id == user_id)
+            .where(StreamJob.created_at >= subscription.current_period_start)
+            .where(StreamJob.total_duration_seconds > 0)
+        )
+        bandwidth_from_jobs = bandwidth_result.scalar() or 0
+        
+        # Also calculate bandwidth from currently running streams
+        # For running streams, calculate from actual_start_at to now
+        running_streams_result = await self.session.execute(
+            select(StreamJob)
+            .where(StreamJob.user_id == user_id)
+            .where(StreamJob.status == StreamJobStatus.RUNNING.value)
+            .where(StreamJob.actual_start_at.isnot(None))
+        )
+        running_streams = running_streams_result.scalars().all()
+        
+        running_bandwidth = 0.0
+        for stream in running_streams:
+            if stream.actual_start_at:
+                # Calculate duration from start to now
+                from app.core.datetime_utils import utcnow, ensure_utc
+                now = utcnow()
+                start = ensure_utc(stream.actual_start_at)
+                duration_seconds = (now - start).total_seconds()
+                # bitrate (kbps) * duration (s) / 8 / 1024 / 1024 = GB
+                running_bandwidth += (stream.target_bitrate * duration_seconds) / 8 / 1024 / 1024
+        
+        bandwidth_used = float(bandwidth_from_jobs) + running_bandwidth
         
         # Storage metric
         storage_percent = calc_percent(storage_used, storage_limit)
@@ -1050,9 +1084,12 @@ class BillingService:
         end_date: date,
         resource_types: Optional[list[str]] = None,
     ) -> dict:
-        """Export usage data to CSV file.
+        """Export usage data to CSV file using real-time data.
         
         Requirements: 27.5 - Detailed CSV export with timestamps and resource types
+        
+        This exports actual usage data from source tables (videos, stream_jobs, etc.)
+        instead of the usage_records table which may be empty.
         
         Args:
             user_id: User ID
@@ -1065,15 +1102,17 @@ class BillingService:
         """
         import csv
         import io
+        import json
+        from datetime import datetime, timedelta
+        from sqlalchemy import select, and_
         from app.core.storage import storage_service
+        from app.modules.video.models import Video
+        from app.modules.stream.stream_job_models import StreamJob
+        from app.modules.account.models import YouTubeAccount
         
-        # Get all usage records for the date range
-        records = await self.usage_repo.get_usage_records_for_export(
-            user_id=user_id,
-            start_date=start_date,
-            end_date=end_date,
-            resource_types=resource_types,
-        )
+        # Convert dates to datetime for comparison
+        start_datetime = datetime.combine(start_date, datetime.min.time())
+        end_datetime = datetime.combine(end_date, datetime.max.time())
         
         # Generate CSV content
         csv_buffer = io.StringIO()
@@ -1081,35 +1120,136 @@ class BillingService:
         
         # Write header row
         writer.writerow([
-            "record_id",
-            "user_id",
-            "subscription_id",
             "resource_type",
+            "resource_id",
+            "resource_name",
             "amount",
-            "billing_period_start",
-            "billing_period_end",
-            "recorded_at",
+            "unit",
+            "created_at",
             "metadata",
         ])
         
-        # Write data rows
-        for record in records:
-            metadata_str = ""
-            if record.usage_metadata:
-                import json
-                metadata_str = json.dumps(record.usage_metadata)
+        record_count = 0
+        
+        # 1. Export Videos (Storage)
+        if not resource_types or "storage_gb" in resource_types:
+            videos_result = await self.session.execute(
+                select(Video)
+                .where(Video.user_id == user_id)
+                .where(Video.created_at >= start_datetime)
+                .where(Video.created_at <= end_datetime)
+                .where(Video.file_size.isnot(None))
+                .order_by(Video.created_at.asc())
+            )
+            videos = videos_result.scalars().all()
             
-            writer.writerow([
-                str(record.id),
-                str(record.user_id),
-                str(record.subscription_id),
-                record.resource_type,
-                record.amount,
-                record.billing_period_start.isoformat(),
-                record.billing_period_end.isoformat(),
-                record.recorded_at.isoformat(),
-                metadata_str,
-            ])
+            for video in videos:
+                size_gb = (video.file_size or 0) / (1024 * 1024 * 1024)
+                # Extract filename from file_path if available
+                video_filename = ""
+                if video.file_path:
+                    video_filename = video.file_path.split("/")[-1].split("\\")[-1]
+                metadata = {
+                    "file_path": video.file_path,
+                    "duration": video.duration,
+                    "resolution": video.resolution,
+                }
+                writer.writerow([
+                    "storage_gb",
+                    str(video.id),
+                    video.title or video_filename or str(video.id)[:8],
+                    round(size_gb, 4),
+                    "GB",
+                    video.created_at.isoformat() if video.created_at else "",
+                    json.dumps(metadata),
+                ])
+                record_count += 1
+        
+        # 2. Export Stream Jobs (Bandwidth)
+        if not resource_types or "bandwidth_gb" in resource_types:
+            streams_result = await self.session.execute(
+                select(StreamJob)
+                .where(StreamJob.user_id == user_id)
+                .where(StreamJob.created_at >= start_datetime)
+                .where(StreamJob.created_at <= end_datetime)
+                .order_by(StreamJob.created_at.asc())
+            )
+            streams = streams_result.scalars().all()
+            
+            for stream in streams:
+                # Calculate bandwidth: bitrate (kbps) * duration (s) / 8 / 1024 / 1024 = GB
+                duration = stream.total_duration_seconds or 0
+                if duration == 0 and stream.actual_start_at and stream.actual_end_at:
+                    duration = (stream.actual_end_at - stream.actual_start_at).total_seconds()
+                
+                bandwidth_gb = (stream.target_bitrate * duration) / 8 / 1024 / 1024
+                
+                metadata = {
+                    "status": stream.status,
+                    "resolution": stream.resolution,
+                    "bitrate_kbps": stream.target_bitrate,
+                    "duration_seconds": duration,
+                    "scheduled_start": stream.scheduled_start_at.isoformat() if stream.scheduled_start_at else None,
+                    "actual_start": stream.actual_start_at.isoformat() if stream.actual_start_at else None,
+                    "actual_end": stream.actual_end_at.isoformat() if stream.actual_end_at else None,
+                }
+                writer.writerow([
+                    "bandwidth_gb",
+                    str(stream.id),
+                    stream.title or f"Stream {str(stream.id)[:8]}",
+                    round(bandwidth_gb, 4),
+                    "GB",
+                    stream.created_at.isoformat() if stream.created_at else "",
+                    json.dumps(metadata),
+                ])
+                record_count += 1
+        
+        # 3. Export YouTube Accounts (Accounts count)
+        if not resource_types or "accounts" in resource_types:
+            accounts_result = await self.session.execute(
+                select(YouTubeAccount)
+                .where(YouTubeAccount.user_id == user_id)
+                .where(YouTubeAccount.status == "active")
+                .order_by(YouTubeAccount.created_at.asc())
+            )
+            accounts = accounts_result.scalars().all()
+            
+            for account in accounts:
+                metadata = {
+                    "channel_id": account.channel_id,
+                    "status": account.status,
+                }
+                writer.writerow([
+                    "accounts",
+                    str(account.id),
+                    account.channel_title or account.channel_id,
+                    1,
+                    "account",
+                    account.created_at.isoformat() if account.created_at else "",
+                    json.dumps(metadata),
+                ])
+                record_count += 1
+        
+        # 4. Add summary row
+        writer.writerow([])  # Empty row
+        writer.writerow(["=== SUMMARY ==="])
+        
+        # Get current usage summary
+        try:
+            dashboard = await self.get_usage_dashboard(user_id)
+            for metric in dashboard.metrics:
+                limit_str = "Unlimited" if metric.is_unlimited else str(metric.limit)
+                writer.writerow([
+                    f"TOTAL: {metric.resource_type}",
+                    "",
+                    "",
+                    metric.used,
+                    "GB" if "gb" in metric.resource_type else "count",
+                    f"Limit: {limit_str}",
+                    f"Usage: {metric.percent:.1f}%",
+                ])
+        except Exception:
+            pass  # Skip summary if error
         
         # Get CSV content as bytes
         csv_content = csv_buffer.getvalue().encode("utf-8")
@@ -1136,7 +1276,7 @@ class BillingService:
         return {
             "download_url": download_url,
             "filename": filename,
-            "record_count": len(records),
+            "record_count": record_count,
             "generated_at": generated_at,
         }
 

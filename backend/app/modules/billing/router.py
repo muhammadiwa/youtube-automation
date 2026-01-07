@@ -28,7 +28,6 @@ from app.modules.billing.schemas import (
     UsageDashboardResponse,
     UsageBreakdownResponse,
     UsageWarningEvent,
-    UsageExportResponse,
     InvoiceResponse,
     InvoiceListResponse,
     PaymentMethodCreate,
@@ -464,49 +463,6 @@ async def get_bandwidth_by_source(
     return await service.get_bandwidth_breakdown_by_source(
         current_user.id, start_date, end_date
     )
-
-
-# ==================== Usage Export (27.5) ====================
-
-@router.post("/usage/me/export", response_model=UsageExportResponse)
-async def export_usage(
-    start_date: date = Query(..., description="Start date for export"),
-    end_date: date = Query(..., description="End date for export"),
-    resource_types: Optional[list[UsageResourceType]] = Query(None, description="Resource types to include"),
-    current_user=Depends(get_current_user),
-    session: AsyncSession = Depends(get_session),
-):
-    """Export usage data to CSV file.
-    
-    Requirements: 27.5 - Detailed CSV export with timestamps and resource types
-    
-    Returns a download URL for the generated CSV file containing:
-    - record_id: Unique identifier for the usage record
-    - user_id: User ID
-    - subscription_id: Subscription ID
-    - resource_type: Type of resource (api_calls, encoding_minutes, storage_gb, bandwidth_gb)
-    - amount: Usage amount
-    - billing_period_start: Start of billing period
-    - billing_period_end: End of billing period
-    - recorded_at: Timestamp when usage was recorded
-    - metadata: Additional metadata (JSON format)
-    """
-    service = BillingService(session)
-    try:
-        # Convert resource types to string values if provided
-        resource_type_values = None
-        if resource_types:
-            resource_type_values = [rt.value for rt in resource_types]
-        
-        result = await service.export_usage_to_csv(
-            user_id=current_user.id,
-            start_date=start_date,
-            end_date=end_date,
-            resource_types=resource_type_values,
-        )
-        return UsageExportResponse(**result)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 # ==================== Invoice Management (28.3, 28.5) ====================

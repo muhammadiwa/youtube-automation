@@ -275,7 +275,7 @@ class UsageRecord(Base):
     amount: Mapped[float] = mapped_column(Float, nullable=False)
     
     # Optional usage metadata (e.g., resolution tier, stream_id, video_id)
-    usage_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    usage_metadata: Mapped[Optional[dict]] = mapped_column("metadata", JSON, nullable=True)
     
     # Billing period this usage belongs to
     billing_period_start: Mapped[date] = mapped_column(Date, nullable=False, index=True)

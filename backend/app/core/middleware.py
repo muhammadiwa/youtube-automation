@@ -302,17 +302,10 @@ class UsageMeteringMiddleware(BaseHTTPMiddleware):
         if response.status_code < 400:
             user_id = self._get_user_id_from_request(request)
             if user_id:
-                # Queue usage recording task (non-blocking)
-                try:
-                    from app.modules.billing.tasks import record_api_usage_task
-                    record_api_usage_task.delay(
-                        user_id=user_id,
-                        endpoint=self._normalize_path(path),
-                        method=request.method,
-                    )
-                except Exception:
-                    # Don't fail request if usage tracking fails
-                    pass
+                # NOTE: API usage tracking via usage_records is disabled
+                # The system now uses real-time queries for usage tracking
+                # See: billing/service.py get_usage_dashboard() and feature_gate.py
+                pass
         
         return response
     

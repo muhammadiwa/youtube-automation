@@ -334,10 +334,6 @@ export const billingApi = {
         }
     },
 
-    async exportUsage(format: "csv" | "json", startDate: string, endDate: string): Promise<{ download_url: string }> {
-        return await apiClient.post(`/billing/usage/me/export?start_date=${startDate}&end_date=${endDate}`)
-    },
-
     // ============ Payment History (Transactions) ============
     async getInvoices(): Promise<Invoice[]> {
         // Get payment transactions and map to Invoice format for display

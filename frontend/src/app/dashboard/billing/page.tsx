@@ -49,7 +49,6 @@ import {
     Radio,
     HardDrive,
     Wifi,
-    Download,
     Filter,
     Loader2,
     TrendingUp,
@@ -588,20 +587,14 @@ function BillingContent() {
                         {usage && (
                             <Card className="border-0 shadow-lg bg-gradient-to-r from-primary/5 via-primary/10 to-primary/5">
                                 <CardContent className="p-6">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-4">
-                                            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-                                                <Calendar className="h-6 w-6 text-primary" />
-                                            </div>
-                                            <div>
-                                                <p className="text-sm text-muted-foreground">Current Billing Period</p>
-                                                <p className="font-semibold">{new Date(usage.period_start).toLocaleDateString()} - {new Date(usage.period_end).toLocaleDateString()}</p>
-                                            </div>
+                                    <div className="flex items-center gap-4">
+                                        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
+                                            <Calendar className="h-6 w-6 text-primary" />
                                         </div>
-                                        <Button variant="outline" className="gap-2">
-                                            <Download className="h-4 w-4" />
-                                            Export
-                                        </Button>
+                                        <div>
+                                            <p className="text-sm text-muted-foreground">Current Billing Period</p>
+                                            <p className="font-semibold">{new Date(usage.period_start).toLocaleDateString()} - {new Date(usage.period_end).toLocaleDateString()}</p>
+                                        </div>
                                     </div>
                                 </CardContent>
                             </Card>

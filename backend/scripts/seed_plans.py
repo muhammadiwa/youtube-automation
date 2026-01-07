@@ -20,6 +20,10 @@ from app.modules.billing.models import Plan
 
 
 # Plan data with proper icons, colors, and display features
+# Bandwidth calculation:
+# - 1 hour streaming @6000kbps = 2.7 GB
+# - 1 hour streaming @3000kbps = 1.35 GB
+# - Average stream duration: 4-8 hours
 PLANS_DATA = [
     {
         "slug": "free",
@@ -32,7 +36,7 @@ PLANS_DATA = [
         "max_videos_per_month": 5,
         "max_streams_per_month": 1,
         "max_storage_gb": 1,
-        "max_bandwidth_gb": 5,
+        "max_bandwidth_gb": 15,  # ~1 stream x 8 hours x 3000kbps = 4GB, buffer for testing
         "ai_generations_per_month": 0,
         "api_calls_per_month": 1000,
         "encoding_minutes_per_month": 60,
@@ -42,8 +46,8 @@ PLANS_DATA = [
             {"name": "1 YouTube Account", "included": True},
             {"name": "5 Videos/month", "included": True},
             {"name": "1 Live Stream/month", "included": True},
+            {"name": "15 GB Bandwidth/month", "included": True},
             {"name": "Basic Analytics", "included": True},
-            {"name": "Strike Monitoring", "included": True},
             {"name": "Advanced Analytics", "included": False},
         ],
         "icon": "Sparkles",
@@ -63,7 +67,7 @@ PLANS_DATA = [
         "max_videos_per_month": 50,
         "max_streams_per_month": 10,
         "max_storage_gb": 10,
-        "max_bandwidth_gb": 50,
+        "max_bandwidth_gb": 100,  # ~10 streams x 4 hours x 4500kbps = 81GB + buffer
         "ai_generations_per_month": 0,
         "api_calls_per_month": 10000,
         "encoding_minutes_per_month": 300,
@@ -76,9 +80,9 @@ PLANS_DATA = [
             {"name": "5 YouTube Accounts", "included": True},
             {"name": "50 Videos/month", "included": True},
             {"name": "10 Live Streams/month", "included": True},
+            {"name": "100 GB Bandwidth/month", "included": True},
             {"name": "3 Concurrent Streams", "included": True},
             {"name": "Advanced Analytics", "included": True},
-            {"name": "Strike Alerts", "included": True},
         ],
         "icon": "Zap",
         "color": "blue",
@@ -96,8 +100,8 @@ PLANS_DATA = [
         "max_accounts": 20,
         "max_videos_per_month": 100,
         "max_streams_per_month": 30,
-        "max_storage_gb": 20,
-        "max_bandwidth_gb": 50,
+        "max_storage_gb": 50,
+        "max_bandwidth_gb": 500,  # ~30 streams x 6 hours x 6000kbps = 486GB + buffer
         "ai_generations_per_month": 0,
         "api_calls_per_month": 100000,
         "encoding_minutes_per_month": 1000,
@@ -111,10 +115,9 @@ PLANS_DATA = [
             {"name": "20 YouTube Accounts", "included": True},
             {"name": "100 Videos/month", "included": True},
             {"name": "30 Live Streams/month", "included": True},
+            {"name": "500 GB Bandwidth/month", "included": True},
             {"name": "5 Concurrent Streams", "included": True},
             {"name": "Full Analytics Suite", "included": True},
-            {"name": "AI Insights", "included": True},
-            {"name": "Report Generation", "included": True},
         ],
         "icon": "Crown",
         "color": "violet",
@@ -133,7 +136,7 @@ PLANS_DATA = [
         "max_videos_per_month": -1,
         "max_streams_per_month": -1,
         "max_storage_gb": -1,
-        "max_bandwidth_gb": -1,
+        "max_bandwidth_gb": -1,  # Unlimited
         "ai_generations_per_month": -1,
         "api_calls_per_month": -1,
         "encoding_minutes_per_month": -1,
@@ -146,11 +149,11 @@ PLANS_DATA = [
         ],
         "display_features": [
             {"name": "Unlimited Accounts", "included": True},
-            {"name": "Unlimited Everything", "included": True},
+            {"name": "Unlimited Videos & Streams", "included": True},
+            {"name": "Unlimited Bandwidth", "included": True},
             {"name": "Unlimited Concurrent Streams", "included": True},
-            {"name": "Full Analytics & AI", "included": True},
             {"name": "Priority Support 24/7", "included": True},
-            {"name": "Custom Reports", "included": True},
+            {"name": "Custom Reports & API", "included": True},
         ],
         "icon": "Building2",
         "color": "amber",

@@ -360,6 +360,64 @@ class FeatureGateService:
         
         return has_space, current_gb, limit_gb, plan.name
     
+    async def get_bandwidth_usage(
+        self,
+        user_id: uuid.UUID,
+    ) -> Tuple[float, float, str]:
+        """Calculate bandwidth usage from stream jobs.
+        
+        Bandwidth = bitrate (kbps) * duration (seconds) / 8 / 1024 / 1024 = GB
+        
+        Args:
+            user_id: User UUID
+            
+        Returns:
+            Tuple of (current_gb, limit_gb, plan_name)
+        """
+        from app.modules.stream.stream_job_models import StreamJob, StreamJobStatus
+        from app.core.datetime_utils import utcnow, ensure_utc
+        
+        plan, subscription = await self.get_user_plan(user_id)
+        
+        # Calculate bandwidth from completed/stopped stream jobs in current billing period
+        bandwidth_result = await self.session.execute(
+            select(
+                sql_func.coalesce(
+                    sql_func.sum(
+                        StreamJob.target_bitrate * StreamJob.total_duration_seconds / 8 / 1024 / 1024
+                    ), 
+                    0
+                )
+            )
+            .where(StreamJob.user_id == user_id)
+            .where(StreamJob.created_at >= subscription.current_period_start)
+            .where(StreamJob.total_duration_seconds > 0)
+        )
+        bandwidth_from_jobs = bandwidth_result.scalar() or 0
+        
+        # Also calculate bandwidth from currently running streams
+        running_streams_result = await self.session.execute(
+            select(StreamJob)
+            .where(StreamJob.user_id == user_id)
+            .where(StreamJob.status == StreamJobStatus.RUNNING.value)
+            .where(StreamJob.actual_start_at.isnot(None))
+        )
+        running_streams = running_streams_result.scalars().all()
+        
+        running_bandwidth = 0.0
+        for stream in running_streams:
+            if stream.actual_start_at:
+                now = utcnow()
+                start = ensure_utc(stream.actual_start_at)
+                duration_seconds = (now - start).total_seconds()
+                # bitrate (kbps) * duration (s) / 8 / 1024 / 1024 = GB
+                running_bandwidth += (stream.target_bitrate * duration_seconds) / 8 / 1024 / 1024
+        
+        bandwidth_used = float(bandwidth_from_jobs) + running_bandwidth
+        limit_gb = float(plan.max_bandwidth_gb)
+        
+        return bandwidth_used, limit_gb, plan.name
+    
     async def get_usage_summary(self, user_id: uuid.UUID) -> dict:
         """Get complete usage summary for a user.
         
@@ -374,6 +432,7 @@ class FeatureGateService:
         _, streams_count, streams_limit, _ = await self.check_streams_per_month_limit(user_id, raise_on_exceed=False)
         _, concurrent_count, concurrent_limit, _ = await self.check_concurrent_streams_limit(user_id, raise_on_exceed=False)
         _, storage_gb, storage_limit, _ = await self.check_storage_limit(user_id, raise_on_exceed=False)
+        bandwidth_gb, bandwidth_limit, _ = await self.get_bandwidth_usage(user_id)
         
         return {
             "plan": {
@@ -410,6 +469,11 @@ class FeatureGateService:
                     "current": round(storage_gb, 2),
                     "limit": storage_limit,
                     "unlimited": self._is_unlimited(int(storage_limit)),
+                },
+                "bandwidth_gb": {
+                    "current": round(bandwidth_gb, 2),
+                    "limit": bandwidth_limit,
+                    "unlimited": self._is_unlimited(int(bandwidth_limit)),
                 },
             },
         }
