@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.database import get_db
 from app.modules.stream.models import LiveEventStatus
 from app.modules.stream.schemas import (
     CreateLiveEventRequest,
@@ -144,7 +145,9 @@ async def list_all_events(
 async def create_live_event(
     request: CreateLiveEventRequest,
     create_on_youtube: bool = Query(True, description="Create broadcast on YouTube"),
+    current_user=Depends(get_current_user),
     service: StreamService = Depends(get_stream_service),
+    db: AsyncSession = Depends(get_db),
 ) -> LiveEventWithRtmpResponse:
     """Create a new live event.
 
@@ -154,14 +157,28 @@ async def create_live_event(
     Args:
         request: Live event creation request
         create_on_youtube: Whether to create on YouTube
+        current_user: Current authenticated user
         service: Stream service instance
+        db: Database session
 
     Returns:
         LiveEventWithRtmpResponse: Created live event with RTMP info
 
     Raises:
-        HTTPException: If account not found or schedule conflict
+        HTTPException: If account not found, schedule conflict, or limit exceeded
     """
+    from app.modules.billing.feature_gate import FeatureGateService, LimitExceededError
+    
+    # Check streams per month limit
+    feature_gate = FeatureGateService(db)
+    try:
+        await feature_gate.check_streams_per_month_limit(current_user.id, raise_on_exceed=True)
+    except LimitExceededError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=e.message,
+        )
+    
     try:
         event = await service.create_live_event(request, create_on_youtube)
         return LiveEventWithRtmpResponse(

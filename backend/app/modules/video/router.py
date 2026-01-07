@@ -127,6 +127,17 @@ async def upload_video(
     from datetime import datetime
     from sqlalchemy import select
     from app.modules.account.models import YouTubeAccount
+    from app.modules.billing.feature_gate import FeatureGateService, LimitExceededError
+    
+    # Check video upload limit
+    feature_gate = FeatureGateService(db)
+    try:
+        await feature_gate.check_videos_per_month_limit(current_user.id, raise_on_exceed=True)
+    except LimitExceededError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=e.message,
+        )
     
     # Verify account belongs to current user
     result = await db.execute(
@@ -160,6 +171,21 @@ async def upload_video(
         upload_result = await stream_upload_to_disk(file)
         file_path = upload_result.file_path
         file_size = upload_result.file_size
+        
+        # Check storage limit with the new file size
+        try:
+            await feature_gate.check_storage_limit(
+                current_user.id, 
+                additional_bytes=file_size, 
+                raise_on_exceed=True
+            )
+        except LimitExceededError as e:
+            # Cleanup uploaded file
+            await cleanup_upload(file_path)
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=e.message,
+            )
 
         # Extract video duration using ffprobe
         duration = await get_video_duration(file_path)

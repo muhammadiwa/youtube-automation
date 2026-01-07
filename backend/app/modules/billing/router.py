@@ -236,6 +236,22 @@ async def check_feature_access(
     return await service.check_feature_access(current_user.id, data.feature)
 
 
+@router.get("/limits/me")
+async def get_feature_limits(
+    current_user=Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Get all feature limits and current usage for the current user.
+    
+    Returns real-time usage data from database with limits from Plan model.
+    No hardcoded limits - all values come from database.
+    """
+    from app.modules.billing.feature_gate import FeatureGateService
+    
+    feature_gate = FeatureGateService(session)
+    return await feature_gate.get_usage_summary(current_user.id)
+
+
 # ==================== Usage Metering (27.1, 27.2, 27.3, 27.4) ====================
 
 @router.post("/usage/me", response_model=UsageRecordResponse)

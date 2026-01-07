@@ -106,6 +106,13 @@ async def oauth_callback(
             status_code=status.HTTP_302_FOUND,
         )
     except Exception as e:
+        # Check if it's a LimitExceededError
+        from app.modules.billing.feature_gate import LimitExceededError
+        if isinstance(e, LimitExceededError):
+            return RedirectResponse(
+                url=f"{frontend_url}/dashboard/accounts?error={quote(e.message)}",
+                status_code=status.HTTP_302_FOUND,
+            )
         # Handle any unexpected errors
         return RedirectResponse(
             url=f"{frontend_url}/dashboard/accounts?error={quote('Failed to connect account. Please try again.')}",

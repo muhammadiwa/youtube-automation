@@ -85,11 +85,17 @@ class YouTubeAccountService:
         Raises:
             OAuthError: If state is invalid or token exchange fails
             AccountExistsError: If channel is already connected
+            LimitExceededError: If account limit reached
         """
         # Validate state and get user_id
         user_id = OAuthStateStore.validate_state(state)
         if user_id is None:
             raise OAuthError("Invalid or expired OAuth state")
+        
+        # Check account limit before proceeding
+        from app.modules.billing.feature_gate import FeatureGateService, LimitExceededError
+        feature_gate = FeatureGateService(self.session)
+        await feature_gate.check_accounts_limit(user_id, raise_on_exceed=True)
 
         # Exchange code for tokens
         token_response = await self.oauth_client.exchange_code(code)

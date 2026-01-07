@@ -66,6 +66,7 @@ async def create_stream_job(
     request: CreateStreamJobRequest,
     current_user=Depends(get_current_user),
     service: StreamJobService = Depends(get_stream_job_service),
+    db: AsyncSession = Depends(get_db),
 ) -> StreamJobResponse:
     """Create a new stream job.
     
@@ -75,10 +76,23 @@ async def create_stream_job(
         request: Stream job creation request
         current_user: Current authenticated user
         service: Stream job service instance
+        db: Database session
         
     Returns:
         StreamJobResponse: Created stream job
     """
+    from app.modules.billing.feature_gate import FeatureGateService, LimitExceededError
+    
+    # Check streams per month limit
+    feature_gate = FeatureGateService(db)
+    try:
+        await feature_gate.check_streams_per_month_limit(current_user.id, raise_on_exceed=True)
+    except LimitExceededError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=e.message,
+        )
+    
     try:
         job = await service.create_stream_job(
             user_id=current_user.id,

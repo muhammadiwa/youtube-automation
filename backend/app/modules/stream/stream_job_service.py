@@ -34,20 +34,6 @@ from app.modules.stream.stream_job_schemas import (
 
 
 # ============================================
-# Subscription Slot Configuration
-# ============================================
-
-STREAM_SLOTS_BY_PLAN = {
-    "free": 1,
-    "basic": 3,
-    "pro": 10,
-    "enterprise": 50,
-}
-
-DEFAULT_PLAN = "free"
-
-
-# ============================================
 # Custom Exceptions
 # ============================================
 
@@ -405,13 +391,13 @@ class StreamJobService:
                 f"Stream job is in '{job.status}' status and cannot be started"
             )
         
-        # Check slot availability (Requirements: 5.5, 6.1)
-        slot_status = await self.get_slot_status(user_id)
-        if slot_status.available_slots <= 0:
-            raise SlotLimitExceededError(
-                f"Stream slot limit reached ({slot_status.total_slots} slots). "
-                f"Upgrade your plan to start more streams."
-            )
+        # Check concurrent streams limit from database Plan
+        from app.modules.billing.feature_gate import FeatureGateService, LimitExceededError
+        feature_gate = FeatureGateService(self.session)
+        try:
+            await feature_gate.check_concurrent_streams_limit(user_id, raise_on_exceed=True)
+        except LimitExceededError as e:
+            raise SlotLimitExceededError(e.message)
         
         # Check stream key not in use (Requirements: 8.4)
         existing = await self.job_repo.get_by_stream_key(job.stream_key)
@@ -524,18 +510,36 @@ class StreamJobService:
         Returns:
             SlotStatusResponse: Slot status
         """
-        # Get user's subscription plan
-        plan = await self._get_user_plan(user_id)
-        total_slots = STREAM_SLOTS_BY_PLAN.get(plan, 1)
+        # Get user's plan limits from database
+        from app.modules.billing.feature_gate import FeatureGateService
+        feature_gate = FeatureGateService(self.session)
+        
+        try:
+            plan, subscription = await feature_gate.get_user_plan(user_id)
+            total_slots = plan.concurrent_streams
+            plan_name = plan.slug
+        except Exception:
+            # Fallback to default if plan not found
+            total_slots = 1
+            plan_name = "free"
         
         # Count active streams
         used_slots = await self.job_repo.count_active_by_user(user_id)
+        
+        # Handle unlimited (-1)
+        if total_slots == -1:
+            return SlotStatusResponse(
+                used_slots=used_slots,
+                total_slots=-1,
+                available_slots=999,  # Effectively unlimited
+                plan=plan_name,
+            )
         
         return SlotStatusResponse(
             used_slots=used_slots,
             total_slots=total_slots,
             available_slots=max(0, total_slots - used_slots),
-            plan=plan,
+            plan=plan_name,
         )
 
     async def check_slot_available(self, user_id: uuid.UUID) -> bool:
