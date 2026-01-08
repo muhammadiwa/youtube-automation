@@ -190,21 +190,32 @@ async def upload_video(
         # Extract video duration using ffprobe
         duration = await get_video_duration(file_path)
 
-        # Handle optional thumbnail upload
+        # Handle optional thumbnail upload - upload directly to storage
         if thumbnail and thumbnail.filename:
-            import os
-            import aiofiles
-            from app.core.config import settings
-            
-            thumb_dir = getattr(settings, 'LOCAL_STORAGE_PATH', './storage') + "/thumbnails"
-            os.makedirs(thumb_dir, exist_ok=True)
+            from app.modules.video.upload_handler import upload_thumbnail_to_storage
             
             thumb_ext = os.path.splitext(thumbnail.filename)[1] or ".jpg"
-            thumbnail_path = os.path.join(thumb_dir, f"{uuid.uuid4()}{thumb_ext}")
+            content = await thumbnail.read()
             
-            async with aiofiles.open(thumbnail_path, 'wb') as f:
-                content = await thumbnail.read()
-                await f.write(content)
+            # Determine content type
+            content_type_map = {
+                '.jpg': 'image/jpeg',
+                '.jpeg': 'image/jpeg',
+                '.png': 'image/png',
+                '.gif': 'image/gif',
+                '.webp': 'image/webp',
+            }
+            thumb_content_type = content_type_map.get(thumb_ext.lower(), 'image/jpeg')
+            
+            # Generate unique ID for thumbnail
+            thumb_id = str(uuid.uuid4())
+            storage_key, thumbnail_url = await upload_thumbnail_to_storage(
+                content=content,
+                video_id=thumb_id,
+                file_ext=thumb_ext,
+                content_type=thumb_content_type,
+            )
+            thumbnail_path = storage_key  # Store storage key instead of local path
 
         # Create upload request
         request = VideoUploadRequest(
@@ -374,11 +385,18 @@ async def bulk_extract_duration(
     
     This is useful for migrating existing videos that were uploaded before
     duration extraction was implemented.
+    
+    For cloud storage: downloads file to temp, extracts duration, then cleans up.
     """
     from app.modules.video.upload_handler import get_video_duration
     from sqlalchemy import select
     from app.modules.video.models import Video
     from app.modules.account.models import YouTubeAccount
+    from app.core.storage import get_storage, is_cloud_storage
+    from app.core.config import settings
+    import tempfile
+    
+    storage = get_storage()
     
     # Get all videos for this user that have file_path but no duration
     result = await db.execute(
@@ -399,18 +417,68 @@ async def bulk_extract_duration(
     for video in videos:
         processed += 1
         
-        if not video.file_path or not os.path.exists(video.file_path):
+        if not video.file_path:
             skipped += 1
             results.append({
                 "videoId": str(video.id),
                 "title": video.title,
                 "status": "skipped",
-                "reason": "File not found"
+                "reason": "No file path"
             })
             continue
         
+        # Determine actual file path
+        actual_path = None
+        temp_file = None
+        
         try:
-            duration = await get_video_duration(video.file_path)
+            if is_cloud_storage():
+                # For cloud storage, check if file exists and download to temp
+                if not storage.exists(video.file_path):
+                    skipped += 1
+                    results.append({
+                        "videoId": str(video.id),
+                        "title": video.title,
+                        "status": "skipped",
+                        "reason": "File not found in cloud storage"
+                    })
+                    continue
+                
+                # Download to temp file
+                ext = os.path.splitext(video.file_path)[1] or ".mp4"
+                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+                temp_file.close()
+                
+                if not storage.download(video.file_path, temp_file.name):
+                    skipped += 1
+                    results.append({
+                        "videoId": str(video.id),
+                        "title": video.title,
+                        "status": "skipped",
+                        "reason": "Failed to download from cloud storage"
+                    })
+                    continue
+                
+                actual_path = temp_file.name
+            else:
+                # For local storage
+                if os.path.isabs(video.file_path):
+                    actual_path = video.file_path
+                else:
+                    actual_path = os.path.join(settings.LOCAL_STORAGE_PATH, video.file_path)
+                
+                if not os.path.exists(actual_path):
+                    skipped += 1
+                    results.append({
+                        "videoId": str(video.id),
+                        "title": video.title,
+                        "status": "skipped",
+                        "reason": "File not found"
+                    })
+                    continue
+            
+            # Extract duration
+            duration = await get_video_duration(actual_path)
             if duration:
                 video.duration = duration
                 updated += 1
@@ -436,6 +504,13 @@ async def bulk_extract_duration(
                 "status": "failed",
                 "reason": str(e)
             })
+        finally:
+            # Clean up temp file if created
+            if temp_file and os.path.exists(temp_file.name):
+                try:
+                    os.remove(temp_file.name)
+                except Exception:
+                    pass
     
     await db.commit()
     
@@ -752,6 +827,68 @@ async def get_video(
         return video
     except VideoNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+class VideoUrlResponse(BaseModel):
+    """Response for video URL endpoint."""
+    video_id: str
+    url: str
+    expires_in: int
+    storage_backend: str
+
+
+@router.get("/{video_id}/url", response_model=VideoUrlResponse)
+async def get_video_url(
+    video_id: uuid.UUID,
+    expires_in: int = Query(3600, ge=60, le=86400, description="URL expiration in seconds"),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get presigned URL for video file.
+    
+    For local storage: returns a file:// URL
+    For cloud storage (R2/S3): returns a presigned HTTPS URL
+    
+    The URL can be used to:
+    - Stream video in browser
+    - Download video file
+    - Use as input for FFmpeg
+    """
+    from sqlalchemy import select
+    from app.modules.video.models import Video
+    from app.modules.account.models import YouTubeAccount
+    from app.core.storage import get_storage, is_cloud_storage
+    from app.core.config import settings
+    
+    # Verify video belongs to current user
+    result = await db.execute(
+        select(Video)
+        .join(YouTubeAccount, Video.account_id == YouTubeAccount.id)
+        .where(Video.id == video_id, YouTubeAccount.user_id == current_user.id)
+    )
+    video = result.scalar_one_or_none()
+    
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found or not authorized",
+        )
+    
+    if not video.file_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video file not found",
+        )
+    
+    storage = get_storage()
+    url = storage.get_url(video.file_path, expires_in=expires_in)
+    
+    return VideoUrlResponse(
+        video_id=str(video_id),
+        url=url,
+        expires_in=expires_in,
+        storage_backend=settings.STORAGE_BACKEND,
+    )
 
 
 @router.get("/{video_id}/progress", response_model=UploadProgressResponse)
@@ -1092,30 +1229,74 @@ async def extract_video_duration(
         if not video.file_path:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Video has no local file. Duration can only be extracted from uploaded videos.",
+                detail="Video has no file. Duration can only be extracted from uploaded videos.",
             )
         
-        if not os.path.exists(video.file_path):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Video file not found on server.",
-            )
+        # Import storage utilities
+        from app.core.storage import get_storage, is_cloud_storage
+        from app.core.config import settings
+        import tempfile
         
-        # Extract duration
-        duration = await get_video_duration(video.file_path)
+        storage = get_storage()
+        actual_path = None
+        temp_file = None
         
-        if duration is None:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to extract duration. Make sure ffprobe is installed.",
-            )
-        
-        # Update video
-        video.duration = duration
-        await db.commit()
-        await db.refresh(video)
-        
-        return video
+        try:
+            if is_cloud_storage():
+                # For cloud storage, download to temp first
+                if not storage.exists(video.file_path):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Video file not found in cloud storage.",
+                    )
+                
+                ext = os.path.splitext(video.file_path)[1] or ".mp4"
+                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+                temp_file.close()
+                
+                if not storage.download(video.file_path, temp_file.name):
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Failed to download video from cloud storage.",
+                    )
+                
+                actual_path = temp_file.name
+            else:
+                # For local storage
+                if os.path.isabs(video.file_path):
+                    actual_path = video.file_path
+                else:
+                    actual_path = os.path.join(settings.LOCAL_STORAGE_PATH, video.file_path)
+                
+                if not os.path.exists(actual_path):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Video file not found on server.",
+                    )
+            
+            # Extract duration
+            duration = await get_video_duration(actual_path)
+            
+            if duration is None:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to extract duration. Make sure ffprobe is installed.",
+                )
+            
+            # Update video
+            video.duration = duration
+            await db.commit()
+            await db.refresh(video)
+            
+            return video
+        finally:
+            # Clean up temp file if created
+            if temp_file and os.path.exists(temp_file.name):
+                try:
+                    os.remove(temp_file.name)
+                except Exception:
+                    pass
+                    
     except VideoNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except HTTPException:

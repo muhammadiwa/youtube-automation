@@ -3,7 +3,6 @@
 Requirements: 19-29 - Global Configuration Management
 """
 
-import os
 import uuid
 from typing import Annotated
 
@@ -638,6 +637,8 @@ async def upload_logo(
     
     Requirements: 29.2 - Upload logo with dimension and format validation
     """
+    from app.core.storage import storage_service
+    
     # Validate file type
     allowed_types = ["image/png", "image/jpeg", "image/svg+xml", "image/webp"]
     if file.content_type not in allowed_types:
@@ -655,20 +656,28 @@ async def upload_logo(
             detail="File size exceeds maximum allowed size of 5MB"
         )
     
-    # Save file to storage
-    storage_dir = "storage/branding"
-    os.makedirs(storage_dir, exist_ok=True)
-    
-    # Generate unique filename
+    # Generate unique filename and storage key
     file_ext = file.filename.split(".")[-1] if file.filename else "png"
     filename = f"logo_{uuid.uuid4().hex}.{file_ext}"
-    file_path = os.path.join(storage_dir, filename)
+    storage_key = f"branding/{filename}"
     
-    with open(file_path, "wb") as f:
-        f.write(content)
+    # Upload to storage (cloud or local based on STORAGE_BACKEND)
+    result = await storage_service.upload_file(
+        key=storage_key,
+        content=content,
+        content_type=file.content_type or "image/png",
+    )
+    
+    if not result.success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload logo: {result.error_message}"
+        )
+    
+    # Get URL for the uploaded logo
+    logo_url = await storage_service.get_url(storage_key, expires_in=86400 * 365)  # 1 year
     
     # Update branding config with logo URL
-    logo_url = f"/storage/branding/{filename}"
     return await service.update_logo_url(logo_url, admin.id)
 
 

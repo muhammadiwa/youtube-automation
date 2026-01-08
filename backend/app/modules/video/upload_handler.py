@@ -2,6 +2,11 @@
 
 Implements chunked file streaming to avoid memory issues with large files.
 The file is streamed directly to disk without loading entirely into memory.
+
+Hybrid Storage Approach:
+- Files are first streamed to local temp storage (for FFmpeg processing)
+- After processing, files are uploaded to cloud storage (R2/S3) if configured
+- Local temp files are cleaned up after successful cloud upload
 """
 
 import asyncio
@@ -28,14 +33,43 @@ MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024
 # Allowed video extensions
 ALLOWED_EXTENSIONS = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv', '.m4v'}
 
+# Allowed image extensions for thumbnails
+ALLOWED_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
+
+
+def get_temp_dir() -> str:
+    """Get the temp directory path for local processing, creating it if needed.
+    
+    This is always local filesystem, used for:
+    - Video uploads before processing
+    - FFmpeg temp files
+    - Files that need local access before cloud upload
+    """
+    temp_dir = os.path.join(settings.LOCAL_STORAGE_PATH, "temp")
+    os.makedirs(temp_dir, exist_ok=True)
+    return temp_dir
+
+
+def get_upload_dir() -> str:
+    """Get the upload directory path, creating it if needed.
+    
+    DEPRECATED: Use get_temp_dir() for temp files, then upload to cloud storage.
+    Kept for backward compatibility.
+    """
+    upload_dir = os.path.join(settings.LOCAL_STORAGE_PATH, "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    return upload_dir
+
 
 @dataclass
 class UploadResult:
     """Result of a file upload operation."""
-    file_path: str
+    file_path: str  # Local temp path (for processing)
     file_size: int
     original_filename: str
     content_type: Optional[str]
+    storage_key: Optional[str] = None  # Cloud storage key (after upload to R2/S3)
+    storage_url: Optional[str] = None  # Cloud storage URL
 
 
 class UploadError(Exception):
@@ -53,18 +87,21 @@ class InvalidFileTypeError(UploadError):
     pass
 
 
-async def stream_upload_to_disk(
+async def stream_upload_to_temp(
     file: UploadFile,
     progress_callback: Optional[Callable[[int, int], Awaitable[None]]] = None,
 ) -> UploadResult:
-    """Stream upload file directly to disk without loading into memory.
+    """Stream upload file to local temp storage for processing.
+    
+    This saves the file locally first so FFmpeg can process it.
+    After processing, use upload_to_cloud_storage() to move to R2/S3.
     
     Args:
         file: FastAPI UploadFile object
         progress_callback: Optional async callback(bytes_written, total_bytes)
         
     Returns:
-        UploadResult with file path and metadata
+        UploadResult with local temp file path and metadata
         
     Raises:
         FileTooLargeError: If file exceeds MAX_FILE_SIZE
@@ -79,13 +116,12 @@ async def stream_upload_to_disk(
             f"File type '{file_ext}' not allowed. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"
         )
     
-    # Create upload directory
-    upload_dir = getattr(settings, 'LOCAL_STORAGE_PATH', './storage') + "/uploads"
-    os.makedirs(upload_dir, exist_ok=True)
+    # Use temp directory for local processing
+    temp_dir = get_temp_dir()
     
     # Generate unique filename
     unique_filename = f"{uuid.uuid4()}{file_ext}"
-    file_path = os.path.join(upload_dir, unique_filename)
+    file_path = os.path.join(temp_dir, unique_filename)
     
     # Stream file to disk
     total_bytes = 0
@@ -113,11 +149,11 @@ async def stream_upload_to_disk(
                 # Report progress
                 if progress_callback:
                     try:
-                        await progress_callback(total_bytes, 0)  # Total unknown during stream
+                        await progress_callback(total_bytes, 0)
                     except Exception as e:
                         logger.warning(f"Progress callback error: {e}")
         
-        logger.info(f"File uploaded: {file_path} ({total_bytes} bytes)")
+        logger.info(f"File uploaded to temp: {file_path} ({total_bytes} bytes)")
         
         return UploadResult(
             file_path=file_path,
@@ -136,11 +172,150 @@ async def stream_upload_to_disk(
         raise UploadError(f"Upload failed: {str(e)}")
 
 
-async def cleanup_upload(file_path: str) -> bool:
-    """Clean up an uploaded file.
+# Alias for backward compatibility
+async def stream_upload_to_disk(
+    file: UploadFile,
+    progress_callback: Optional[Callable[[int, int], Awaitable[None]]] = None,
+) -> UploadResult:
+    """Alias for stream_upload_to_temp() for backward compatibility."""
+    return await stream_upload_to_temp(file, progress_callback)
+
+
+async def upload_to_cloud_storage(
+    local_path: str,
+    storage_key: str,
+    content_type: str = "video/mp4",
+    cleanup_local: bool = True,
+) -> tuple[str, str]:
+    """Upload a local file to cloud storage (R2/S3/MinIO).
     
     Args:
-        file_path: Path to the file to delete
+        local_path: Path to local file
+        storage_key: Key/path in cloud storage (e.g., "videos/user_id/video_id.mp4")
+        content_type: MIME type of the file
+        cleanup_local: Whether to delete local file after successful upload
+        
+    Returns:
+        Tuple of (storage_key, storage_url)
+        
+    Raises:
+        UploadError: If upload fails
+    """
+    from app.core.storage import get_storage
+    
+    storage = get_storage()
+    
+    # Check if using cloud storage
+    if settings.STORAGE_BACKEND == "local":
+        # For local backend, just move file to final location
+        final_path = os.path.join(settings.LOCAL_STORAGE_PATH, storage_key)
+        os.makedirs(os.path.dirname(final_path), exist_ok=True)
+        
+        if cleanup_local and local_path != final_path:
+            import shutil
+            shutil.move(local_path, final_path)
+        elif local_path != final_path:
+            import shutil
+            shutil.copy2(local_path, final_path)
+        
+        url = storage.get_url(storage_key)
+        logger.info(f"File stored locally: {storage_key}")
+        return storage_key, url
+    
+    # Upload to cloud storage (R2/S3/MinIO)
+    try:
+        result = storage.upload(local_path, storage_key, content_type)
+        
+        if not result.success:
+            raise UploadError(f"Cloud upload failed: {result.error_message}")
+        
+        # Cleanup local temp file
+        if cleanup_local and os.path.exists(local_path):
+            os.remove(local_path)
+            logger.info(f"Cleaned up temp file: {local_path}")
+        
+        logger.info(f"File uploaded to cloud: {storage_key}")
+        return result.key, result.url
+        
+    except Exception as e:
+        logger.error(f"Cloud upload failed: {e}")
+        raise UploadError(f"Cloud upload failed: {str(e)}")
+
+
+async def upload_thumbnail_to_storage(
+    content: bytes,
+    video_id: str,
+    file_ext: str = ".jpg",
+    content_type: str = "image/jpeg",
+) -> tuple[str, str]:
+    """Upload thumbnail directly to storage (cloud or local).
+    
+    Args:
+        content: Thumbnail image bytes
+        video_id: Video ID for generating storage key
+        file_ext: File extension (default: .jpg)
+        content_type: MIME type (default: image/jpeg)
+        
+    Returns:
+        Tuple of (storage_key, storage_url)
+    """
+    from app.core.storage import storage_service
+    
+    storage_key = f"thumbnails/{video_id}{file_ext}"
+    
+    result = await storage_service.upload_file(
+        key=storage_key,
+        content=content,
+        content_type=content_type,
+    )
+    
+    if not result.success:
+        raise UploadError(f"Thumbnail upload failed: {result.error_message}")
+    
+    url = await storage_service.get_url(storage_key)
+    logger.info(f"Thumbnail uploaded: {storage_key}")
+    
+    return storage_key, url
+
+
+async def cleanup_upload(file_path: str) -> bool:
+    """Clean up an uploaded file (local temp or storage).
+    
+    Args:
+        file_path: Path to the file to delete (local path or storage key)
+        
+    Returns:
+        True if file was deleted, False if it didn't exist
+    """
+    try:
+        # Check if it's a local file path
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            logger.info(f"Cleaned up local file: {file_path}")
+            return True
+        
+        # Try to delete from cloud storage if it looks like a storage key
+        if not file_path.startswith("/") and not file_path.startswith("."):
+            try:
+                from app.core.storage import storage_service
+                result = await storage_service.delete_file(file_path)
+                if result:
+                    logger.info(f"Cleaned up storage file: {file_path}")
+                return result
+            except Exception as e:
+                logger.warning(f"Failed to cleanup from storage {file_path}: {e}")
+        
+        return False
+    except Exception as e:
+        logger.error(f"Failed to cleanup {file_path}: {e}")
+        return False
+
+
+def cleanup_temp_file(file_path: str) -> bool:
+    """Synchronously clean up a local temp file.
+    
+    Args:
+        file_path: Path to the local file to delete
         
     Returns:
         True if file was deleted, False if it didn't exist
@@ -148,19 +323,12 @@ async def cleanup_upload(file_path: str) -> bool:
     try:
         if os.path.exists(file_path):
             os.remove(file_path)
-            logger.info(f"Cleaned up upload: {file_path}")
+            logger.info(f"Cleaned up temp file: {file_path}")
             return True
         return False
     except Exception as e:
-        logger.error(f"Failed to cleanup {file_path}: {e}")
+        logger.error(f"Failed to cleanup temp file {file_path}: {e}")
         return False
-
-
-def get_upload_dir() -> str:
-    """Get the upload directory path, creating it if needed."""
-    upload_dir = getattr(settings, 'LOCAL_STORAGE_PATH', './storage') + "/uploads"
-    os.makedirs(upload_dir, exist_ok=True)
-    return upload_dir
 
 
 async def get_video_duration(file_path: str) -> Optional[int]:

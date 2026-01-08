@@ -129,6 +129,29 @@ class VideoResponse(BaseModel):
     created_at: datetime = Field(alias="createdAt", serialization_alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt", serialization_alias="updatedAt")
 
+    @field_validator("thumbnail_url", mode="before")
+    @classmethod
+    def transform_thumbnail_url(cls, v: Optional[str]) -> Optional[str]:
+        """Transform thumbnail URL for cloud storage.
+        
+        If using cloud storage (R2/S3) and the thumbnail_url is a storage key,
+        generate a presigned URL. If it's already a full URL, return as-is.
+        """
+        if not v:
+            return v
+        
+        # If it's already a full URL, return as-is
+        if v.startswith(('http://', 'https://')):
+            return v
+        
+        # For storage keys, generate presigned URL if using cloud storage
+        try:
+            from app.core.storage import get_public_url
+            return get_public_url(v, expires_in=3600)
+        except Exception:
+            # If storage is not available, return the original value
+            return v
+
     class Config:
         from_attributes = True
         populate_by_name = True

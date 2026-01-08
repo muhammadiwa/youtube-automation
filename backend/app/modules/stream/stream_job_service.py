@@ -129,11 +129,11 @@ class StreamJobService:
             VideoNotFoundError: If video file doesn't exist
             AccountNotFoundError: If YouTube account not found
         """
-        # Convert relative path to absolute if needed
+        # Convert relative path to absolute path or presigned URL
         video_path = self._resolve_video_path(request.video_path)
         
-        # Validate video file exists
-        if not os.path.exists(video_path):
+        # Validate video file/URL exists
+        if not self._validate_video_source(video_path, request.video_path):
             raise VideoNotFoundError(f"Video file not found: {request.video_path}")
         
         # Validate YouTube account exists
@@ -754,27 +754,62 @@ class StreamJobService:
         return DEFAULT_PLAN
 
     def _resolve_video_path(self, video_path: str) -> str:
-        """Resolve video path to absolute path.
+        """Resolve video path to a path/URL that FFmpeg can use.
         
-        Converts relative storage paths (like 'videos/xxx/yyy.mp4') to 
-        absolute paths using LOCAL_STORAGE_PATH setting.
+        Supports:
+        - Absolute local paths (returned as-is)
+        - Relative storage keys (converted to absolute path or presigned URL)
+        - HTTP/HTTPS URLs (returned as-is, FFmpeg supports HTTP input)
         
         Args:
-            video_path: Video path (can be relative or absolute)
+            video_path: Video path (can be relative, absolute, or HTTP URL)
             
         Returns:
-            str: Absolute path to video file
+            str: Path or URL that FFmpeg can read
         """
         from pathlib import Path
         from app.core.config import settings
+        from app.core.storage import get_file_url_for_ffmpeg, is_cloud_storage
         
-        # If already absolute, return as-is
+        # If it's already an HTTP URL, return as-is (FFmpeg supports HTTP input)
+        if video_path.startswith("http://") or video_path.startswith("https://"):
+            return video_path
+        
+        # If already absolute local path, return as-is
         if os.path.isabs(video_path):
             return video_path
         
-        # Convert relative path to absolute using storage base path
-        base_path = Path(settings.LOCAL_STORAGE_PATH)
-        return str((base_path / video_path).resolve())
+        # It's a relative storage key - get appropriate path/URL
+        return get_file_url_for_ffmpeg(video_path, expires_in=86400)  # 24 hours for long streams
+
+    def _validate_video_source(self, resolved_path: str, original_path: str) -> bool:
+        """Validate that video source exists and is accessible.
+        
+        Supports:
+        - Local file paths (checks os.path.exists)
+        - HTTP/HTTPS URLs (assumes valid if it's a presigned URL)
+        - Storage keys (checks via storage.exists)
+        
+        Args:
+            resolved_path: Resolved path/URL from _resolve_video_path
+            original_path: Original path provided by user
+            
+        Returns:
+            bool: True if video source is valid
+        """
+        from app.core.storage import get_storage, is_cloud_storage
+        
+        # If it's an HTTP URL (presigned URL from R2/S3), assume valid
+        # The presigned URL was just generated, so it should be valid
+        if resolved_path.startswith("http://") or resolved_path.startswith("https://"):
+            # For cloud storage, verify the file exists in storage
+            if is_cloud_storage() and not os.path.isabs(original_path):
+                storage = get_storage()
+                return storage.exists(original_path)
+            return True
+        
+        # For local paths, check if file exists
+        return os.path.exists(resolved_path)
 
     # ============================================
     # History & Analytics Operations (Requirements: 12.1, 12.2, 12.4, 12.5)

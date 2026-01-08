@@ -467,13 +467,25 @@ class VideoService:
         Args:
             video_id: Video UUID
         """
+        from app.core.storage import get_storage, is_cloud_storage
+        
         video = await self.get_video(video_id)
+        storage = get_storage()
         
         # Delete video file from storage
         if video.file_path:
             try:
-                if os.path.exists(video.file_path):
-                    os.remove(video.file_path)
+                if is_cloud_storage():
+                    # For cloud storage, use storage service
+                    storage.delete(video.file_path)
+                else:
+                    # For local storage, check if it's a storage key or absolute path
+                    if os.path.isabs(video.file_path):
+                        if os.path.exists(video.file_path):
+                            os.remove(video.file_path)
+                    else:
+                        # It's a storage key
+                        storage.delete(video.file_path)
             except Exception as e:
                 # Log but don't fail if file deletion fails
                 import logging
@@ -482,8 +494,16 @@ class VideoService:
         # Delete thumbnail file from storage
         if video.local_thumbnail_path:
             try:
-                if os.path.exists(video.local_thumbnail_path):
-                    os.remove(video.local_thumbnail_path)
+                if is_cloud_storage():
+                    # For cloud storage, use storage service
+                    storage.delete(video.local_thumbnail_path)
+                else:
+                    # For local storage
+                    if os.path.isabs(video.local_thumbnail_path):
+                        if os.path.exists(video.local_thumbnail_path):
+                            os.remove(video.local_thumbnail_path)
+                    else:
+                        storage.delete(video.local_thumbnail_path)
             except Exception as e:
                 import logging
                 logging.warning(f"Failed to delete thumbnail file {video.local_thumbnail_path}: {e}")

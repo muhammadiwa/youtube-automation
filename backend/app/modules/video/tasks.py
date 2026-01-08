@@ -22,15 +22,43 @@ logger = logging.getLogger(__name__)
 def _get_full_storage_path(relative_path: str) -> str:
     """Get full storage path from relative storage key.
     
+    For local storage: returns absolute file path
+    For cloud storage: downloads file to temp and returns temp path
+    
+    Note: For YouTube upload, we need a local file path because the
+    YouTube API requires reading from a file. For cloud storage,
+    we download to temp first.
+    
     Args:
         relative_path: Relative storage key like 'videos/user_id/video_id.mp4'
         
     Returns:
-        Full absolute path to the file
+        Full absolute path to the file (local or temp)
     """
-    base_path = Path(settings.LOCAL_STORAGE_PATH)
-    full_path = base_path / relative_path
-    return str(full_path.resolve())
+    from app.core.storage import is_cloud_storage, get_storage
+    
+    if is_cloud_storage():
+        # For cloud storage, download to temp directory
+        storage = get_storage()
+        temp_dir = os.path.join(settings.LOCAL_STORAGE_PATH, "temp")
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        # Generate temp file path
+        filename = os.path.basename(relative_path)
+        temp_path = os.path.join(temp_dir, f"yt_upload_{filename}")
+        
+        # Download if not already cached
+        if not os.path.exists(temp_path):
+            logger.info(f"Downloading {relative_path} from cloud storage to {temp_path}")
+            if not storage.download(relative_path, temp_path):
+                raise FileNotFoundError(f"Failed to download {relative_path} from cloud storage")
+        
+        return temp_path
+    else:
+        # For local storage, return absolute path
+        base_path = Path(settings.LOCAL_STORAGE_PATH)
+        full_path = base_path / relative_path
+        return str(full_path.resolve())
 
 
 class UploadRetryConfig(RetryConfig):

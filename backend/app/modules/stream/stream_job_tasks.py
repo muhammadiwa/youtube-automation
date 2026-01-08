@@ -698,7 +698,10 @@ async def _increment_restart_count(job_id: str) -> None:
 
 
 async def _get_playlist_video_paths(session, playlist_id: str) -> list[str]:
-    """Get video file paths from a playlist.
+    """Get video file paths/URLs from a playlist.
+    
+    For local storage: returns absolute file paths
+    For cloud storage (R2/S3): returns presigned URLs (FFmpeg supports HTTP input)
     
     Requirements: 11.1
     
@@ -707,10 +710,11 @@ async def _get_playlist_video_paths(session, playlist_id: str) -> list[str]:
         playlist_id: Playlist UUID string
         
     Returns:
-        list[str]: List of video file paths in order
+        list[str]: List of video file paths/URLs in order
     """
     from app.modules.stream.repository import StreamPlaylistRepository
     from app.modules.video.repository import VideoRepository
+    from app.core.storage import get_file_url_for_ffmpeg, is_cloud_storage, get_storage
     
     playlist_repo = StreamPlaylistRepository(session)
     video_repo = VideoRepository(session)
@@ -720,13 +724,29 @@ async def _get_playlist_video_paths(session, playlist_id: str) -> list[str]:
         return []
     
     video_paths = []
+    storage = get_storage()
+    
     for item in sorted(playlist.items, key=lambda x: x.position):
         if item.video_id:
             video = await video_repo.get_by_id(item.video_id)
-            if video and video.local_path and os.path.exists(video.local_path):
-                video_paths.append(video.local_path)
-        elif item.video_url and os.path.exists(item.video_url):
-            video_paths.append(item.video_url)
+            if video and video.file_path:
+                # Get path/URL that FFmpeg can use
+                ffmpeg_path = get_file_url_for_ffmpeg(video.file_path, expires_in=86400)
+                
+                # Validate file exists
+                if ffmpeg_path.startswith("http"):
+                    # For HTTP URLs, check storage exists
+                    if storage.exists(video.file_path):
+                        video_paths.append(ffmpeg_path)
+                elif os.path.exists(ffmpeg_path):
+                    video_paths.append(ffmpeg_path)
+                    
+        elif item.video_url:
+            # Direct URL or path provided
+            if item.video_url.startswith("http"):
+                video_paths.append(item.video_url)
+            elif os.path.exists(item.video_url):
+                video_paths.append(item.video_url)
     
     return video_paths
 

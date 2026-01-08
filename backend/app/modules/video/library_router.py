@@ -373,7 +373,113 @@ async def move_to_folder(
     return VideoResponse.from_orm(video)
 
 
-@router.get("/{video_id}/stream")
+@router.get("/{video_id}/thumbnail")
+async def get_video_thumbnail(
+    video_id: uuid.UUID,
+    token: Optional[str] = Query(None, description="Auth token for thumbnail access"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get video thumbnail.
+    
+    - For local storage: serves thumbnail file directly
+    - For cloud storage (R2/S3): redirects to presigned URL
+    
+    Accepts auth token via query parameter for img element compatibility.
+    """
+    import os
+    import logging
+    from fastapi.responses import FileResponse, RedirectResponse
+    from app.core.config import settings
+    from app.core.storage import get_storage, is_cloud_storage
+    from app.modules.auth.jwt import validate_token
+    
+    logger = logging.getLogger(__name__)
+    
+    # Verify token from query parameter
+    if not token:
+        logger.warning("Thumbnail request without token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required. Provide token as query parameter."
+        )
+    
+    # Validate token
+    payload = validate_token(token, expected_type="access")
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token"
+        )
+    
+    # Get user_id from payload
+    try:
+        user_id = uuid.UUID(payload.sub)
+    except (ValueError, AttributeError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload"
+        )
+    
+    service = VideoLibraryService(db)
+    
+    # Get video to verify ownership and get thumbnail path
+    video = await service.get_video_by_id(
+        video_id=video_id,
+        user_id=user_id
+    )
+    
+    # Check for thumbnail - prefer local_thumbnail_path, then thumbnail_url
+    thumbnail_key = video.local_thumbnail_path or video.thumbnail_url
+    
+    if not thumbnail_key:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Thumbnail not found for this video"
+        )
+    
+    # If thumbnail_url is a full URL (e.g., YouTube thumbnail), redirect to it
+    if thumbnail_key.startswith(('http://', 'https://')):
+        return RedirectResponse(url=thumbnail_key, status_code=302)
+    
+    storage = get_storage()
+    
+    # Check if using cloud storage (R2/S3)
+    if is_cloud_storage():
+        # For cloud storage, redirect to presigned URL
+        presigned_url = storage.get_url(thumbnail_key, expires_in=3600)
+        logger.info(f"Redirecting to cloud storage URL for thumbnail {video_id}")
+        return RedirectResponse(url=presigned_url, status_code=302)
+    
+    # For local storage, serve the file directly
+    file_path = thumbnail_key
+    
+    # If it's a relative path (storage key), prepend the local storage path
+    if not os.path.isabs(file_path):
+        local_storage_path = getattr(settings, 'LOCAL_STORAGE_PATH', './storage')
+        file_path = os.path.join(local_storage_path, file_path)
+    
+    # Check if file exists
+    if not os.path.exists(file_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Thumbnail file not found on disk"
+        )
+    
+    # Determine content type based on file extension
+    ext = os.path.splitext(file_path)[1].lower()
+    content_types = {
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp',
+    }
+    content_type = content_types.get(ext, 'image/jpeg')
+    
+    return FileResponse(
+        path=file_path,
+        media_type=content_type
+    )@router.get("/{video_id}/stream")
 async def stream_video_preview(
     video_id: uuid.UUID,
     token: Optional[str] = Query(None, description="Auth token for video streaming"),
@@ -382,13 +488,16 @@ async def stream_video_preview(
     """Stream video file for preview.
     
     Returns the actual video file for streaming.
-    Supports range requests for seeking.
+    - For local storage: serves file directly with range request support
+    - For cloud storage (R2/S3): redirects to presigned URL
+    
     Accepts auth token via query parameter for video element compatibility.
     """
     import os
     import logging
-    from fastapi.responses import FileResponse
+    from fastapi.responses import FileResponse, RedirectResponse
     from app.core.config import settings
+    from app.core.storage import get_storage, is_cloud_storage
     from app.modules.auth.jwt import validate_token
     
     logger = logging.getLogger(__name__)
@@ -436,6 +545,17 @@ async def stream_video_preview(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Video file not found. This video may have been imported from YouTube without a local file."
         )
+    
+    storage = get_storage()
+    
+    # Check if using cloud storage (R2/S3)
+    if is_cloud_storage():
+        # For cloud storage, redirect to presigned URL
+        # This allows the browser to stream directly from R2/S3
+        # Presigned URL valid for 1 hour (3600 seconds)
+        presigned_url = storage.get_url(video.file_path, expires_in=3600)
+        logger.info(f"Redirecting to cloud storage URL for video {video_id}")
+        return RedirectResponse(url=presigned_url, status_code=302)
     
     # For local storage, serve the file directly
     # The file_path could be a relative path or absolute path
@@ -587,12 +707,14 @@ async def create_stream_from_video(
     Creates a 24/7 looping stream using the video from library.
     Uses the stream key stored in the YouTube account.
     Tracks video usage for streaming.
+    
+    For cloud storage: uses presigned URL that FFmpeg can read directly.
     """
     from app.modules.stream.stream_job_service import StreamJobService
     from app.modules.stream.stream_job_schemas import CreateStreamJobRequest
     from app.core.config import settings
+    from app.core.storage import get_file_url_for_ffmpeg
     from datetime import datetime
-    from pathlib import Path
     
     user_id = current_user.id
     
@@ -603,15 +725,15 @@ async def create_stream_from_video(
         user_id=user_id
     )
     
-    # Get video file path - convert relative storage key to full path
+    # Get video file path - convert storage key to path/URL that FFmpeg can use
     if not video.file_path:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Video file not found"
         )
     
-    base_path = Path(settings.LOCAL_STORAGE_PATH)
-    video_path = str((base_path / video.file_path).resolve())
+    # Get path/URL for FFmpeg (local path or presigned URL for cloud storage)
+    video_path = get_file_url_for_ffmpeg(video.file_path, expires_in=86400 * 7)  # 7 days for long streams
     
     # Parse scheduled start time
     scheduled_start = None

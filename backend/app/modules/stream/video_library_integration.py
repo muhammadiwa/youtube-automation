@@ -236,23 +236,29 @@ class VideoLibraryStreamIntegration:
         return result.scalar_one_or_none()
     
     async def _get_video_file_path(self, video: Video) -> str:
-        """Get actual file path for video.
+        """Get actual file path or URL for video that FFmpeg can use.
+        
+        For local storage: returns absolute file path
+        For cloud storage (R2/S3): returns presigned URL (FFmpeg supports HTTP input)
         
         Args:
             video: Video instance
             
         Returns:
-            str: Actual file path
+            str: File path or HTTP URL that FFmpeg can read
             
         Raises:
             ValueError: If file path cannot be determined
         """
+        from app.core.storage import get_file_url_for_ffmpeg, is_cloud_storage
+        
         if not video.file_path:
             raise ValueError(f"Video {video.id} has no file path")
         
-        # If using cloud storage, get presigned URL or download path
-        # For now, assume local storage
-        return video.file_path
+        # Get URL/path that FFmpeg can use
+        # For local: absolute path
+        # For R2/S3: presigned URL (FFmpeg supports HTTP input)
+        return get_file_url_for_ffmpeg(video.file_path, expires_in=86400)  # 24 hours for long streams
     
     async def _update_video_streaming_status(
         self,
