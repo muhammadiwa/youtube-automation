@@ -462,7 +462,10 @@ class VideoService:
         return await self.video_repo.set_published(video)
 
     async def delete_video(self, video_id: uuid.UUID) -> None:
-        """Delete a video and its associated files.
+        """Soft delete a video and hard delete its associated files from storage.
+        
+        This preserves database records (including VideoUsageLog for billing accuracy)
+        while removing files from storage to save costs.
 
         Args:
             video_id: Video UUID
@@ -470,9 +473,14 @@ class VideoService:
         from app.core.storage import get_storage, is_cloud_storage
         
         video = await self.get_video(video_id)
+        
+        # Check if already deleted
+        if video.is_deleted():
+            raise VideoServiceError("Video already deleted")
+        
         storage = get_storage()
         
-        # Delete video file from storage
+        # Hard delete video file from storage
         if video.file_path:
             try:
                 if is_cloud_storage():
@@ -491,7 +499,7 @@ class VideoService:
                 import logging
                 logging.warning(f"Failed to delete video file {video.file_path}: {e}")
         
-        # Delete thumbnail file from storage
+        # Hard delete thumbnail file from storage
         if video.local_thumbnail_path:
             try:
                 if is_cloud_storage():
@@ -508,7 +516,9 @@ class VideoService:
                 import logging
                 logging.warning(f"Failed to delete thumbnail file {video.local_thumbnail_path}: {e}")
         
-        await self.video_repo.delete(video)
+        # Soft delete the video record (preserves VideoUsageLog for billing)
+        video.soft_delete()
+        await self.session.flush()
 
     # Template methods
     async def create_template(

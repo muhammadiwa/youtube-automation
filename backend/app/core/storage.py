@@ -352,11 +352,13 @@ class S3Storage(StorageBackend):
             return False
 
     def get_url(self, key: str, expires_in: int = 3600) -> str:
-        """Get URL for a file (presigned URL)."""
-        # Use CDN if enabled
-        if self.config.cdn_enabled and self.config.cdn_domain:
-            return f"https://{self.config.cdn_domain}/{key}"
+        """Get URL for a file (presigned URL).
         
+        Note: CDN URLs are only used for public content.
+        For authenticated video streaming, always use presigned URLs.
+        """
+        # For video streaming, always use presigned URLs (not CDN)
+        # CDN URLs don't support authentication
         try:
             client = self._get_client()
             url = client.generate_presigned_url(

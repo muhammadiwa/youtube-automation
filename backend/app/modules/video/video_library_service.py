@@ -223,6 +223,8 @@ class VideoLibraryService:
     ) -> tuple[list[Video], int]:
         """Get user's library videos with filters and pagination.
         
+        Automatically excludes soft-deleted videos.
+        
         Args:
             user_id: Owner of videos
             filters: Filter criteria
@@ -231,8 +233,11 @@ class VideoLibraryService:
         Returns:
             tuple[list[Video], int]: (videos, total_count)
         """
-        # Build query
-        query = select(Video).where(Video.user_id == user_id)
+        # Build query - auto-exclude soft-deleted videos
+        query = select(Video).where(
+            Video.user_id == user_id,
+            Video.deleted_at.is_(None)  # Exclude soft-deleted videos
+        )
         
         # Apply filters
         if filters.folder_id:
@@ -286,6 +291,8 @@ class VideoLibraryService:
     ) -> Video:
         """Get video by ID with access check.
         
+        Automatically excludes soft-deleted videos.
+        
         Args:
             video_id: Video identifier
             user_id: User requesting access
@@ -298,7 +305,8 @@ class VideoLibraryService:
         """
         query = select(Video).where(
             Video.id == video_id,
-            Video.user_id == user_id
+            Video.user_id == user_id,
+            Video.deleted_at.is_(None)  # Exclude soft-deleted videos
         )
         result = await self.db.execute(query)
         video = result.scalar_one_or_none()
@@ -367,34 +375,108 @@ class VideoLibraryService:
         video_id: UUID,
         user_id: UUID
     ) -> None:
-        """Delete video from library.
+        """Soft delete video from library with auto-cleanup of orphan logs.
+        
+        Deletes files from storage (hard delete) but preserves database records
+        (soft delete) for billing accuracy. VideoUsageLog is preserved for quota tracking.
+        
+        Checks for ACTUAL running stream jobs (source of truth).
+        Auto-cleans up orphan usage logs if no active stream jobs exist.
         
         Args:
             video_id: Video identifier
             user_id: User requesting deletion
             
         Raises:
-            HTTPException: If video is in use or deletion fails
+            HTTPException: If video is actively being streamed or already deleted
         """
+        from sqlalchemy import select, func
+        from app.modules.video.video_usage_tracker import VideoUsageLog
+        from app.modules.stream.stream_job_models import StreamJob, StreamJobStatus
+        from app.core.datetime_utils import utcnow
+        import logging
+        
+        logger = logging.getLogger(__name__)
         video = await self.get_video_by_id(video_id, user_id)
         
-        # Check if video is being used for streaming
-        if video.is_used_for_streaming:
+        # Check if already deleted
+        if video.is_deleted():
             raise HTTPException(
                 status_code=400,
-                detail="Cannot delete video that is currently being used for streaming"
+                detail="Video already deleted"
             )
         
-        # Delete files from storage
+        # Step 1: Check for ACTUAL running stream jobs (source of truth)
+        running_jobs_query = select(func.count()).select_from(StreamJob).where(
+            StreamJob.video_id == video_id,
+            StreamJob.status.in_([
+                StreamJobStatus.RUNNING.value,
+                StreamJobStatus.STARTING.value,
+                StreamJobStatus.SCHEDULED.value
+            ])
+        )
+        running_jobs_result = await self.db.execute(running_jobs_query)
+        running_jobs_count = running_jobs_result.scalar() or 0
+        
+        # If there are actual running stream jobs, block deletion
+        if running_jobs_count > 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot delete video - currently being streamed ({running_jobs_count} active stream job(s))"
+            )
+        
+        # Step 2: No running stream jobs - safe to delete
+        # But first, cleanup any orphan usage logs
+        orphan_logs_query = select(VideoUsageLog).where(
+            VideoUsageLog.video_id == video_id,
+            VideoUsageLog.usage_type == "live_stream",
+            VideoUsageLog.ended_at.is_(None)
+        )
+        orphan_logs_result = await self.db.execute(orphan_logs_query)
+        orphan_logs = orphan_logs_result.scalars().all()
+        
+        if orphan_logs:
+            # Auto-cleanup orphan logs
+            now = utcnow()
+            for log in orphan_logs:
+                log.ended_at = now
+                duration = int((now - log.started_at).total_seconds())
+                if log.usage_metadata is None:
+                    log.usage_metadata = {}
+                log.usage_metadata["auto_cleanup"] = True
+                log.usage_metadata["cleanup_reason"] = "no_active_stream_job"
+                log.usage_metadata["stream_duration"] = duration
+                
+                # Update video total streaming duration
+                video.total_streaming_duration += duration
+            
+            logger.info(f"Auto-cleaned up {len(orphan_logs)} orphan usage logs for video {video_id}")
+        
+        # Step 3: Reset streaming flag
+        if video.is_used_for_streaming:
+            video.is_used_for_streaming = False
+            logger.info(f"Reset is_used_for_streaming flag for video {video_id}")
+        
+        # Step 4: Hard delete files from storage (save costs)
         if video.file_path:
-            await self.storage.delete_video(video.file_path)
+            try:
+                await self.storage.delete_video(video.file_path)
+                logger.info(f"Deleted video file from storage: {video.file_path}")
+            except Exception as e:
+                logger.warning(f"Failed to delete video file {video.file_path}: {e}")
         
         if video.local_thumbnail_path:
-            await self.storage.delete_thumbnail(video.local_thumbnail_path)
+            try:
+                await self.storage.delete_thumbnail(video.local_thumbnail_path)
+                logger.info(f"Deleted thumbnail from storage: {video.local_thumbnail_path}")
+            except Exception as e:
+                logger.warning(f"Failed to delete thumbnail {video.local_thumbnail_path}: {e}")
         
-        # Delete from database
-        await self.db.delete(video)
+        # Step 5: Soft delete the video record (preserves VideoUsageLog for billing)
+        video.soft_delete()
         await self.db.commit()
+        
+        logger.info(f"Successfully soft deleted video {video_id} from library (files hard deleted, DB record preserved)")
 
     async def toggle_favorite(
         self,

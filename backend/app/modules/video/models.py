@@ -163,6 +163,9 @@ class Video(Base):
     last_accessed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )  # NEW
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )  # Soft delete timestamp
 
     # Relationships
     folder: Mapped[Optional["VideoFolder"]] = relationship(
@@ -171,7 +174,7 @@ class Video(Base):
     usage_logs: Mapped[list["VideoUsageLog"]] = relationship(
         "VideoUsageLog",
         back_populates="video",
-        cascade="all, delete-orphan",
+        # REMOVED cascade="all, delete-orphan" to preserve usage logs for billing
     )  # NEW
     # NOTE: stream_jobs relationship commented out to avoid circular import issues
     # Access stream jobs via query: session.query(StreamJob).filter_by(video_id=video.id)
@@ -204,6 +207,15 @@ class Video(Base):
         if self.scheduled_publish_at is None:
             return False
         return utcnow() >= ensure_utc(self.scheduled_publish_at)
+
+    def is_deleted(self) -> bool:
+        """Check if video is soft deleted."""
+        return self.deleted_at is not None
+
+    def soft_delete(self) -> None:
+        """Mark video as soft deleted."""
+        self.deleted_at = utcnow()
+        self.status = VideoStatus.ARCHIVED.value
 
     def __repr__(self) -> str:
         return f"<Video(id={self.id}, title={self.title}, status={self.status})>"
