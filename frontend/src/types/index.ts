@@ -61,6 +61,7 @@ export interface Video {
     isUsedForStreaming?: boolean
     streamingCount?: number
     totalStreamingDuration?: number  // Total streaming duration in seconds
+    streamUrl?: string  // URL for video preview (CDN or stream endpoint)
     createdAt?: string
     updatedAt?: string
 }

@@ -1,11 +1,12 @@
 """Video Library Service for managing video library operations.
 
 Provides library-first video management with storage, metadata extraction,
-and organization features.
+auto-conversion to MP4, and organization features.
 Requirements: 1.1, 1.2
 """
 
-import tempfile
+import os
+import uuid
 from pathlib import Path
 from typing import Optional
 from uuid import UUID
@@ -17,6 +18,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.video.models import Video, VideoFolder, VideoStatus
 from app.modules.video.video_storage_service import video_storage_service
 from app.modules.video.video_metadata_extractor import video_metadata_extractor
+
+# Temp directory for uploads - relative to backend folder
+TEMP_DIR = Path(__file__).parent.parent.parent.parent / "storage" / "temp"
+
+
+def get_temp_dir() -> Path:
+    """Get temp directory path, creating it if it doesn't exist."""
+    TEMP_DIR.mkdir(parents=True, exist_ok=True)
+    return TEMP_DIR
 
 
 # Validation constants
@@ -87,7 +97,7 @@ class VideoLibraryService:
         custom_tags: Optional[list[str]] = None,
         notes: Optional[str] = None
     ) -> Video:
-        """Upload video to library.
+        """Upload video to library with auto-conversion to MP4.
         
         Args:
             user_id: Owner of the video
@@ -105,6 +115,8 @@ class VideoLibraryService:
         Raises:
             HTTPException: If validation fails or upload fails
         """
+        from app.modules.video.video_converter import VideoConverter
+        
         # Validate file
         self._validate_file(file)
         
@@ -128,16 +140,23 @@ class VideoLibraryService:
         await self.db.flush()  # Get video.id
         
         try:
-            # Save file to temporary location for metadata extraction
-            with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as tmp_file:
-                content = await file.read()
+            # Save file to storage/temp folder for processing
+            temp_dir = get_temp_dir()
+            original_ext = Path(file.filename).suffix
+            tmp_file_path = str(temp_dir / f"upload_{uuid.uuid4().hex}{original_ext}")
+            
+            content = await file.read()
+            with open(tmp_file_path, 'wb') as tmp_file:
                 tmp_file.write(content)
-                tmp_file_path = tmp_file.name
+            
+            print(f"📁 Saved upload to temp: {tmp_file_path}")
             
             # Reset file pointer for storage upload
             await file.seek(0)
             
             # Extract metadata
+            needs_conversion = False
+            detected_format = None
             try:
                 metadata = await self.metadata_extractor.extract_metadata(tmp_file_path)
                 
@@ -149,21 +168,86 @@ class VideoLibraryService:
                 video.bitrate = metadata.bitrate
                 video.codec = metadata.codec
                 video.file_size = metadata.file_size
+                detected_format = metadata.format
                 
-                print(f"Metadata extracted successfully: duration={metadata.duration}, resolution={metadata.resolution}, format={metadata.format}")
+                print(f"📊 Metadata extracted: duration={metadata.duration}s, format={metadata.format}, resolution={metadata.resolution}")
                 
             except Exception as e:
-                # If metadata extraction fails, continue with upload
-                # but log the error with full details
+                # If metadata extraction fails, use file extension as format
                 import traceback
-                print(f"Warning: Failed to extract metadata from {tmp_file_path}: {e}")
+                print(f"⚠️  Warning: Failed to extract metadata: {e}")
                 print(f"Traceback: {traceback.format_exc()}")
+                
+                # Fallback: detect format from file extension
+                detected_format = original_ext.lower().lstrip('.')
+                video.format = detected_format
+                video.file_size = os.path.getsize(tmp_file_path)
+                print(f"📊 Using fallback format from extension: {detected_format}")
+            
+            # Check if conversion needed
+            needs_conversion = VideoConverter.needs_conversion(detected_format) if detected_format else False
+            print(f"🔍 Format check: detected_format='{detected_format}', needs_conversion={needs_conversion}")
+            if needs_conversion:
+                print(f"⚠️  Format '{detected_format}' needs conversion to MP4 for browser compatibility")
+            else:
+                print(f"✅ Format '{detected_format}' is browser-compatible, no conversion needed")
+            
+            # Convert to MP4 if needed
+            final_file_path = tmp_file_path
+            if needs_conversion:
+                print(f"🔄 Starting conversion: {detected_format} → MP4...")
+                print(f"   Input file: {tmp_file_path}")
+                print(f"   File exists: {os.path.exists(tmp_file_path)}")
+                
+                # Get recommended settings based on file size
+                file_size_mb = os.path.getsize(tmp_file_path) / 1024 / 1024
+                settings = VideoConverter.get_recommended_settings(file_size_mb)
+                print(f"   File size: {file_size_mb:.2f} MB")
+                print(f"   Settings: preset={settings['preset']}, crf={settings['crf']}")
+                
+                # Output path in storage/temp
+                converted_output_path = str(temp_dir / f"converted_{uuid.uuid4().hex}.mp4")
+                print(f"   Output path: {converted_output_path}")
+                
+                success, converted_path, error = await VideoConverter.convert_to_mp4(
+                    input_path=tmp_file_path,
+                    output_path=converted_output_path,
+                    preset=settings['preset'],
+                    crf=settings['crf'],
+                    remove_input=True  # Remove original after conversion
+                )
+                
+                if success and converted_path:
+                    print(f"✅ Conversion successful!")
+                    print(f"   Converted file: {converted_path}")
+                    print(f"   Converted file exists: {os.path.exists(converted_path)}")
+                    final_file_path = converted_path
+                    
+                    # Update video metadata after conversion
+                    video.format = 'mp4'
+                    video.file_size = os.path.getsize(converted_path)
+                    print(f"   Updated format to: {video.format}")
+                    print(f"   Updated file_size to: {video.file_size}")
+                    
+                    # Re-extract metadata from converted file
+                    try:
+                        converted_metadata = await self.metadata_extractor.extract_metadata(converted_path)
+                        video.codec = converted_metadata.codec
+                        video.bitrate = converted_metadata.bitrate
+                        print(f"   Updated metadata: codec={video.codec}, bitrate={video.bitrate}")
+                    except Exception as e:
+                        print(f"⚠️  Warning: Failed to extract metadata from converted file: {e}")
+                else:
+                    print(f"❌ Conversion failed!")
+                    print(f"   Error: {error}")
+                    print(f"   Continuing with original file...")
+                    # Continue with original file if conversion fails
             
             # Generate thumbnail
             try:
-                thumbnail_tmp_path = tmp_file_path + "_thumb.jpg"
+                thumbnail_tmp_path = final_file_path + "_thumb.jpg"
                 await self.metadata_extractor.generate_thumbnail(
-                    tmp_file_path,
+                    final_file_path,
                     thumbnail_tmp_path,
                     timestamp=5
                 )
@@ -185,18 +269,43 @@ class VideoLibraryService:
                 print(f"Warning: Failed to generate thumbnail: {e}")
             
             # Upload video to storage
-            storage_key, file_size = await self.storage.save_video(
-                user_id=user_id,
-                video_id=video.id,
-                file=file
-            )
+            # Need to create a file-like object from the final file path
+            with open(final_file_path, 'rb') as video_file:
+                # Create a mock UploadFile for storage service
+                from fastapi import UploadFile as FastAPIUploadFile
+                from io import BytesIO
+                
+                video_content = video_file.read()
+                
+                # Determine filename based on actual format (not just needs_conversion flag)
+                # If conversion was successful, video.format will be 'mp4'
+                # If conversion failed, video.format will still be original format
+                actual_ext = '.mp4' if video.format == 'mp4' else original_ext
+                upload_filename = f"{video.id}{actual_ext}"
+                
+                print(f"📤 Uploading to storage: {upload_filename}")
+                print(f"   Video format in DB: {video.format}")
+                print(f"   Final file path: {final_file_path}")
+                
+                video_file_obj = FastAPIUploadFile(
+                    filename=upload_filename,
+                    file=BytesIO(video_content)
+                )
+                
+                storage_key, file_size = await self.storage.save_video(
+                    user_id=user_id,
+                    video_id=video.id,
+                    file=video_file_obj
+                )
+                
+                print(f"   Storage key: {storage_key}")
             
             video.file_path = storage_key
             if not video.file_size:  # If metadata extraction failed
                 video.file_size = file_size
             
             # Clean up temp file
-            Path(tmp_file_path).unlink(missing_ok=True)
+            Path(final_file_path).unlink(missing_ok=True)
             
             await self.db.commit()
             await self.db.refresh(video)

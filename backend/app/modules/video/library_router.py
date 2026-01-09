@@ -48,6 +48,37 @@ from app.modules.video.schemas import (
 router = APIRouter(prefix="/videos/library", tags=["video-library"])
 
 
+def _create_video_response(video, video_id: uuid.UUID = None) -> VideoResponse:
+    """Create VideoResponse with stream_url populated.
+    
+    Args:
+        video: Video model instance
+        video_id: Optional video ID (uses video.id if not provided)
+        
+    Returns:
+        VideoResponse with stream_url set based on storage configuration
+    """
+    from app.core.storage import get_storage, is_cloud_storage
+    
+    # Generate stream URL based on storage configuration
+    stream_url = None
+    if video.file_path:
+        if is_cloud_storage():
+            # For cloud storage, return direct CDN/presigned URL
+            storage = get_storage()
+            stream_url = storage.get_url(video.file_path, expires_in=3600)
+        else:
+            # For local storage, return stream endpoint URL
+            vid = video_id or video.id
+            stream_url = f"/api/v1/videos/library/{vid}/stream"
+    
+    # Create response with stream_url
+    response = VideoResponse.model_validate(video)
+    response.stream_url = stream_url
+    
+    return response
+
+
 @router.post("/upload", response_model=VideoResponse, status_code=status.HTTP_201_CREATED)
 async def upload_to_library(
     file: UploadFile = File(...),
@@ -80,7 +111,7 @@ async def upload_to_library(
         folder_id=folder_id
     )
     
-    return VideoResponse.from_orm(video)
+    return _create_video_response(video)
 
 
 @router.get("", response_model=PaginatedVideoResponse)
@@ -129,7 +160,7 @@ async def get_library_videos(
     total_pages = math.ceil(total / limit) if total > 0 else 0
     
     return PaginatedVideoResponse(
-        items=[VideoResponse.from_orm(v) for v in videos],
+        items=[_create_video_response(v) for v in videos],
         total=total,
         page=page,
         pageSize=limit,
@@ -282,7 +313,13 @@ async def get_video_details(
     current_user = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get video details by ID."""
+    """Get video details by ID.
+    
+    Returns video details including stream_url for video preview.
+    The stream_url is generated based on storage configuration:
+    - For cloud storage with CDN: returns public CDN URL
+    - For local storage: returns stream endpoint URL
+    """
     service = VideoLibraryService(db)
     user_id = current_user.id
     
@@ -291,7 +328,7 @@ async def get_video_details(
         user_id=user_id
     )
     
-    return VideoResponse.from_orm(video)
+    return _create_video_response(video, video_id)
 
 
 @router.patch("/{video_id}", response_model=VideoResponse)
@@ -314,7 +351,7 @@ async def update_video_metadata(
         notes=metadata.notes if hasattr(metadata, 'notes') else None
     )
     
-    return VideoResponse.from_orm(video)
+    return _create_video_response(video, video_id)
 
 
 @router.delete("/{video_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -350,7 +387,7 @@ async def toggle_favorite(
         user_id=user_id
     )
     
-    return VideoResponse.from_orm(video)
+    return _create_video_response(video, video_id)
 
 
 @router.post("/{video_id}/move")
@@ -370,7 +407,7 @@ async def move_to_folder(
         folder_id=folder_id
     )
     
-    return VideoResponse.from_orm(video)
+    return _create_video_response(video, video_id)
 
 
 @router.get("/{video_id}/thumbnail")
@@ -479,57 +516,35 @@ async def get_video_thumbnail(
     return FileResponse(
         path=file_path,
         media_type=content_type
-    )@router.get("/{video_id}/stream")
+    )
+
+
+@router.get("/{video_id}/stream")
 async def stream_video_preview(
     video_id: uuid.UUID,
-    token: Optional[str] = Query(None, description="Auth token for video streaming"),
     db: AsyncSession = Depends(get_db),
+    current_user = Depends(get_current_user),
 ):
     """Stream video file for preview.
     
     Returns the actual video file for streaming.
-    - For local storage: serves file directly with range request support
-    - For cloud storage (R2/S3): redirects to presigned URL
+    - For cloud storage with public CDN: redirects to public CDN URL
+    - For local storage or private cloud: serves file with authentication
     
-    Accepts auth token via query parameter for video element compatibility.
+    Authentication is required to verify video ownership.
     """
     import os
     import logging
     from fastapi.responses import FileResponse, RedirectResponse
     from app.core.config import settings
     from app.core.storage import get_storage, is_cloud_storage
-    from app.modules.auth.jwt import validate_token
     
     logger = logging.getLogger(__name__)
     
-    # Verify token from query parameter
-    if not token:
-        logger.warning("Stream request without token")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required. Provide token as query parameter."
-        )
+    # Get user_id from current_user
+    user_id = current_user.id
     
-    # Validate token - checks type, blacklist, and expiration
-    payload = validate_token(token, expected_type="access")
-    if payload is None:
-        logger.warning(f"Invalid token for stream request: token={token[:20]}...")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token"
-        )
-    
-    logger.info(f"Stream request authenticated for user: {payload.sub}")
-    
-    # Get user_id from payload.sub (it's a string UUID)
-    try:
-        user_id = uuid.UUID(payload.sub)
-    except (ValueError, AttributeError) as e:
-        logger.error(f"Invalid user_id in token: {payload.sub}, error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload"
-        )
+    logger.info(f"Stream request for video {video_id} by user {user_id}")
     
     service = VideoLibraryService(db)
     
@@ -550,12 +565,14 @@ async def stream_video_preview(
     
     # Check if using cloud storage (R2/S3)
     if is_cloud_storage():
-        # For cloud storage, redirect to presigned URL
-        # This allows the browser to stream directly from R2/S3
-        # Presigned URL valid for 1 hour (3600 seconds)
-        presigned_url = storage.get_url(video.file_path, expires_in=3600)
+        # For cloud storage, get the URL (CDN or presigned)
+        # If CDN is enabled and bucket is public, this returns CDN URL
+        # Otherwise, returns presigned URL
+        video_url = storage.get_url(video.file_path, expires_in=3600)
         logger.info(f"Redirecting to cloud storage URL for video {video_id}")
-        return RedirectResponse(url=presigned_url, status_code=302)
+        
+        # Redirect to cloud URL - browser will fetch directly
+        return RedirectResponse(url=video_url, status_code=302)
     
     # For local storage, serve the file directly
     # The file_path could be a relative path or absolute path

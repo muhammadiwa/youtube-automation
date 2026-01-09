@@ -36,6 +36,7 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useToast } from "@/components/ui/toast"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { VideoUsageBadgeFull } from "@/components/videos/video-usage-badge"
 import { UploadToYouTubeDialog } from "@/components/videos/upload-to-youtube-dialog"
 import { CreateStreamDialog } from "@/components/videos/create-stream-dialog"
@@ -73,6 +74,7 @@ export default function VideoDetailPage() {
     const [uploadToYouTubeOpen, setUploadToYouTubeOpen] = useState(false)
     const [createStreamOpen, setCreateStreamOpen] = useState(false)
     const [moveToFolderOpen, setMoveToFolderOpen] = useState(false)
+    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
     const [youtubeAccounts, setYoutubeAccounts] = useState<YouTubeAccount[]>([])
 
     // Load data
@@ -82,41 +84,36 @@ export default function VideoDetailPage() {
         loadYouTubeAccounts()
     }, [videoId])
 
-    // Load stream URL after video is loaded
+    // Set stream URL when video is loaded
     useEffect(() => {
         if (video) {
-            loadStreamUrl()
+            // Only set stream URL if video has a local file
+            // Videos imported from YouTube won't have a local file
+            if (!video.filePath) {
+                setStreamUrl(null)
+                return
+            }
+
+            // Use streamUrl from backend response (already includes CDN URL or stream endpoint)
+            if (video.streamUrl) {
+                console.log("Setting streamUrl from backend:", video.streamUrl)
+                setStreamUrl(video.streamUrl)
+            } else {
+                // Fallback to stream endpoint if streamUrl not provided
+                const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
+                const fallbackUrl = `${apiUrl}/videos/library/${video.id}/stream`
+                console.log("Setting fallback streamUrl:", fallbackUrl)
+                setStreamUrl(fallbackUrl)
+            }
         }
-    }, [video?.id, video?.filePath])
-
-    const loadStreamUrl = async () => {
-        // Only set stream URL if video has a local file
-        // Videos imported from YouTube won't have a local file
-        if (!video?.filePath) {
-            setStreamUrl(null)
-            return
-        }
-
-        // For local storage, we use the stream endpoint directly
-        // The endpoint returns the video file directly
-        // We need to add auth token as query parameter for video element to access
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
-
-        // Get token from localStorage - key is "auth_access_token" as defined in auth-provider
-        const token = typeof window !== 'undefined' ? localStorage.getItem('auth_access_token') : null
-
-        if (token) {
-            setStreamUrl(`${apiUrl}/videos/library/${videoId}/stream?token=${encodeURIComponent(token)}`)
-        } else {
-            // Try without token - will fail if auth required
-            setStreamUrl(`${apiUrl}/videos/library/${videoId}/stream`)
-        }
-    }
+    }, [video])
 
     const loadVideo = async () => {
         try {
             setLoading(true)
             const data = await videoLibraryApi.getLibraryVideo(videoId)
+            console.log("Loaded video data:", data)
+            console.log("Video streamUrl:", data.streamUrl)
             setVideo(data)
             setFormData({
                 title: data.title,
@@ -220,23 +217,29 @@ export default function VideoDetailPage() {
         }
     }
 
-    const handleDelete = async () => {
-        if (!video || !confirm("Are you sure you want to delete this video? This action cannot be undone.")) return
+    const handleDelete = () => {
+        // Open delete confirmation dialog
+        setDeleteDialogOpen(true)
+    }
+
+    const confirmDelete = async () => {
+        if (!video) return
 
         try {
             await videoLibraryApi.deleteFromLibrary(video.id)
             addToast({
                 type: "success",
-                title: "Success",
-                description: "Video deleted successfully",
+                title: "Video Deleted",
+                description: `"${video.title}" has been deleted`,
             })
+            // Redirect to video library after successful delete
             router.push("/dashboard/videos/library")
-        } catch (error) {
+        } catch (error: any) {
             console.error("Failed to delete video:", error)
             addToast({
                 type: "error",
-                title: "Error",
-                description: "Failed to delete video",
+                title: "Delete Failed",
+                description: error.message || "Failed to delete video",
             })
         }
     }
@@ -739,6 +742,16 @@ export default function VideoDetailPage() {
                 onSuccess={loadVideo}
                 video={video}
                 folders={folders}
+            />
+            <ConfirmDialog
+                open={deleteDialogOpen}
+                onOpenChange={setDeleteDialogOpen}
+                title="Delete Video"
+                description={`Are you sure you want to delete "${video?.title}"? This action cannot be undone.`}
+                confirmText="Delete"
+                cancelText="Cancel"
+                variant="destructive"
+                onConfirm={confirmDelete}
             />
         </DashboardLayout>
     )

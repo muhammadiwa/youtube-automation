@@ -55,6 +55,7 @@ export function VideoPlayer({
     const [playbackRate, setPlaybackRate] = useState(1)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
+    const [errorDetails, setErrorDetails] = useState<string | null>(null)
     const [showControls, setShowControls] = useState(true)
     const [buffered, setBuffered] = useState(0)
 
@@ -166,6 +167,13 @@ export function VideoPlayer({
         if (!video) return
 
         let errorMessage = "Failed to load video"
+        let errorDetails = ""
+
+        console.error("Video error:", video.error)
+        console.error("Video src:", video.src)
+        console.error("Video networkState:", video.networkState)
+        console.error("Video readyState:", video.readyState)
+
         if (video.error) {
             switch (video.error.code) {
                 case MediaError.MEDIA_ERR_ABORTED:
@@ -173,17 +181,25 @@ export function VideoPlayer({
                     break
                 case MediaError.MEDIA_ERR_NETWORK:
                     errorMessage = "Network error while loading video"
+                    errorDetails = "Check your internet connection and try again"
                     break
                 case MediaError.MEDIA_ERR_DECODE:
                     errorMessage = "Video decoding failed"
+                    errorDetails = "The video file may be corrupted or in an unsupported codec"
                     break
                 case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
                     errorMessage = "Video format not supported"
+                    // Extract format from URL if possible
+                    const urlParts = videoUrl.split('.')
+                    const format = urlParts.length > 1 ? urlParts[urlParts.length - 1].split('?')[0] : 'unknown'
+                    errorDetails = `Your browser doesn't support this video format (.${format}). Supported formats: MP4, WebM. Consider converting the video to MP4 for better compatibility.`
                     break
             }
+            console.error("MediaError code:", video.error.code, "message:", video.error.message)
         }
 
         setError(errorMessage)
+        setErrorDetails(errorDetails)
         setLoading(false)
         onError?.(new Error(errorMessage))
     }
@@ -268,6 +284,7 @@ export function VideoPlayer({
 
     const handleRetry = () => {
         setError(null)
+        setErrorDetails(null)
         setLoading(true)
         videoRef.current?.load()
     }
@@ -278,7 +295,12 @@ export function VideoPlayer({
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-white p-8">
                     <AlertCircle className="h-16 w-16 mb-4 text-destructive" />
                     <h3 className="text-lg font-semibold mb-2">Error Loading Video</h3>
-                    <p className="text-sm text-muted-foreground mb-4 text-center">{error}</p>
+                    <p className="text-sm text-muted-foreground mb-2 text-center">{error}</p>
+                    {errorDetails && (
+                        <p className="text-xs text-muted-foreground mb-4 text-center max-w-md">
+                            {errorDetails}
+                        </p>
+                    )}
                     <Button onClick={handleRetry} variant="secondary">
                         Retry
                     </Button>
@@ -301,6 +323,7 @@ export function VideoPlayer({
                 poster={poster}
                 className="w-full h-full"
                 onClick={togglePlay}
+                playsInline
             />
 
             {/* Loading Spinner */}
