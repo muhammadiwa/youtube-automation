@@ -49,16 +49,16 @@ router = APIRouter(prefix="/videos/library", tags=["video-library"])
 
 
 def _create_video_response(video, video_id: uuid.UUID = None) -> VideoResponse:
-    """Create VideoResponse with stream_url populated.
+    """Create VideoResponse with stream_url and thumbnail_url populated.
     
     Args:
         video: Video model instance
         video_id: Optional video ID (uses video.id if not provided)
         
     Returns:
-        VideoResponse with stream_url set based on storage configuration
+        VideoResponse with stream_url and thumbnail_url set based on storage configuration
     """
-    from app.core.storage import get_storage, is_cloud_storage
+    from app.core.storage import get_storage, is_cloud_storage, get_public_url
     
     # Generate stream URL based on storage configuration
     stream_url = None
@@ -72,9 +72,17 @@ def _create_video_response(video, video_id: uuid.UUID = None) -> VideoResponse:
             vid = video_id or video.id
             stream_url = f"/api/v1/videos/library/{vid}/stream"
     
-    # Create response with stream_url
+    # Generate thumbnail URL
+    # Priority: thumbnail_url (YouTube) > local_thumbnail_path (generated)
+    thumbnail_url = video.thumbnail_url
+    if not thumbnail_url and video.local_thumbnail_path:
+        thumbnail_url = get_public_url(video.local_thumbnail_path, expires_in=3600)
+    
+    # Create response with stream_url and thumbnail_url
     response = VideoResponse.model_validate(video)
     response.stream_url = stream_url
+    if thumbnail_url:
+        response.thumbnail_url = thumbnail_url
     
     return response
 
