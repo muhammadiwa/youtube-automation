@@ -16,7 +16,6 @@ from fastapi import (
     Query,
     UploadFile,
     status,
-    Response
 )
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -246,7 +245,7 @@ async def delete_folder(
     folder_id: uuid.UUID,
     current_user = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> None:
     """Delete folder (must be empty)."""
     service = VideoFolderService(db)
     user_id = current_user.id
@@ -255,8 +254,6 @@ async def delete_folder(
         folder_id=folder_id,
         user_id=user_id
     )
-    
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # Bulk Operations
@@ -339,6 +336,33 @@ async def get_video_details(
     return _create_video_response(video, video_id)
 
 
+@router.get("/{video_id}/processing-status")
+async def get_processing_status(
+    video_id: uuid.UUID,
+    current_user = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get video processing status.
+    
+    Use this endpoint to poll for upload processing progress.
+    Returns status, progress percentage, and any errors.
+    
+    Uses existing columns:
+    - status: processing_upload → in_library (ready) or failed
+    - upload_progress: 0-100
+    - last_upload_error: Error message if failed
+    """
+    service = VideoLibraryService(db)
+    user_id = current_user.id
+    
+    status = await service.get_processing_status(
+        video_id=video_id,
+        user_id=user_id
+    )
+    
+    return status
+
+
 @router.patch("/{video_id}", response_model=VideoResponse)
 async def update_video_metadata(
     video_id: uuid.UUID,
@@ -367,7 +391,7 @@ async def delete_video(
     video_id: uuid.UUID,
     current_user = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> None:
     """Delete video from library."""
     service = VideoLibraryService(db)
     user_id = current_user.id
@@ -376,8 +400,6 @@ async def delete_video(
         video_id=video_id,
         user_id=user_id
     )
-    
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{video_id}/favorite", response_model=VideoResponse)

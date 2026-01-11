@@ -46,8 +46,8 @@ export interface Video {
     viewCount: number
     likeCount: number
     commentCount: number
-    status: "draft" | "uploading" | "processing" | "published" | "scheduled" | "failed" | "in_library" | "uploaded"
-    uploadProgress?: number
+    status: "draft" | "uploading" | "processing" | "published" | "scheduled" | "failed" | "in_library" | "uploaded" | "processing_upload"
+    uploadProgress?: number  // 0-100 progress for both YouTube upload and library upload processing
     filePath?: string  // Local file path for Video-to-Live streaming
     fileSize?: number
     duration?: number  // Duration in seconds
@@ -62,6 +62,8 @@ export interface Video {
     streamingCount?: number
     totalStreamingDuration?: number  // Total streaming duration in seconds
     streamUrl?: string  // URL for video preview (CDN or stream endpoint)
+    // Error tracking
+    lastUploadError?: string | null  // Error message if upload/processing failed
     createdAt?: string
     updatedAt?: string
 }

@@ -127,6 +127,7 @@ export interface UsageLog {
 export const videoLibraryApi = {
     /**
      * Upload video to library (not YouTube)
+     * Returns immediately with processing status - use getProcessingStatus to poll
      */
     async uploadToLibrary(
         file: File,
@@ -156,6 +157,43 @@ export const videoLibraryApi = {
         }
 
         return response.json()
+    },
+
+    /**
+     * Get video processing status (for background upload)
+     * Uses existing columns: status, upload_progress, last_upload_error
+     */
+    async getProcessingStatus(videoId: string): Promise<{
+        videoId: string
+        status: string
+        uploadProgress: number
+        uploadError: string | null
+        taskId: string | null
+        isReady: boolean
+        filePath: string | null
+        thumbnailUrl: string | null
+    }> {
+        const response = await apiClient.get<{
+            video_id: string
+            status: string
+            upload_progress: number
+            upload_error: string | null
+            task_id: string | null
+            is_ready: boolean
+            file_path: string | null
+            thumbnail_url: string | null
+        }>(`/videos/library/${videoId}/processing-status`)
+
+        return {
+            videoId: response.video_id,
+            status: response.status,
+            uploadProgress: response.upload_progress,
+            uploadError: response.upload_error,
+            taskId: response.task_id,
+            isReady: response.is_ready,
+            filePath: response.file_path,
+            thumbnailUrl: response.thumbnail_url,
+        }
     },
 
     /**

@@ -27,6 +27,7 @@ class VideoStatus(str, Enum):
     """Status of a video in the system."""
 
     IN_LIBRARY = "in_library"  # NEW - video in library, not uploaded
+    PROCESSING_UPLOAD = "processing_upload"  # NEW - background processing (convert, upload to storage)
     DRAFT = "draft"
     UPLOADING = "uploading"
     PROCESSING = "processing"
@@ -142,8 +143,8 @@ class Video(Base):
     # Upload information
     status: Mapped[str] = mapped_column(String(50), default=VideoStatus.IN_LIBRARY.value)  # CHANGED default
 
-    # Upload job tracking
-    upload_job_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # Upload job tracking (used for both YouTube upload AND library upload processing)
+    upload_job_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # Celery task ID
     upload_progress: Mapped[int] = mapped_column(Integer, default=0)  # 0-100
     upload_attempts: Mapped[int] = mapped_column(Integer, default=0)
     last_upload_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

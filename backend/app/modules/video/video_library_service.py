@@ -97,7 +97,16 @@ class VideoLibraryService:
         custom_tags: Optional[list[str]] = None,
         notes: Optional[str] = None
     ) -> Video:
-        """Upload video to library with auto-conversion to MP4.
+        """Upload video to library with background processing.
+        
+        This method saves the file to temp and queues a background task
+        for conversion and upload to cloud storage. Returns immediately
+        with video in 'processing_upload' status.
+        
+        Uses existing columns for tracking:
+        - upload_job_id: Celery task ID
+        - upload_progress: Progress 0-100
+        - last_upload_error: Error message if failed
         
         Args:
             user_id: Owner of the video
@@ -110,12 +119,15 @@ class VideoLibraryService:
             notes: Internal notes
             
         Returns:
-            Video: Created video object
+            Video: Created video object with processing_upload status
             
         Raises:
-            HTTPException: If validation fails or upload fails
+            HTTPException: If validation fails
         """
-        from app.modules.video.video_converter import VideoConverter
+        from app.modules.video.tasks import process_library_upload_task
+        import logging
+        
+        logger = logging.getLogger(__name__)
         
         # Validate file
         self._validate_file(file)
@@ -124,7 +136,7 @@ class VideoLibraryService:
         if folder_id:
             await self._validate_folder_access(user_id, folder_id)
         
-        # Create video record first (to get video_id)
+        # Create video record with processing status
         video = Video(
             user_id=user_id,
             title=title,
@@ -133,179 +145,41 @@ class VideoLibraryService:
             folder_id=folder_id,
             custom_tags=custom_tags or [],
             notes=notes,
-            status=VideoStatus.IN_LIBRARY.value,
+            status=VideoStatus.PROCESSING_UPLOAD.value,
+            upload_progress=0,
             is_favorite=False
         )
         self.db.add(video)
         await self.db.flush()  # Get video.id
         
         try:
-            # Save file to storage/temp folder for processing
+            # Save file to storage/temp folder
             temp_dir = get_temp_dir()
             original_ext = Path(file.filename).suffix
-            tmp_file_path = str(temp_dir / f"upload_{uuid.uuid4().hex}{original_ext}")
+            tmp_file_path = str(temp_dir / f"upload_{video.id}{original_ext}")
             
             content = await file.read()
             with open(tmp_file_path, 'wb') as tmp_file:
                 tmp_file.write(content)
             
-            print(f"📁 Saved upload to temp: {tmp_file_path}")
+            # Get file size for initial record
+            video.file_size = len(content)
             
-            # Reset file pointer for storage upload
-            await file.seek(0)
+            logger.info(f"📁 Saved upload to temp: {tmp_file_path} ({video.file_size} bytes)")
             
-            # Extract metadata
-            needs_conversion = False
-            detected_format = None
-            try:
-                metadata = await self.metadata_extractor.extract_metadata(tmp_file_path)
-                
-                # Update video with metadata
-                video.duration = metadata.duration
-                video.format = metadata.format
-                video.resolution = metadata.resolution
-                video.frame_rate = metadata.frame_rate
-                video.bitrate = metadata.bitrate
-                video.codec = metadata.codec
-                video.file_size = metadata.file_size
-                detected_format = metadata.format
-                
-                print(f"📊 Metadata extracted: duration={metadata.duration}s, format={metadata.format}, resolution={metadata.resolution}")
-                
-            except Exception as e:
-                # If metadata extraction fails, use file extension as format
-                import traceback
-                print(f"⚠️  Warning: Failed to extract metadata: {e}")
-                print(f"Traceback: {traceback.format_exc()}")
-                
-                # Fallback: detect format from file extension
-                detected_format = original_ext.lower().lstrip('.')
-                video.format = detected_format
-                video.file_size = os.path.getsize(tmp_file_path)
-                print(f"📊 Using fallback format from extension: {detected_format}")
+            # Queue background task for processing
+            task = process_library_upload_task.delay(
+                video_id=str(video.id),
+                temp_file_path=tmp_file_path,
+                original_filename=file.filename,
+                user_id=str(user_id)
+            )
             
-            # Check if conversion needed
-            needs_conversion = VideoConverter.needs_conversion(detected_format) if detected_format else False
-            print(f"🔍 Format check: detected_format='{detected_format}', needs_conversion={needs_conversion}")
-            if needs_conversion:
-                print(f"⚠️  Format '{detected_format}' needs conversion to MP4 for browser compatibility")
-            else:
-                print(f"✅ Format '{detected_format}' is browser-compatible, no conversion needed")
+            # Store task ID for status tracking (using existing column)
+            video.upload_job_id = task.id
+            video.upload_progress = 5  # Initial progress after queuing
             
-            # Convert to MP4 if needed
-            final_file_path = tmp_file_path
-            if needs_conversion:
-                print(f"🔄 Starting conversion: {detected_format} → MP4...")
-                print(f"   Input file: {tmp_file_path}")
-                print(f"   File exists: {os.path.exists(tmp_file_path)}")
-                
-                # Get recommended settings based on file size
-                file_size_mb = os.path.getsize(tmp_file_path) / 1024 / 1024
-                settings = VideoConverter.get_recommended_settings(file_size_mb)
-                print(f"   File size: {file_size_mb:.2f} MB")
-                print(f"   Settings: preset={settings['preset']}, crf={settings['crf']}")
-                
-                # Output path in storage/temp
-                converted_output_path = str(temp_dir / f"converted_{uuid.uuid4().hex}.mp4")
-                print(f"   Output path: {converted_output_path}")
-                
-                success, converted_path, error = await VideoConverter.convert_to_mp4(
-                    input_path=tmp_file_path,
-                    output_path=converted_output_path,
-                    preset=settings['preset'],
-                    crf=settings['crf'],
-                    remove_input=True  # Remove original after conversion
-                )
-                
-                if success and converted_path:
-                    print(f"✅ Conversion successful!")
-                    print(f"   Converted file: {converted_path}")
-                    print(f"   Converted file exists: {os.path.exists(converted_path)}")
-                    final_file_path = converted_path
-                    
-                    # Update video metadata after conversion
-                    video.format = 'mp4'
-                    video.file_size = os.path.getsize(converted_path)
-                    print(f"   Updated format to: {video.format}")
-                    print(f"   Updated file_size to: {video.file_size}")
-                    
-                    # Re-extract metadata from converted file
-                    try:
-                        converted_metadata = await self.metadata_extractor.extract_metadata(converted_path)
-                        video.codec = converted_metadata.codec
-                        video.bitrate = converted_metadata.bitrate
-                        print(f"   Updated metadata: codec={video.codec}, bitrate={video.bitrate}")
-                    except Exception as e:
-                        print(f"⚠️  Warning: Failed to extract metadata from converted file: {e}")
-                else:
-                    print(f"❌ Conversion failed!")
-                    print(f"   Error: {error}")
-                    print(f"   Continuing with original file...")
-                    # Continue with original file if conversion fails
-            
-            # Generate thumbnail
-            try:
-                thumbnail_tmp_path = final_file_path + "_thumb.jpg"
-                await self.metadata_extractor.generate_thumbnail(
-                    final_file_path,
-                    thumbnail_tmp_path,
-                    timestamp=5
-                )
-                
-                # Upload thumbnail to storage
-                with open(thumbnail_tmp_path, "rb") as thumb_file:
-                    thumb_content = thumb_file.read()
-                    thumb_key = await self.storage.save_thumbnail(
-                        video_id=video.id,
-                        content=thumb_content,
-                        custom=False
-                    )
-                    video.local_thumbnail_path = thumb_key
-                
-                # Clean up thumbnail temp file
-                Path(thumbnail_tmp_path).unlink(missing_ok=True)
-                
-            except Exception as e:
-                print(f"Warning: Failed to generate thumbnail: {e}")
-            
-            # Upload video to storage
-            # Need to create a file-like object from the final file path
-            with open(final_file_path, 'rb') as video_file:
-                # Create a mock UploadFile for storage service
-                from fastapi import UploadFile as FastAPIUploadFile
-                from io import BytesIO
-                
-                video_content = video_file.read()
-                
-                # Determine filename based on actual format (not just needs_conversion flag)
-                # If conversion was successful, video.format will be 'mp4'
-                # If conversion failed, video.format will still be original format
-                actual_ext = '.mp4' if video.format == 'mp4' else original_ext
-                upload_filename = f"{video.id}{actual_ext}"
-                
-                print(f"📤 Uploading to storage: {upload_filename}")
-                print(f"   Video format in DB: {video.format}")
-                print(f"   Final file path: {final_file_path}")
-                
-                video_file_obj = FastAPIUploadFile(
-                    filename=upload_filename,
-                    file=BytesIO(video_content)
-                )
-                
-                storage_key, file_size = await self.storage.save_video(
-                    user_id=user_id,
-                    video_id=video.id,
-                    file=video_file_obj
-                )
-                
-                print(f"   Storage key: {storage_key}")
-            
-            video.file_path = storage_key
-            if not video.file_size:  # If metadata extraction failed
-                video.file_size = file_size
-            
-            # Clean up temp file
-            Path(final_file_path).unlink(missing_ok=True)
+            logger.info(f"📋 Queued processing task: {task.id} for video {video.id}")
             
             await self.db.commit()
             await self.db.refresh(video)
@@ -314,15 +188,48 @@ class VideoLibraryService:
             
         except Exception as e:
             await self.db.rollback()
-            # Clean up uploaded files if any
-            if video.file_path:
-                await self.storage.delete_video(video.file_path)
-            if video.local_thumbnail_path:
-                await self.storage.delete_thumbnail(video.local_thumbnail_path)
+            # Clean up temp file if saved
+            try:
+                Path(tmp_file_path).unlink(missing_ok=True)
+            except:
+                pass
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to upload video: {str(e)}"
+                detail=f"Failed to queue video upload: {str(e)}"
             )
+    
+    async def get_processing_status(
+        self,
+        video_id: UUID,
+        user_id: UUID
+    ) -> dict:
+        """Get video processing status.
+        
+        Uses existing columns:
+        - status: Video status (processing_upload, in_library, failed)
+        - upload_job_id: Celery task ID
+        - upload_progress: Progress 0-100
+        - last_upload_error: Error message
+        
+        Args:
+            video_id: Video identifier
+            user_id: User requesting status
+            
+        Returns:
+            dict with processing status info
+        """
+        video = await self.get_video_by_id(video_id, user_id)
+        
+        return {
+            "video_id": str(video.id),
+            "status": video.status,
+            "upload_progress": video.upload_progress or 0,
+            "upload_error": video.last_upload_error,
+            "task_id": video.upload_job_id,
+            "is_ready": video.status == VideoStatus.IN_LIBRARY.value,
+            "file_path": video.file_path,
+            "thumbnail_url": video.local_thumbnail_path
+        }
 
     async def get_library_videos(
         self,

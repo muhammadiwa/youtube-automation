@@ -760,3 +760,275 @@ def sync_all_video_stats() -> dict:
             return {"status": "success", "synced": synced_count, "errors": error_count}
 
     return _run_async(_sync())
+
+
+# ============================================
+# Library Upload Processing Task
+# ============================================
+
+@celery_app.task(bind=True, max_retries=3)
+def process_library_upload_task(
+    self,
+    video_id: str,
+    temp_file_path: str,
+    original_filename: str,
+    user_id: str
+) -> dict:
+    """Process library video upload in background.
+    
+    This task handles:
+    1. Extract metadata from video
+    2. Convert to MP4 if needed
+    3. Generate thumbnail
+    4. Upload to cloud storage (R2/S3)
+    5. Update video record with file info
+    6. Cleanup temp files
+    
+    Uses existing columns for tracking:
+    - upload_progress: Progress 0-100
+    - last_upload_error: Error message if failed
+    - status: Video status (processing_upload → in_library or failed)
+    
+    Args:
+        video_id: UUID of the video record
+        temp_file_path: Path to temp file saved during upload
+        original_filename: Original filename for extension detection
+        user_id: UUID of the user who uploaded
+        
+    Returns:
+        dict with status and video info
+    """
+    from app.core.database import celery_session_maker
+    from app.modules.video.models import Video, VideoStatus
+    from app.modules.video.video_converter import VideoConverter
+    from app.modules.video.video_metadata_extractor import video_metadata_extractor
+    from app.modules.video.video_storage_service import video_storage_service
+    from pathlib import Path
+    from io import BytesIO
+    from fastapi import UploadFile as FastAPIUploadFile
+    
+    def update_progress(progress: int, error: str = None):
+        """Update upload progress in database using sync connection.
+        
+        Uses existing columns: upload_progress, last_upload_error, status
+        """
+        from app.core.database import sync_engine
+        from sqlalchemy.orm import Session
+        from sqlalchemy import update
+        
+        try:
+            with Session(sync_engine) as session:
+                values = {"upload_progress": progress}
+                if error:
+                    values["last_upload_error"] = error
+                    values["status"] = VideoStatus.FAILED.value
+                
+                session.execute(
+                    update(Video)
+                    .where(Video.id == uuid.UUID(video_id))
+                    .values(**values)
+                )
+                session.commit()
+                logger.info(f"Updated upload progress: {progress}%")
+        except Exception as e:
+            logger.warning(f"Failed to update progress: {e}")
+    
+    async def _process():
+        logger.info(f"Starting library upload processing for video {video_id}")
+        logger.info(f"Temp file: {temp_file_path}")
+        logger.info(f"Original filename: {original_filename}")
+        
+        # Check if temp file exists
+        if not os.path.exists(temp_file_path):
+            error_msg = f"Temp file not found: {temp_file_path}"
+            logger.error(error_msg)
+            update_progress(0, error_msg)
+            return {"status": "error", "error": error_msg}
+        
+        original_ext = Path(original_filename).suffix.lower()
+        final_file_path = temp_file_path
+        detected_format = original_ext.lstrip('.')
+        
+        try:
+            # Step 1: Extract metadata (10%)
+            update_progress(10)
+            logger.info("Extracting metadata...")
+            
+            metadata = None
+            try:
+                metadata = await video_metadata_extractor.extract_metadata(temp_file_path)
+                detected_format = metadata.format
+                logger.info(f"Metadata extracted: duration={metadata.duration}s, format={metadata.format}")
+            except Exception as e:
+                logger.warning(f"Failed to extract metadata: {e}")
+                # Continue with file extension as format
+            
+            # Step 2: Check if conversion needed (15%)
+            update_progress(15)
+            
+            needs_conversion = VideoConverter.needs_conversion(detected_format) if detected_format else False
+            logger.info(f"Format check: detected_format='{detected_format}', needs_conversion={needs_conversion}")
+            
+            # Step 3: Convert to MP4 if needed (20-50%)
+            if needs_conversion:
+                update_progress(20)
+                logger.info(f"Starting conversion: {detected_format} → MP4")
+                
+                # Get recommended settings
+                file_size_mb = os.path.getsize(temp_file_path) / 1024 / 1024
+                settings = VideoConverter.get_recommended_settings(file_size_mb)
+                
+                # Output path
+                temp_dir = Path(temp_file_path).parent
+                converted_output_path = str(temp_dir / f"converted_{uuid.uuid4().hex}.mp4")
+                
+                success, converted_path, error = await VideoConverter.convert_to_mp4(
+                    input_path=temp_file_path,
+                    output_path=converted_output_path,
+                    preset=settings['preset'],
+                    crf=settings['crf'],
+                    remove_input=True
+                )
+                
+                if success and converted_path:
+                    logger.info(f"Conversion successful: {converted_path}")
+                    final_file_path = converted_path
+                    detected_format = 'mp4'
+                    update_progress(50)
+                else:
+                    logger.warning(f"Conversion failed: {error}, continuing with original")
+                    update_progress(50)
+            else:
+                update_progress(50)
+                logger.info("No conversion needed")
+            
+            # Step 4: Generate thumbnail (55%)
+            update_progress(55)
+            logger.info("Generating thumbnail...")
+            
+            thumbnail_key = None
+            try:
+                thumbnail_tmp_path = final_file_path + "_thumb.jpg"
+                await video_metadata_extractor.generate_thumbnail(
+                    final_file_path,
+                    thumbnail_tmp_path,
+                    timestamp=5
+                )
+                
+                # Upload thumbnail to storage
+                with open(thumbnail_tmp_path, "rb") as thumb_file:
+                    thumb_content = thumb_file.read()
+                    thumbnail_key = await video_storage_service.save_thumbnail(
+                        video_id=uuid.UUID(video_id),
+                        content=thumb_content,
+                        custom=False
+                    )
+                
+                # Cleanup thumbnail temp file
+                Path(thumbnail_tmp_path).unlink(missing_ok=True)
+                logger.info(f"Thumbnail generated: {thumbnail_key}")
+            except Exception as e:
+                logger.warning(f"Failed to generate thumbnail: {e}")
+            
+            # Step 5: Upload to cloud storage (60-90%)
+            update_progress(60)
+            logger.info("Uploading to cloud storage...")
+            
+            with open(final_file_path, 'rb') as video_file:
+                video_content = video_file.read()
+                
+                # Determine filename
+                actual_ext = '.mp4' if detected_format == 'mp4' else original_ext
+                upload_filename = f"{video_id}{actual_ext}"
+                
+                logger.info(f"Uploading to storage: {upload_filename}")
+                
+                video_file_obj = FastAPIUploadFile(
+                    filename=upload_filename,
+                    file=BytesIO(video_content)
+                )
+                
+                storage_key, file_size = await video_storage_service.save_video(
+                    user_id=uuid.UUID(user_id),
+                    video_id=uuid.UUID(video_id),
+                    file=video_file_obj
+                )
+                
+                logger.info(f"Uploaded to storage: {storage_key}")
+            
+            update_progress(90)
+            
+            # Step 6: Update video record (95%)
+            update_progress(95)
+            logger.info("Finalizing video record...")
+            
+            async with celery_session_maker() as session:
+                from sqlalchemy import select
+                
+                result = await session.execute(
+                    select(Video).where(Video.id == uuid.UUID(video_id))
+                )
+                video = result.scalar_one_or_none()
+                
+                if not video:
+                    return {"status": "error", "error": "Video not found"}
+                
+                # Update video with file info
+                video.file_path = storage_key
+                video.file_size = file_size
+                video.format = detected_format
+                
+                if metadata:
+                    video.duration = metadata.duration
+                    video.resolution = metadata.resolution
+                    video.frame_rate = metadata.frame_rate
+                    video.bitrate = metadata.bitrate
+                    video.codec = metadata.codec
+                
+                if thumbnail_key:
+                    video.local_thumbnail_path = thumbnail_key
+                
+                # Mark as ready (using existing columns)
+                video.status = VideoStatus.IN_LIBRARY.value
+                video.upload_progress = 100
+                video.last_upload_error = None
+                
+                await session.commit()
+                logger.info(f"Video record updated: {video_id}")
+            
+            # Step 7: Cleanup temp files
+            try:
+                Path(final_file_path).unlink(missing_ok=True)
+                logger.info(f"Cleaned up temp file: {final_file_path}")
+            except Exception as e:
+                logger.warning(f"Failed to cleanup temp file: {e}")
+            
+            return {
+                "status": "success",
+                "video_id": video_id,
+                "file_path": storage_key,
+                "format": detected_format,
+                "thumbnail": thumbnail_key
+            }
+            
+        except Exception as e:
+            logger.exception(f"Processing failed for video {video_id}: {e}")
+            update_progress(0, str(e))
+            
+            # Cleanup temp files on error
+            try:
+                Path(temp_file_path).unlink(missing_ok=True)
+                if final_file_path != temp_file_path:
+                    Path(final_file_path).unlink(missing_ok=True)
+            except:
+                pass
+            
+            # Retry if possible
+            attempt = self.request.retries + 1
+            if attempt < 3:
+                delay = 30 * attempt
+                raise self.retry(exc=e, countdown=delay)
+            
+            return {"status": "failed", "error": str(e)}
+    
+    return _run_async(_process())

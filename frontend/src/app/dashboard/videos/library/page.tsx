@@ -48,6 +48,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useToast } from "@/components/ui/toast"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { VideoUsageBadgeCompact } from "@/components/videos/video-usage-badge"
+import { ProcessingStatusBadgeCompact } from "@/components/videos/processing-status-badge"
 import { CreateFolderDialog } from "@/components/videos/create-folder-dialog"
 import { EditFolderDialog } from "@/components/videos/edit-folder-dialog"
 import { DeleteFolderDialog } from "@/components/videos/delete-folder-dialog"
@@ -689,7 +690,16 @@ export default function VideoLibraryPage() {
                                             </DropdownMenu>
                                         </div>
                                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                            <VideoUsageBadgeCompact video={video} />
+                                            {video.status === "processing_upload" ? (
+                                                <ProcessingStatusBadgeCompact
+                                                    videoId={video.id}
+                                                    status={video.status}
+                                                    uploadProgress={video.uploadProgress}
+                                                    onComplete={loadVideos}
+                                                />
+                                            ) : (
+                                                <VideoUsageBadgeCompact video={video} />
+                                            )}
                                             <span>•</span>
                                             <span>{formatFileSize(video.fileSize)}</span>
                                             {video.isFavorite && (
@@ -752,7 +762,16 @@ export default function VideoLibraryPage() {
                                                 {video.title}
                                             </h3>
                                             <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
-                                                <VideoUsageBadgeCompact video={video} />
+                                                {video.status === "processing_upload" ? (
+                                                    <ProcessingStatusBadgeCompact
+                                                        videoId={video.id}
+                                                        status={video.status}
+                                                        uploadProgress={video.uploadProgress}
+                                                        onComplete={loadVideos}
+                                                    />
+                                                ) : (
+                                                    <VideoUsageBadgeCompact video={video} />
+                                                )}
                                                 <span>•</span>
                                                 <span>{formatDuration(video.duration)}</span>
                                                 <span>•</span>
