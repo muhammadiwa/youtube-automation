@@ -92,6 +92,16 @@ class AuthService:
             import logging
             logging.getLogger(__name__).warning(f"Failed to create free subscription for user {user.id}: {e}")
 
+        # Auto-create default notification preferences for new user
+        try:
+            from app.modules.notification.service import NotificationService
+            notification_service = NotificationService(self.session)
+            await notification_service.create_default_preferences(user.id, user.email)
+        except Exception as e:
+            # Log error but don't fail registration
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to create notification preferences for user {user.id}: {e}")
+
         return user
 
     async def login(

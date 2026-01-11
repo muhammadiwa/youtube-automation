@@ -548,6 +548,8 @@ async def configure_channel(
 @router.post("/channels/{channel_type}/test")
 async def test_channel(
     channel_type: str,
+    config: Optional[dict] = None,
+    current_user=Depends(get_current_user),
     service: NotificationService = Depends(get_notification_service),
     db: AsyncSession = Depends(get_db),
 ):
@@ -555,26 +557,46 @@ async def test_channel(
     
     Args:
         channel_type: Type of channel to test (email, telegram)
+        config: Optional config with chat_id for telegram
     """
     from app.modules.notification.channels import (
         EmailChannel,
         TelegramChannel,
     )
-    
-    # Get test recipient from request or use default
-    test_recipient = "test@example.com"
+    from sqlalchemy import select
+    from app.modules.notification.models import NotificationPreference
     
     if channel_type == "email":
+        # Use user's email from their account
         channel = EmailChannel()
         result = await channel.deliver(
-            recipient=test_recipient,
+            recipient=current_user.email,
             title="Test Notification",
             message="This is a test notification from YouTube Automation Platform.",
         )
     elif channel_type == "telegram":
+        # Get chat_id from request config or from user's preferences
+        chat_id = None
+        if config and config.get("chat_id"):
+            chat_id = config.get("chat_id")
+        else:
+            # Try to get from user's preferences
+            pref_result = await db.execute(
+                select(NotificationPreference).where(
+                    NotificationPreference.user_id == current_user.id,
+                    NotificationPreference.telegram_chat_id.isnot(None)
+                ).limit(1)
+            )
+            pref = pref_result.scalar_one_or_none()
+            if pref:
+                chat_id = pref.telegram_chat_id
+        
+        if not chat_id:
+            return {"success": False, "message": "Telegram Chat ID not configured"}
+        
         channel = TelegramChannel()
         result = await channel.deliver(
-            recipient="test_chat_id",
+            recipient=chat_id,
             title="Test Notification",
             message="This is a test notification from YouTube Automation Platform.",
         )

@@ -58,6 +58,40 @@ class NotificationService:
 
     # SLA threshold for delivery timing (Requirements: 23.1)
     SLA_THRESHOLD_SECONDS = 60.0
+    
+    # Default event types for notification preferences
+    DEFAULT_EVENT_TYPES = [
+        # Stream events
+        "stream_started",
+        "stream_ended",
+        "stream_error",
+        "stream_disconnected",
+        "stream_reconnected",
+        # Video events
+        "upload_complete",
+        "upload_failed",
+        # Account events
+        "quota_warning",
+        "token_expiring",
+        "token_expired",
+        # Channel events
+        "strike_detected",
+        "strike_resolved",
+        "subscriber_milestone",
+        # System events
+        "system_alert",
+        "security_alert",
+        "backup_completed",
+        "backup_failed",
+        # Billing events
+        "payment_success",
+        "payment_failed",
+        "subscription_activated",
+        "subscription_cancelled",
+        "subscription_expiring",
+        "subscription_expired",
+        "subscription_renewed",
+    ]
 
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -476,6 +510,36 @@ class NotificationService:
     async def delete_preference(self, preference_id: uuid.UUID) -> bool:
         """Delete notification preference."""
         return await self.pref_repo.delete_preference(preference_id)
+
+    async def create_default_preferences(
+        self,
+        user_id: uuid.UUID,
+        email: str,
+    ) -> list[NotificationPreferenceResponse]:
+        """Create default notification preferences for a new user.
+        
+        Creates preferences for all event types with email enabled by default.
+        
+        Args:
+            user_id: User ID
+            email: User's email address
+            
+        Returns:
+            List of created preferences
+        """
+        created_preferences = []
+        
+        for event_type in self.DEFAULT_EVENT_TYPES:
+            preference = await self.pref_repo.create_preference(
+                user_id=user_id,
+                event_type=event_type,
+                email_enabled=True,
+                telegram_enabled=False,
+                email_address=email,
+            )
+            created_preferences.append(self._preference_to_response(preference))
+        
+        return created_preferences
 
     # ==================== Escalation Rules Management (23.4) ====================
 
