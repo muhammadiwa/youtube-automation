@@ -1,6 +1,7 @@
 """Database configuration with SQLAlchemy 2.0 async support."""
 
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -26,19 +27,51 @@ async_session_maker = async_sessionmaker(
     expire_on_commit=False,
 )
 
-# Celery-specific engine with NullPool (no connection reuse)
-# This avoids event loop conflicts when Celery creates new loops per task
-celery_engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=False,
-    poolclass=NullPool,  # No pooling - new connection each time
-)
 
-celery_session_maker = async_sessionmaker(
-    celery_engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
+def _create_celery_engine():
+    """Create a fresh async engine for Celery tasks.
+    
+    Each call creates a new engine to avoid event loop binding issues.
+    Uses NullPool so connections are not reused across different event loops.
+    """
+    return create_async_engine(
+        settings.DATABASE_URL,
+        echo=False,
+        poolclass=NullPool,  # No pooling - new connection each time
+    )
+
+
+@asynccontextmanager
+async def celery_session_maker():
+    """Create a fresh session with a fresh engine for Celery tasks.
+    
+    This creates a new engine and session for each task to avoid
+    'bound to a different event loop' errors when multiple Celery
+    tasks run concurrently with asyncio.run().
+    
+    Usage:
+        async with celery_session_maker() as session:
+            # use session
+    """
+    # Create fresh engine for this event loop
+    task_engine = _create_celery_engine()
+    
+    # Create session maker bound to this engine
+    task_session_maker = async_sessionmaker(
+        task_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    
+    async with task_session_maker() as session:
+        try:
+            yield session
+        finally:
+            await session.close()
+    
+    # Dispose engine after use to clean up
+    await task_engine.dispose()
+
 
 # Sync engine for simple operations that need to run outside async context
 # Used for progress updates in Celery tasks to avoid async session conflicts
