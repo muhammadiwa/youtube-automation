@@ -602,3 +602,151 @@ class VideoLibraryService:
             )
         
         return folder
+
+    async def upload_thumbnail(
+        self,
+        video_id: UUID,
+        user_id: UUID,
+        file: UploadFile
+    ) -> Video:
+        """Upload custom thumbnail for video.
+        
+        Validates image format and size, uploads to storage,
+        and updates video record.
+        
+        Args:
+            video_id: Video identifier
+            user_id: User uploading thumbnail
+            file: Uploaded image file
+            
+        Returns:
+            Video: Updated video object
+            
+        Raises:
+            HTTPException: If validation fails or upload fails
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        video = await self.get_video_by_id(video_id, user_id)
+        
+        # Validate file
+        if not file.filename:
+            raise HTTPException(
+                status_code=400,
+                detail="Filename is required"
+            )
+        
+        # Check file extension
+        ext = Path(file.filename).suffix.lower().lstrip(".")
+        allowed_formats = ["jpg", "jpeg", "png", "webp"]
+        if ext not in allowed_formats:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Image format not allowed. Allowed formats: {', '.join(allowed_formats)}"
+            )
+        
+        # Read file content
+        content = await file.read()
+        
+        # Check file size (max 2MB)
+        max_size = 2 * 1024 * 1024  # 2MB
+        if len(content) > max_size:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Thumbnail too large. Maximum size is 2MB"
+            )
+        
+        try:
+            # Delete old custom thumbnail if exists
+            if video.local_thumbnail_path and "_custom" in video.local_thumbnail_path:
+                try:
+                    await self.storage.delete_thumbnail(video.local_thumbnail_path)
+                    logger.info(f"Deleted old custom thumbnail: {video.local_thumbnail_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete old thumbnail: {e}")
+            
+            # Upload new thumbnail
+            thumbnail_key = await self.storage.save_thumbnail(
+                video_id=video_id,
+                content=content,
+                custom=True  # Mark as custom thumbnail
+            )
+            
+            # Update video record
+            video.local_thumbnail_path = thumbnail_key
+            
+            await self.db.commit()
+            await self.db.refresh(video)
+            
+            logger.info(f"Uploaded custom thumbnail for video {video_id}: {thumbnail_key}")
+            
+            return video
+            
+        except Exception as e:
+            logger.error(f"Failed to upload thumbnail: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to upload thumbnail: {str(e)}"
+            )
+
+    async def delete_thumbnail(
+        self,
+        video_id: UUID,
+        user_id: UUID
+    ) -> Video:
+        """Delete custom thumbnail and revert to auto-generated.
+        
+        If video has an auto-generated thumbnail, it will be restored.
+        Otherwise, thumbnail will be empty.
+        
+        Args:
+            video_id: Video identifier
+            user_id: User requesting deletion
+            
+        Returns:
+            Video: Updated video object
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        video = await self.get_video_by_id(video_id, user_id)
+        
+        if not video.local_thumbnail_path:
+            raise HTTPException(
+                status_code=400,
+                detail="Video has no thumbnail to delete"
+            )
+        
+        # Check if it's a custom thumbnail
+        is_custom = "_custom" in video.local_thumbnail_path
+        
+        try:
+            # Delete from storage
+            await self.storage.delete_thumbnail(video.local_thumbnail_path)
+            logger.info(f"Deleted thumbnail from storage: {video.local_thumbnail_path}")
+            
+            if is_custom:
+                # Try to find auto-generated thumbnail
+                auto_thumbnail_key = f"thumbnails/{video_id}.jpg"
+                if await self.storage.video_exists(auto_thumbnail_key):
+                    video.local_thumbnail_path = auto_thumbnail_key
+                    logger.info(f"Reverted to auto-generated thumbnail: {auto_thumbnail_key}")
+                else:
+                    video.local_thumbnail_path = None
+                    logger.info("No auto-generated thumbnail found, cleared thumbnail")
+            else:
+                # Deleting auto-generated thumbnail
+                video.local_thumbnail_path = None
+            
+            await self.db.commit()
+            await self.db.refresh(video)
+            
+            return video
+            
+        except Exception as e:
+            logger.error(f"Failed to delete thumbnail: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to delete thumbnail: {str(e)}"
+            )

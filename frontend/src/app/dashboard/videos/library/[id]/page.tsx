@@ -24,7 +24,9 @@ import {
     Clock,
     HardDrive,
     Film,
-    Eye
+    Eye,
+    ImageIcon,
+    X
 } from "lucide-react"
 import { DashboardLayout } from "@/components/dashboard"
 import { Button } from "@/components/ui/button"
@@ -60,6 +62,7 @@ export default function VideoDetailPage() {
     const [saving, setSaving] = useState(false)
     const [editing, setEditing] = useState(false)
     const [streamUrl, setStreamUrl] = useState<string | null>(null)
+    const [uploadingThumbnail, setUploadingThumbnail] = useState(false)
 
     // Form data
     const [formData, setFormData] = useState({
@@ -257,6 +260,79 @@ export default function VideoDetailPage() {
             ...formData,
             tags: formData.tags.filter((tag) => tag !== tagToRemove),
         })
+    }
+
+    const handleThumbnailUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!video || !e.target.files || e.target.files.length === 0) return
+
+        const file = e.target.files[0]
+
+        // Validate file type
+        const allowedTypes = ["image/jpeg", "image/png", "image/webp"]
+        if (!allowedTypes.includes(file.type)) {
+            addToast({
+                type: "error",
+                title: "Invalid File",
+                description: "Please upload a JPEG, PNG, or WebP image",
+            })
+            return
+        }
+
+        // Validate file size (max 2MB)
+        if (file.size > 2 * 1024 * 1024) {
+            addToast({
+                type: "error",
+                title: "File Too Large",
+                description: "Thumbnail must be less than 2MB",
+            })
+            return
+        }
+
+        try {
+            setUploadingThumbnail(true)
+            await videoLibraryApi.uploadThumbnail(video.id, file)
+            addToast({
+                type: "success",
+                title: "Thumbnail Updated",
+                description: "Custom thumbnail has been uploaded",
+            })
+            loadVideo()
+        } catch (error: any) {
+            console.error("Failed to upload thumbnail:", error)
+            addToast({
+                type: "error",
+                title: "Upload Failed",
+                description: error.message || "Failed to upload thumbnail",
+            })
+        } finally {
+            setUploadingThumbnail(false)
+            // Reset input
+            e.target.value = ""
+        }
+    }
+
+    const handleDeleteThumbnail = async () => {
+        if (!video) return
+
+        try {
+            setUploadingThumbnail(true)
+            await videoLibraryApi.deleteThumbnail(video.id)
+            addToast({
+                type: "success",
+                title: "Thumbnail Removed",
+                description: "Custom thumbnail has been removed",
+            })
+            loadVideo()
+        } catch (error: any) {
+            console.error("Failed to delete thumbnail:", error)
+            addToast({
+                type: "error",
+                title: "Delete Failed",
+                description: error.message || "Failed to delete thumbnail",
+            })
+        } finally {
+            setUploadingThumbnail(false)
+        }
     }
 
     const formatDuration = (seconds: number | null | undefined) => {
@@ -564,6 +640,69 @@ export default function VideoDetailPage() {
                                             {video.notes || "No notes"}
                                         </p>
                                     )}
+                                </div>
+
+                                {/* Thumbnail */}
+                                <Separator />
+                                <div className="space-y-2">
+                                    <Label>Thumbnail</Label>
+                                    <div className="flex items-start gap-4">
+                                        {/* Thumbnail Preview */}
+                                        <div className="relative w-32 h-20 bg-muted rounded overflow-hidden flex-shrink-0">
+                                            {video.thumbnailUrl ? (
+                                                <img
+                                                    src={video.thumbnailUrl}
+                                                    alt="Video thumbnail"
+                                                    className="w-full h-full object-cover"
+                                                />
+                                            ) : (
+                                                <div className="w-full h-full flex items-center justify-center">
+                                                    <ImageIcon className="h-8 w-8 text-muted-foreground" />
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Upload/Delete Buttons */}
+                                        <div className="flex flex-col gap-2">
+                                            <div className="relative">
+                                                <input
+                                                    type="file"
+                                                    accept="image/jpeg,image/png,image/webp"
+                                                    onChange={handleThumbnailUpload}
+                                                    disabled={uploadingThumbnail}
+                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                                                />
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    disabled={uploadingThumbnail}
+                                                    className="pointer-events-none"
+                                                >
+                                                    {uploadingThumbnail ? (
+                                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                    ) : (
+                                                        <Upload className="mr-2 h-4 w-4" />
+                                                    )}
+                                                    {video.thumbnailUrl ? "Change" : "Upload"}
+                                                </Button>
+                                            </div>
+                                            {video.thumbnailUrl && (
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={handleDeleteThumbnail}
+                                                    disabled={uploadingThumbnail}
+                                                    className="text-destructive hover:text-destructive"
+                                                >
+                                                    <X className="mr-2 h-4 w-4" />
+                                                    Remove
+                                                </Button>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">
+                                        JPEG, PNG, or WebP. Max 2MB.
+                                    </p>
                                 </div>
                             </CardContent>
                         </Card>

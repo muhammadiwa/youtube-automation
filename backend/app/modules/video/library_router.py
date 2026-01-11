@@ -386,6 +386,52 @@ async def update_video_metadata(
     return _create_video_response(video, video_id)
 
 
+@router.post("/{video_id}/thumbnail", response_model=VideoResponse)
+async def upload_thumbnail(
+    video_id: uuid.UUID,
+    file: UploadFile = File(...),
+    current_user = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload custom thumbnail for video.
+    
+    Accepts JPEG, PNG, or WebP images. Max size 2MB.
+    Replaces any existing custom thumbnail.
+    """
+    service = VideoLibraryService(db)
+    user_id = current_user.id
+    
+    video = await service.upload_thumbnail(
+        video_id=video_id,
+        user_id=user_id,
+        file=file
+    )
+    
+    return _create_video_response(video, video_id)
+
+
+@router.delete("/{video_id}/thumbnail", response_model=VideoResponse)
+async def delete_thumbnail(
+    video_id: uuid.UUID,
+    current_user = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete custom thumbnail and revert to auto-generated one.
+    
+    If video has an auto-generated thumbnail, it will be used.
+    Otherwise, thumbnail will be empty.
+    """
+    service = VideoLibraryService(db)
+    user_id = current_user.id
+    
+    video = await service.delete_thumbnail(
+        video_id=video_id,
+        user_id=user_id
+    )
+    
+    return _create_video_response(video, video_id)
+
+
 @router.delete("/{video_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_video(
     video_id: uuid.UUID,

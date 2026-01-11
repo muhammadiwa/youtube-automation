@@ -237,6 +237,39 @@ export const videoLibraryApi = {
     },
 
     /**
+     * Upload custom thumbnail for video
+     */
+    async uploadThumbnail(videoId: string, file: File): Promise<Video> {
+        const formData = new FormData()
+        formData.append("file", file)
+
+        const response = await fetch(
+            `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"}/videos/library/${videoId}/thumbnail`,
+            {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${apiClient.getAccessToken()}`,
+                },
+                body: formData,
+            }
+        )
+
+        if (!response.ok) {
+            const error = await response.json()
+            throw new Error(error.detail || "Failed to upload thumbnail")
+        }
+
+        return response.json()
+    },
+
+    /**
+     * Delete custom thumbnail and revert to auto-generated
+     */
+    async deleteThumbnail(videoId: string): Promise<Video> {
+        return apiClient.delete(`/videos/library/${videoId}/thumbnail`)
+    },
+
+    /**
      * Delete video from library
      */
     async deleteFromLibrary(videoId: string): Promise<void> {
