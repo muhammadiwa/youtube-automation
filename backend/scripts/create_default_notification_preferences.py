@@ -18,7 +18,10 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session_maker
+
+# Import all models to ensure relationships are resolved
 from app.modules.auth.models import User
+from app.modules.account.models import YouTubeAccount
 from app.modules.notification.models import NotificationPreference
 from app.modules.notification.service import NotificationService
 

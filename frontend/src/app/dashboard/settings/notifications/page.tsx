@@ -23,35 +23,36 @@ import { apiClient } from "@/lib/api/client"
 
 type NotificationType =
     // Stream events
-    | "stream_started"
-    | "stream_ended"
-    | "stream_error"
-    | "stream_disconnected"
-    | "stream_reconnected"
+    | "stream.started"
+    | "stream.ended"
+    | "stream.health_degraded"
+    | "stream.disconnected"
+    | "stream.reconnected"
     // Video events
-    | "upload_complete"
-    | "upload_failed"
+    | "video.uploaded"
+    | "video.processing_failed"
     // Account events
-    | "quota_warning"
-    | "token_expiring"
-    | "token_expired"
+    | "account.quota_warning"
+    | "account.token_expiring"
+    | "account.token_expired"
+    // Strike events
+    | "strike.detected"
+    | "strike.resolved"
     // Channel events
-    | "strike_detected"
-    | "strike_resolved"
-    | "subscriber_milestone"
+    | "channel.subscriber_milestone"
     // System events
-    | "system_alert"
-    | "security_alert"
-    | "backup_completed"
-    | "backup_failed"
-    // Payment/Billing events
-    | "payment_success"
-    | "payment_failed"
-    | "subscription_activated"
-    | "subscription_cancelled"
-    | "subscription_expiring"
-    | "subscription_expired"
-    | "subscription_renewed"
+    | "system.alert"
+    | "security.alert"
+    | "backup.completed"
+    | "backup.failed"
+    // Billing events
+    | "payment.success"
+    | "payment.failed"
+    | "subscription.activated"
+    | "subscription.cancelled"
+    | "subscription.expiring"
+    | "subscription.expired"
+    | "subscription.renewed"
 
 interface NotificationPreference {
     id: string
@@ -72,35 +73,36 @@ interface ChannelState {
 
 const EVENT_TYPES: { type: NotificationType; label: string; description: string; category: string }[] = [
     // Stream events
-    { type: "stream_started", label: "Stream Started", description: "When a live stream begins", category: "Streaming" },
-    { type: "stream_ended", label: "Stream Ended", description: "When a live stream ends", category: "Streaming" },
-    { type: "stream_error", label: "Stream Error", description: "When a stream encounters an error", category: "Streaming" },
-    { type: "stream_disconnected", label: "Stream Disconnected", description: "When a stream loses connection", category: "Streaming" },
-    { type: "stream_reconnected", label: "Stream Reconnected", description: "When a stream reconnects successfully", category: "Streaming" },
+    { type: "stream.started", label: "Stream Started", description: "When a live stream begins", category: "Streaming" },
+    { type: "stream.ended", label: "Stream Ended", description: "When a live stream ends", category: "Streaming" },
+    { type: "stream.health_degraded", label: "Stream Error", description: "When a stream encounters an error", category: "Streaming" },
+    { type: "stream.disconnected", label: "Stream Disconnected", description: "When a stream loses connection", category: "Streaming" },
+    { type: "stream.reconnected", label: "Stream Reconnected", description: "When a stream reconnects successfully", category: "Streaming" },
     // Video events
-    { type: "upload_complete", label: "Upload Complete", description: "When a video upload finishes", category: "Videos" },
-    { type: "upload_failed", label: "Upload Failed", description: "When a video upload fails", category: "Videos" },
+    { type: "video.uploaded", label: "Video Uploaded", description: "When a video upload finishes", category: "Videos" },
+    { type: "video.processing_failed", label: "Processing Failed", description: "When video processing fails", category: "Videos" },
     // Account events
-    { type: "quota_warning", label: "Quota Warning", description: "When API quota is running low", category: "Account" },
-    { type: "token_expiring", label: "Token Expiring", description: "When OAuth token is about to expire", category: "Account" },
-    { type: "token_expired", label: "Token Expired", description: "When OAuth token has expired", category: "Account" },
+    { type: "account.quota_warning", label: "Quota Warning", description: "When API quota is running low", category: "Account" },
+    { type: "account.token_expiring", label: "Token Expiring", description: "When OAuth token is about to expire", category: "Account" },
+    { type: "account.token_expired", label: "Token Expired", description: "When OAuth token has expired", category: "Account" },
+    // Strike events
+    { type: "strike.detected", label: "Strike Detected", description: "When a strike is detected on your channel", category: "Channel" },
+    { type: "strike.resolved", label: "Strike Resolved", description: "When a strike is resolved", category: "Channel" },
     // Channel events
-    { type: "strike_detected", label: "Strike Detected", description: "When a strike is detected on your channel", category: "Channel" },
-    { type: "strike_resolved", label: "Strike Resolved", description: "When a strike is resolved", category: "Channel" },
-    { type: "subscriber_milestone", label: "Subscriber Milestone", description: "When you reach subscriber milestones", category: "Channel" },
+    { type: "channel.subscriber_milestone", label: "Subscriber Milestone", description: "When you reach subscriber milestones", category: "Channel" },
     // System events
-    { type: "system_alert", label: "System Alert", description: "Important system notifications", category: "System" },
-    { type: "security_alert", label: "Security Alert", description: "Security-related notifications", category: "System" },
-    { type: "backup_completed", label: "Backup Completed", description: "When a backup completes successfully", category: "System" },
-    { type: "backup_failed", label: "Backup Failed", description: "When a backup fails", category: "System" },
+    { type: "system.alert", label: "System Alert", description: "Important system notifications", category: "System" },
+    { type: "security.alert", label: "Security Alert", description: "Security-related notifications", category: "System" },
+    { type: "backup.completed", label: "Backup Completed", description: "When a backup completes successfully", category: "System" },
+    { type: "backup.failed", label: "Backup Failed", description: "When a backup fails", category: "System" },
     // Billing events
-    { type: "payment_success", label: "Payment Success", description: "When a payment is completed successfully", category: "Billing" },
-    { type: "payment_failed", label: "Payment Failed", description: "When a payment fails", category: "Billing" },
-    { type: "subscription_activated", label: "Subscription Activated", description: "When your subscription is activated", category: "Billing" },
-    { type: "subscription_cancelled", label: "Subscription Cancelled", description: "When your subscription is cancelled", category: "Billing" },
-    { type: "subscription_expiring", label: "Subscription Expiring", description: "When your subscription is about to expire", category: "Billing" },
-    { type: "subscription_expired", label: "Subscription Expired", description: "When your subscription has expired", category: "Billing" },
-    { type: "subscription_renewed", label: "Subscription Renewed", description: "When your subscription is renewed", category: "Billing" },
+    { type: "payment.success", label: "Payment Success", description: "When a payment is completed successfully", category: "Billing" },
+    { type: "payment.failed", label: "Payment Failed", description: "When a payment fails", category: "Billing" },
+    { type: "subscription.activated", label: "Subscription Activated", description: "When your subscription is activated", category: "Billing" },
+    { type: "subscription.cancelled", label: "Subscription Cancelled", description: "When your subscription is cancelled", category: "Billing" },
+    { type: "subscription.expiring", label: "Subscription Expiring", description: "When your subscription is about to expire", category: "Billing" },
+    { type: "subscription.expired", label: "Subscription Expired", description: "When your subscription has expired", category: "Billing" },
+    { type: "subscription.renewed", label: "Subscription Renewed", description: "When your subscription is renewed", category: "Billing" },
 ]
 
 // Group events by category for display
@@ -135,6 +137,7 @@ export default function NotificationSettingsPage() {
                     setPreferences(prefsData)
 
                     // Derive channel states from preferences
+                    // Email is enabled if at least one preference has email_enabled = true
                     const hasEmailEnabled = prefsData.some(p => p.email_enabled)
                     const hasTelegramEnabled = prefsData.some(p => p.telegram_enabled)
 
@@ -148,9 +151,20 @@ export default function NotificationSettingsPage() {
                         { type: "email", label: "Email", description: "Receive notifications via email", enabled: hasEmailEnabled },
                         { type: "telegram", label: "Telegram", description: "Receive notifications via Telegram", enabled: hasTelegramEnabled, config: prefWithTelegram?.telegram_chat_id ? { chat_id: prefWithTelegram.telegram_chat_id } : undefined },
                     ])
+                } else {
+                    // No preferences yet - set default channel states
+                    // Email enabled by default, telegram disabled
+                    setChannels([
+                        { type: "email", label: "Email", description: "Receive notifications via email", enabled: true },
+                        { type: "telegram", label: "Telegram", description: "Receive notifications via Telegram", enabled: false },
+                    ])
                 }
             } catch {
-                // Use default preferences if API fails
+                // Use default channel states if API fails
+                setChannels([
+                    { type: "email", label: "Email", description: "Receive notifications via email", enabled: true },
+                    { type: "telegram", label: "Telegram", description: "Receive notifications via Telegram", enabled: false },
+                ])
             }
         } catch (error) {
             console.error("Failed to load notification settings:", error)
@@ -231,7 +245,22 @@ export default function NotificationSettingsPage() {
                     return
                 }
             }
-            // Update local state - channel preferences are managed through individual event preferences
+
+            // Update all preferences for this channel in database
+            const field = channelType === "email" ? "email_enabled" : "telegram_enabled"
+
+            for (const pref of preferences) {
+                if (pref.id) {
+                    await apiClient.put(`/notifications/preferences/${pref.id}`, {
+                        [field]: enabled
+                    })
+                }
+            }
+
+            // Update local preferences state
+            setPreferences(prev => prev.map(p => ({ ...p, [field]: enabled })))
+
+            // Update channel state
             setChannels(prev => prev.map(c => c.type === channelType ? { ...c, enabled } : c))
         } catch (error) {
             console.error("Failed to toggle channel:", error)
@@ -248,6 +277,17 @@ export default function NotificationSettingsPage() {
                     [field]: value
                 })
                 setPreferences(prev => prev.map(p => p.event_type === eventType ? { ...p, [field]: value } : p))
+            } else {
+                // Preference doesn't exist yet, create it
+                const newPref = await apiClient.post<NotificationPreference>(`/notifications/preferences/me`, {
+                    event_type: eventType,
+                    email_enabled: field === "email_enabled" ? value : true,
+                    telegram_enabled: field === "telegram_enabled" ? value : false,
+                    telegram_chat_id: telegramChatId || undefined,
+                })
+                if (newPref?.id) {
+                    setPreferences(prev => [...prev, newPref])
+                }
             }
         } catch (error) {
             console.error("Failed to update preference:", error)

@@ -55,43 +55,52 @@ async def get_notifications(
     """Get notifications for the current user.
     
     Returns notifications from notification_logs table.
+    Deduplicates notifications with same event_type, title, message within 1 minute.
     """
-    from sqlalchemy import select, func, desc
+    from sqlalchemy import select, func, desc, and_
     from app.modules.notification.models import NotificationLog
     
     # Filter by authenticated user
     user_id = current_user.id
     
-    # Build query
-    query = select(NotificationLog).where(NotificationLog.user_id == user_id).order_by(desc(NotificationLog.created_at))
+    # Build subquery to get distinct notifications (deduplicate by event_type + title + message)
+    # Group by event_type, title, message and take the first one (min id or max created_at)
+    # This deduplicates notifications sent to multiple channels for the same event
+    
+    # First, get all logs
+    base_query = select(NotificationLog).where(NotificationLog.user_id == user_id)
     
     if unread_only:
-        query = query.where(NotificationLog.acknowledged == False)
+        base_query = base_query.where(NotificationLog.acknowledged == False)
     
     if type:
-        query = query.where(NotificationLog.event_type == type)
+        base_query = base_query.where(NotificationLog.event_type == type)
     
-    # Get total count
-    count_query = select(func.count()).select_from(NotificationLog).where(NotificationLog.user_id == user_id)
+    base_query = base_query.order_by(desc(NotificationLog.created_at))
     
-    total_result = await db.execute(count_query)
-    total = total_result.scalar() or 0
+    result = await db.execute(base_query)
+    all_logs = result.scalars().all()
     
-    # Get unread count
-    unread_query = select(func.count()).select_from(NotificationLog).where(
-        NotificationLog.user_id == user_id,
-        NotificationLog.acknowledged == False
-    )
+    # Deduplicate: group by (event_type, title, message) within 60 seconds
+    seen = {}  # key: (event_type, title, message, minute_bucket) -> log
+    deduplicated_logs = []
     
-    unread_result = await db.execute(unread_query)
-    unread_count = unread_result.scalar() or 0
+    for log in all_logs:
+        # Create a time bucket (round to nearest minute)
+        time_bucket = log.created_at.replace(second=0, microsecond=0) if log.created_at else None
+        key = (log.event_type, log.title, log.message, time_bucket)
+        
+        if key not in seen:
+            seen[key] = log
+            deduplicated_logs.append(log)
     
-    # Apply pagination
+    # Calculate totals from deduplicated list
+    total = len(deduplicated_logs)
+    unread_count = sum(1 for log in deduplicated_logs if not log.acknowledged)
+    
+    # Apply pagination to deduplicated list
     offset = (page - 1) * page_size
-    query = query.offset(offset).limit(page_size)
-    
-    result = await db.execute(query)
-    logs = result.scalars().all()
+    paginated_logs = deduplicated_logs[offset:offset + page_size]
     
     # Map to response format
     items = [
@@ -107,7 +116,7 @@ async def get_notifications(
             "metadata": log.payload,
             "created_at": log.created_at.isoformat() if log.created_at else None,
         }
-        for log in logs
+        for log in paginated_logs
     ]
     
     return {
@@ -123,16 +132,28 @@ async def get_unread_count(
     service: NotificationService = Depends(get_notification_service),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get count of unread notifications for current user."""
-    from sqlalchemy import select, func
+    """Get count of unread notifications for current user (deduplicated)."""
+    from sqlalchemy import select, desc
     from app.modules.notification.models import NotificationLog
     
-    query = select(func.count()).select_from(NotificationLog).where(
+    # Get all unread logs
+    query = select(NotificationLog).where(
         NotificationLog.user_id == current_user.id,
         NotificationLog.acknowledged == False
-    )
+    ).order_by(desc(NotificationLog.created_at))
+    
     result = await db.execute(query)
-    count = result.scalar() or 0
+    all_logs = result.scalars().all()
+    
+    # Deduplicate
+    seen = set()
+    count = 0
+    for log in all_logs:
+        time_bucket = log.created_at.replace(second=0, microsecond=0) if log.created_at else None
+        key = (log.event_type, log.title, log.message, time_bucket)
+        if key not in seen:
+            seen.add(key)
+            count += 1
     
     return {"count": count}
 

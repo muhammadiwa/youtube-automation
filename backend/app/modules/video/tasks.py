@@ -995,6 +995,20 @@ def process_library_upload_task(
                 
                 await session.commit()
                 logger.info(f"Video record updated: {video_id}")
+                
+                # Send notification for library upload completion
+                try:
+                    from app.modules.notification.integration import NotificationIntegrationService
+                    notification_service = NotificationIntegrationService(session)
+                    await notification_service.notify_video_uploaded(
+                        user_id=uuid.UUID(user_id),
+                        video_title=video.title,
+                        channel_name="Video Library",
+                        video_id=str(video.id),
+                    )
+                    logger.info(f"Sent library upload notification for video {video_id}")
+                except Exception as e:
+                    logger.error(f"Failed to send library upload notification: {e}")
             
             # Step 7: Cleanup temp files
             try:
@@ -1014,6 +1028,27 @@ def process_library_upload_task(
         except Exception as e:
             logger.exception(f"Processing failed for video {video_id}: {e}")
             update_progress(0, str(e))
+            
+            # Send failure notification
+            try:
+                async with celery_session_maker() as session:
+                    from sqlalchemy import select
+                    result = await session.execute(
+                        select(Video).where(Video.id == uuid.UUID(video_id))
+                    )
+                    video = result.scalar_one_or_none()
+                    
+                    if video:
+                        from app.modules.notification.integration import NotificationIntegrationService
+                        notification_service = NotificationIntegrationService(session)
+                        await notification_service.notify_video_processing_failed(
+                            user_id=uuid.UUID(user_id),
+                            video_title=video.title,
+                            video_id=str(video.id),
+                            error_message=str(e),
+                        )
+            except Exception as notif_error:
+                logger.error(f"Failed to send failure notification: {notif_error}")
             
             # Cleanup temp files on error
             try:

@@ -59,38 +59,39 @@ class NotificationService:
     # SLA threshold for delivery timing (Requirements: 23.1)
     SLA_THRESHOLD_SECONDS = 60.0
     
-    # Default event types for notification preferences
+    # Default event types for notification preferences (using dot notation)
     DEFAULT_EVENT_TYPES = [
         # Stream events
-        "stream_started",
-        "stream_ended",
-        "stream_error",
-        "stream_disconnected",
-        "stream_reconnected",
+        "stream.started",
+        "stream.ended",
+        "stream.health_degraded",
+        "stream.disconnected",
+        "stream.reconnected",
         # Video events
-        "upload_complete",
-        "upload_failed",
+        "video.uploaded",
+        "video.processing_failed",
         # Account events
-        "quota_warning",
-        "token_expiring",
-        "token_expired",
+        "account.quota_warning",
+        "account.token_expiring",
+        "account.token_expired",
+        # Strike events
+        "strike.detected",
+        "strike.resolved",
         # Channel events
-        "strike_detected",
-        "strike_resolved",
-        "subscriber_milestone",
+        "channel.subscriber_milestone",
         # System events
-        "system_alert",
-        "security_alert",
-        "backup_completed",
-        "backup_failed",
+        "system.alert",
+        "security.alert",
+        "backup.completed",
+        "backup.failed",
         # Billing events
-        "payment_success",
-        "payment_failed",
-        "subscription_activated",
-        "subscription_cancelled",
-        "subscription_expiring",
-        "subscription_expired",
-        "subscription_renewed",
+        "payment.success",
+        "payment.failed",
+        "subscription.activated",
+        "subscription.cancelled",
+        "subscription.expiring",
+        "subscription.expired",
+        "subscription.renewed",
     ]
 
     def __init__(self, session: AsyncSession):
@@ -118,9 +119,28 @@ class NotificationService:
         
         Requirements: 23.1 - Deliver within 60 seconds
         Requirements: 23.2 - Use preferences per account and event type
+        
+        Flow:
+        1. Get user email as fallback
+        2. Find preference for event_type
+        3. Check email_enabled → if true, use preference.email_address or fallback to user.email
+        4. Check telegram_enabled → if true, use preference.telegram_chat_id
+        5. Only create log and deliver for channels that are enabled AND have valid recipients
         """
         notification_ids = []
         channels_used = []
+        
+        # Get user email as fallback
+        user_email = None
+        try:
+            from sqlalchemy import select
+            from app.modules.auth.models import User
+            result = await self.session.execute(
+                select(User.email).where(User.id == request.user_id)
+            )
+            user_email = result.scalar_one_or_none()
+        except Exception:
+            pass
         
         # Get user preferences for this event type
         preference = await self.pref_repo.get_preference_for_event(
@@ -129,16 +149,36 @@ class NotificationService:
             account_id=request.account_id,
         )
         
-        # Determine which channels to use
+        # Build list of channels to send with their recipients
+        channels_to_send = []  # List of (channel, recipient)
+        
         if request.channels:
-            # Use explicitly specified channels
-            target_channels = [c.value for c in request.channels]
+            # Use explicitly specified channels (override preferences)
+            for channel in request.channels:
+                recipient = self._get_recipient_for_channel(channel.value, preference)
+                if not recipient and channel.value == NotificationChannel.EMAIL.value:
+                    recipient = user_email
+                if recipient:
+                    channels_to_send.append((channel.value, recipient))
         elif preference:
-            # Use channels from preferences
-            target_channels = preference.get_enabled_channels()
+            # Check each channel based on preference enabled flags
+            if preference.email_enabled:
+                email_recipient = preference.email_address or user_email
+                if email_recipient:
+                    channels_to_send.append((NotificationChannel.EMAIL.value, email_recipient))
+            
+            if preference.telegram_enabled and preference.telegram_chat_id:
+                channels_to_send.append((NotificationChannel.TELEGRAM.value, preference.telegram_chat_id))
+            
+            if preference.sms_enabled and preference.phone_number:
+                channels_to_send.append((NotificationChannel.SMS.value, preference.phone_number))
+            
+            if preference.slack_enabled and preference.slack_webhook_url:
+                channels_to_send.append((NotificationChannel.SLACK.value, preference.slack_webhook_url))
         else:
-            # Default to email only
-            target_channels = [NotificationChannel.EMAIL.value]
+            # No preference found - default to email only if user has email
+            if user_email:
+                channels_to_send.append((NotificationChannel.EMAIL.value, user_email))
         
         # Check for batching (Requirements: 23.3)
         batch_id = None
@@ -151,28 +191,8 @@ class NotificationService:
             batch_id = batch.id
             is_batched = True
         
-        # Create notification logs for each channel
-        for channel in target_channels:
-            recipient = self._get_recipient_for_channel(channel, preference)
-            
-            # If no recipient from preference, try to get from user profile for email
-            if not recipient and channel == NotificationChannel.EMAIL.value:
-                # Try to get user email from auth module
-                try:
-                    from sqlalchemy import select
-                    from app.modules.auth.models import User
-                    result = await self.session.execute(
-                        select(User.email).where(User.id == request.user_id)
-                    )
-                    user_email = result.scalar_one_or_none()
-                    if user_email:
-                        recipient = user_email
-                except Exception:
-                    pass  # User table might not exist or have different structure
-            
-            if not recipient:
-                continue
-            
+        # Create notification logs and deliver for each enabled channel
+        for channel, recipient in channels_to_send:
             log = await self.log_repo.create_log(
                 user_id=request.user_id,
                 event_type=request.event_type,
