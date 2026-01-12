@@ -678,31 +678,8 @@ export function StreamJobControlPanel({ job, onUpdate }: StreamJobControlPanelPr
                                         </div>
                                     </div>
 
-                                    {/* System Resources */}
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div className="p-3 bg-muted rounded-lg">
-                                            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
-                                                <Cpu className="h-3 w-3" />
-                                                CPU Usage
-                                            </div>
-                                            <p className="text-lg font-semibold">
-                                                {health.cpuPercent?.toFixed(1) || "—"}%
-                                            </p>
-                                            <Progress
-                                                value={health.cpuPercent || 0}
-                                                className="h-1 mt-2"
-                                            />
-                                        </div>
-                                        <div className="p-3 bg-muted rounded-lg">
-                                            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
-                                                <HardDrive className="h-3 w-3" />
-                                                Memory
-                                            </div>
-                                            <p className="text-lg font-semibold">
-                                                {health.memoryMb?.toFixed(0) || "—"} MB
-                                            </p>
-                                        </div>
-                                    </div>
+                                    {/* System Resources - Hidden for SaaS users */}
+                                    {/* CPU and Memory metrics are internal infrastructure details */}
 
                                     {/* Frame Count */}
                                     <div className="flex items-center justify-between text-sm">

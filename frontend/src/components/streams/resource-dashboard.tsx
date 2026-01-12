@@ -117,55 +117,7 @@ export function ResourceDashboardCard({ refreshInterval = 10000 }: ResourceDashb
                         </Tooltip>
                     </TooltipProvider>
 
-                    {/* CPU Usage */}
-                    <TooltipProvider>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <div className="space-y-2">
-                                    <div className="flex items-center justify-between text-sm">
-                                        <span className="text-muted-foreground flex items-center gap-1">
-                                            <Cpu className="h-3 w-3" />
-                                            CPU
-                                        </span>
-                                        <span className="font-medium">{cpuPercent.toFixed(1)}%</span>
-                                    </div>
-                                    <Progress
-                                        value={cpuPercent}
-                                        className={`h-2 ${cpuPercent > 80 ? "[&>div]:bg-red-500" : ""}`}
-                                    />
-                                </div>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                                <p>Total CPU usage across all streams</p>
-                            </TooltipContent>
-                        </Tooltip>
-                    </TooltipProvider>
-
-                    {/* Memory Usage */}
-                    <TooltipProvider>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <div className="space-y-2">
-                                    <div className="flex items-center justify-between text-sm">
-                                        <span className="text-muted-foreground flex items-center gap-1">
-                                            <HardDrive className="h-3 w-3" />
-                                            Memory
-                                        </span>
-                                        <span className="font-medium">
-                                            {aggregate.totalMemoryMb.toFixed(0)} MB
-                                        </span>
-                                    </div>
-                                    <Progress
-                                        value={memoryPercent}
-                                        className={`h-2 ${memoryPercent > 80 ? "[&>div]:bg-red-500" : ""}`}
-                                    />
-                                </div>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                                <p>Total memory usage across all streams</p>
-                            </TooltipContent>
-                        </Tooltip>
-                    </TooltipProvider>
+                    {/* CPU and Memory hidden for SaaS - internal infrastructure */}
 
                     {/* Bandwidth */}
                     <TooltipProvider>

@@ -818,15 +818,15 @@ async def create_stream_from_video(
         user_id=user_id
     )
     
-    # Get video file path - convert storage key to path/URL that FFmpeg can use
+    # Get video file path - use storage key, let stream_job_service resolve it
     if not video.file_path:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Video file not found"
         )
     
-    # Get path/URL for FFmpeg (local path or presigned URL for cloud storage)
-    video_path = get_file_url_for_ffmpeg(video.file_path, expires_in=86400 * 7)  # 7 days for long streams
+    # Use storage key directly - stream_job_service will resolve to URL/path for FFmpeg
+    video_path = video.file_path
     
     # Parse scheduled start time
     scheduled_start = None
