@@ -190,6 +190,25 @@ export interface PaymentMethod {
     is_default: boolean
 }
 
+// ============ Public Plan Types (for landing page) ============
+export interface PublicPlanFeature {
+    name: string
+    included: boolean
+}
+
+export interface PublicPlan {
+    name: string
+    slug: string
+    description: string
+    price_monthly: number
+    price_yearly: number
+    currency: string
+    display_features: PublicPlanFeature[]
+    is_popular: boolean
+    icon: string
+    color: string
+}
+
 // Helper to get current user ID from localStorage/session
 function getCurrentUserId(): string {
     if (typeof window !== "undefined") {
@@ -201,6 +220,17 @@ function getCurrentUserId(): string {
 }
 
 export const billingApi = {
+    // ============ Public Plans (No Auth Required) ============
+    async getPublicPlans(): Promise<PublicPlan[]> {
+        try {
+            const response = await apiClient.get<{ plans: PublicPlan[] }>("/billing/plans/public")
+            return response?.plans || []
+        } catch (error) {
+            console.error("Failed to fetch public plans:", error)
+            return []
+        }
+    },
+
     // ============ Plans ============
     async getPlans(): Promise<Plan[]> {
         const response = await apiClient.get<{ plans: Plan[] } | Plan[]>("/billing/plans")

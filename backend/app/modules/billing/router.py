@@ -51,6 +51,40 @@ router = APIRouter(prefix="/billing", tags=["billing"])
 
 # ==================== Plan Information (28.1) ====================
 
+@router.get("/plans/public")
+async def get_public_plans(
+    session: AsyncSession = Depends(get_session),
+):
+    """Get all available plans for public display (landing page).
+    
+    No authentication required. Returns plans formatted for landing page.
+    """
+    service = BillingService(session)
+    plans = await service.get_plans_from_db()
+    
+    if not plans:
+        return {"plans": []}
+    
+    # Format for landing page display
+    # Note: to_dict() already converts cents to dollars
+    formatted_plans = []
+    for plan in plans:
+        formatted_plans.append({
+            "name": plan["name"],
+            "slug": plan["slug"],
+            "description": plan["description"],
+            "price_monthly": plan["price_monthly"],  # Already in dollars from to_dict()
+            "price_yearly": plan["price_yearly"],    # Already in dollars from to_dict()
+            "currency": plan["currency"],
+            "display_features": plan.get("features", []),  # to_dict uses "features" key
+            "is_popular": plan.get("is_popular", False),
+            "icon": plan.get("icon", "Sparkles"),
+            "color": plan.get("color", "slate"),
+        })
+    
+    return {"plans": formatted_plans}
+
+
 @router.get("/plans")
 async def get_all_plans(
     session: AsyncSession = Depends(get_session),

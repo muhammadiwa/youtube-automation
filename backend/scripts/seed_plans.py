@@ -33,9 +33,9 @@ PLANS_DATA = [
         "price_yearly": 0,
         "currency": "USD",
         "max_accounts": 1,
-        "max_videos_per_month": 5,
+        "max_videos_per_month": 5,  # Limit uploads to prevent spam
         "max_streams_per_month": 1,
-        "max_storage_gb": 1,
+        "max_storage_gb": 1,  # Primary cost control
         "max_bandwidth_gb": 15,  # ~1 stream x 8 hours x 3000kbps = 4GB, buffer for testing
         "ai_generations_per_month": 0,
         "api_calls_per_month": 1000,
@@ -44,11 +44,11 @@ PLANS_DATA = [
         "features": ["basic_upload", "basic_analytics", "live_streaming", "strike_monitoring"],
         "display_features": [
             {"name": "1 YouTube Account", "included": True},
-            {"name": "5 Videos/month", "included": True},
-            {"name": "1 Live Stream/month", "included": True},
+            {"name": "1 GB Storage", "included": True},
+            {"name": "5 Uploads/month", "included": True},
             {"name": "15 GB Bandwidth/month", "included": True},
+            {"name": "1 Concurrent Stream", "included": True},
             {"name": "Basic Analytics", "included": True},
-            {"name": "Advanced Analytics", "included": False},
         ],
         "icon": "Sparkles",
         "color": "slate",
@@ -59,29 +59,29 @@ PLANS_DATA = [
     {
         "slug": "basic",
         "name": "Basic",
-        "description": "Perfect for multi-channel creators",
+        "description": "Perfect for growing creators",
         "price_monthly": 999,  # $9.99
         "price_yearly": 9999,  # $99.99
         "currency": "USD",
         "max_accounts": 5,
-        "max_videos_per_month": 50,
+        "max_videos_per_month": 20,  # Limit uploads to prevent spam
         "max_streams_per_month": 10,
-        "max_storage_gb": 10,
+        "max_storage_gb": 20,  # Primary cost control
         "max_bandwidth_gb": 100,  # ~10 streams x 4 hours x 4500kbps = 81GB + buffer
         "ai_generations_per_month": 0,
         "api_calls_per_month": 10000,
         "encoding_minutes_per_month": 300,
-        "concurrent_streams": 3,
+        "concurrent_streams": 2,
         "features": [
             "basic_upload", "basic_analytics", "advanced_analytics",
             "live_streaming", "strike_monitoring", "basic_moderation"
         ],
         "display_features": [
             {"name": "5 YouTube Accounts", "included": True},
-            {"name": "50 Videos/month", "included": True},
-            {"name": "10 Live Streams/month", "included": True},
+            {"name": "20 GB Storage", "included": True},
+            {"name": "20 Uploads/month", "included": True},
             {"name": "100 GB Bandwidth/month", "included": True},
-            {"name": "3 Concurrent Streams", "included": True},
+            {"name": "2 Concurrent Streams", "included": True},
             {"name": "Advanced Analytics", "included": True},
         ],
         "icon": "Zap",
@@ -93,14 +93,14 @@ PLANS_DATA = [
     {
         "slug": "pro",
         "name": "Pro",
-        "description": "For professional multi-channel managers",
+        "description": "For professional creators & agencies",
         "price_monthly": 2999,  # $29.99
         "price_yearly": 29999,  # $299.99
         "currency": "USD",
-        "max_accounts": 20,
-        "max_videos_per_month": 100,
-        "max_streams_per_month": 30,
-        "max_storage_gb": 50,
+        "max_accounts": 10,
+        "max_videos_per_month": 100,  # Limit uploads to prevent spam
+        "max_streams_per_month": 50,
+        "max_storage_gb": 50,  # Primary cost control
         "max_bandwidth_gb": 500,  # ~30 streams x 6 hours x 6000kbps = 486GB + buffer
         "ai_generations_per_month": 0,
         "api_calls_per_month": 100000,
@@ -112,9 +112,9 @@ PLANS_DATA = [
             "ai_insights", "report_generation", "channel_comparison"
         ],
         "display_features": [
-            {"name": "20 YouTube Accounts", "included": True},
-            {"name": "100 Videos/month", "included": True},
-            {"name": "30 Live Streams/month", "included": True},
+            {"name": "10 YouTube Accounts", "included": True},
+            {"name": "50 GB Storage", "included": True},
+            {"name": "100 Uploads/month", "included": True},
             {"name": "500 GB Bandwidth/month", "included": True},
             {"name": "5 Concurrent Streams", "included": True},
             {"name": "Full Analytics Suite", "included": True},
@@ -128,15 +128,15 @@ PLANS_DATA = [
     {
         "slug": "enterprise",
         "name": "Enterprise",
-        "description": "For agencies and MCN managing 50+ channels",
+        "description": "For agencies & MCN with custom needs",
         "price_monthly": 9999,  # $99.99
         "price_yearly": 99999,  # $999.99
         "currency": "USD",
         "max_accounts": -1,  # Unlimited
         "max_videos_per_month": -1,
         "max_streams_per_month": -1,
-        "max_storage_gb": -1,
-        "max_bandwidth_gb": -1,  # Unlimited
+        "max_storage_gb": 500,  # Still have a high limit for cost control
+        "max_bandwidth_gb": 5000,  # 5 TB
         "ai_generations_per_month": -1,
         "api_calls_per_month": -1,
         "encoding_minutes_per_month": -1,
@@ -149,11 +149,11 @@ PLANS_DATA = [
         ],
         "display_features": [
             {"name": "Unlimited Accounts", "included": True},
-            {"name": "Unlimited Videos & Streams", "included": True},
-            {"name": "Unlimited Bandwidth", "included": True},
+            {"name": "500 GB Storage", "included": True},
+            {"name": "Unlimited Uploads", "included": True},
+            {"name": "5 TB Bandwidth/month", "included": True},
             {"name": "Unlimited Concurrent Streams", "included": True},
             {"name": "Priority Support 24/7", "included": True},
-            {"name": "Custom Reports & API", "included": True},
         ],
         "icon": "Building2",
         "color": "amber",

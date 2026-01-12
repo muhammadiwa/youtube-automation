@@ -536,7 +536,7 @@ class Plan(Base):
             "name": self.name,
             "description": self.description,
             "price_monthly": self.price_monthly / 100,  # Convert cents to dollars
-            "price_yearly": self.price_yearly / 100,
+            "price_yearly": self.price_yearly / 100,    # Convert cents to dollars
             "currency": self.currency,
             "features": self.display_features or [],
             "limits": {
