@@ -410,6 +410,8 @@ class StreamJobService:
         job.status = StreamJobStatus.STARTING.value
         job.is_stream_key_locked = True
         job.last_error = None
+        job.actual_start_at = None  # Reset for fresh duration calculation
+        job.actual_end_at = None
         
         # Queue the FFmpeg worker task
         from app.modules.stream.stream_job_tasks import start_ffmpeg_worker
@@ -488,8 +490,10 @@ class StreamJobService:
             job.is_stream_key_locked = False
             await self.job_repo.update(job)
         
-        # Reset restart count for manual restart
+        # Reset restart count and actual_start_at for manual restart
         job.restart_count = 0
+        job.actual_start_at = None  # Reset so duration starts fresh
+        job.actual_end_at = None
         await self.job_repo.update(job)
         
         # Start again
