@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { motion, useScroll, useTransform, useInView } from "framer-motion"
+import { motion, useScroll, useTransform, useInView, useMotionValue, useSpring } from "framer-motion"
 import {
   Zap,
   Shield,
@@ -39,6 +39,34 @@ const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   Zap,
   Crown,
   Building2,
+}
+
+// ============================================
+// MOUSE PARALLAX HOOK
+// ============================================
+function useMouseParallax(strength: number = 20) {
+  const x = useMotionValue(0)
+  const y = useMotionValue(0)
+
+  const springConfig = { damping: 25, stiffness: 150 }
+  const springX = useSpring(x, springConfig)
+  const springY = useSpring(y, springConfig)
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      const centerX = window.innerWidth / 2
+      const centerY = window.innerHeight / 2
+      const moveX = (e.clientX - centerX) / centerX * strength
+      const moveY = (e.clientY - centerY) / centerY * strength
+      x.set(moveX)
+      y.set(moveY)
+    }
+
+    window.addEventListener("mousemove", handleMouseMove)
+    return () => window.removeEventListener("mousemove", handleMouseMove)
+  }, [x, y, strength])
+
+  return { x: springX, y: springY }
 }
 
 // ============================================
@@ -93,11 +121,319 @@ function FloatingCard({ children, delay = 0, className = "" }: { children: React
 }
 
 // ============================================
+// TILT CARD COMPONENT (3D HOVER EFFECT)
+// ============================================
+function TiltCard({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  const cardRef = useRef<HTMLDivElement>(null)
+  const [rotateX, setRotateX] = useState(0)
+  const [rotateY, setRotateY] = useState(0)
+  const [isHovering, setIsHovering] = useState(false)
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!cardRef.current) return
+    const rect = cardRef.current.getBoundingClientRect()
+    const centerX = rect.left + rect.width / 2
+    const centerY = rect.top + rect.height / 2
+    const mouseX = e.clientX - centerX
+    const mouseY = e.clientY - centerY
+
+    // Calculate rotation (max 10 degrees)
+    const rotateXValue = (mouseY / (rect.height / 2)) * -10
+    const rotateYValue = (mouseX / (rect.width / 2)) * 10
+
+    setRotateX(rotateXValue)
+    setRotateY(rotateYValue)
+  }
+
+  const handleMouseLeave = () => {
+    setRotateX(0)
+    setRotateY(0)
+    setIsHovering(false)
+  }
+
+  return (
+    <div
+      ref={cardRef}
+      onMouseMove={handleMouseMove}
+      onMouseEnter={() => setIsHovering(true)}
+      onMouseLeave={handleMouseLeave}
+      style={{
+        transform: `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg)`,
+        transition: isHovering ? 'transform 0.1s ease-out' : 'transform 0.5s ease-out',
+      }}
+      className={className}
+    >
+      {children}
+    </div>
+  )
+}
+
+// ============================================
 // GRADIENT BLOB COMPONENT
 // ============================================
 function GradientBlob({ className = "" }: { className?: string }) {
   return (
     <div className={`absolute rounded-full blur-3xl opacity-30 ${className}`} />
+  )
+}
+
+// ============================================
+// ANIMATED GRADIENT ORB (Moving background orbs)
+// ============================================
+function GradientOrb({
+  size = 400,
+  color = "from-red-300 to-orange-300",
+  duration = 20,
+  delay = 0,
+  className = ""
+}: {
+  size?: number
+  color?: string
+  duration?: number
+  delay?: number
+  className?: string
+}) {
+  return (
+    <motion.div
+      animate={{
+        x: [0, 30, -20, 10, 0],
+        y: [0, -20, 30, -10, 0],
+        scale: [1, 1.1, 0.95, 1.05, 1],
+      }}
+      transition={{
+        duration,
+        delay,
+        repeat: Infinity,
+        ease: "easeInOut"
+      }}
+      style={{ width: size, height: size }}
+      className={`absolute rounded-full blur-3xl opacity-20 bg-gradient-to-br ${color} ${className}`}
+    />
+  )
+}
+
+// ============================================
+// ANIMATED GRADIENT ORBS BACKGROUND
+// ============================================
+function GradientOrbsBackground() {
+  return (
+    <div className="absolute inset-0 overflow-hidden pointer-events-none">
+      <GradientOrb
+        size={500}
+        color="from-red-300 to-orange-300"
+        duration={25}
+        delay={0}
+        className="-top-40 -right-40"
+      />
+      <GradientOrb
+        size={400}
+        color="from-indigo-300 to-purple-300"
+        duration={20}
+        delay={2}
+        className="top-1/3 -left-32"
+      />
+      <GradientOrb
+        size={350}
+        color="from-green-300 to-emerald-300"
+        duration={22}
+        delay={4}
+        className="bottom-20 right-1/4"
+      />
+      <GradientOrb
+        size={300}
+        color="from-blue-300 to-cyan-300"
+        duration={18}
+        delay={1}
+        className="top-1/2 right-10"
+      />
+    </div>
+  )
+}
+
+// ============================================
+// SCROLL REVEAL COMPONENT (Enhanced Animations)
+// ============================================
+type RevealDirection = "up" | "down" | "left" | "right" | "scale" | "rotate"
+
+function ScrollReveal({
+  children,
+  direction = "up",
+  delay = 0,
+  duration = 0.6,
+  className = ""
+}: {
+  children: React.ReactNode
+  direction?: RevealDirection
+  delay?: number
+  duration?: number
+  className?: string
+}) {
+  const variants = {
+    up: { hidden: { opacity: 0, y: 60 }, visible: { opacity: 1, y: 0 } },
+    down: { hidden: { opacity: 0, y: -60 }, visible: { opacity: 1, y: 0 } },
+    left: { hidden: { opacity: 0, x: -60 }, visible: { opacity: 1, x: 0 } },
+    right: { hidden: { opacity: 0, x: 60 }, visible: { opacity: 1, x: 0 } },
+    scale: { hidden: { opacity: 0, scale: 0.8 }, visible: { opacity: 1, scale: 1 } },
+    rotate: { hidden: { opacity: 0, rotate: -10, scale: 0.9 }, visible: { opacity: 1, rotate: 0, scale: 1 } },
+  }
+
+  return (
+    <motion.div
+      initial="hidden"
+      whileInView="visible"
+      viewport={{ once: true, margin: "-50px" }}
+      variants={variants[direction]}
+      transition={{
+        duration,
+        delay,
+        ease: [0.25, 0.1, 0.25, 1] // Custom easing for smooth feel
+      }}
+      className={className}
+    >
+      {children}
+    </motion.div>
+  )
+}
+
+// ============================================
+// STAGGER CONTAINER (For staggered children animations)
+// ============================================
+function StaggerContainer({
+  children,
+  staggerDelay = 0.1,
+  className = ""
+}: {
+  children: React.ReactNode
+  staggerDelay?: number
+  className?: string
+}) {
+  return (
+    <motion.div
+      initial="hidden"
+      whileInView="visible"
+      viewport={{ once: true, margin: "-50px" }}
+      variants={{
+        hidden: {},
+        visible: {
+          transition: {
+            staggerChildren: staggerDelay
+          }
+        }
+      }}
+      className={className}
+    >
+      {children}
+    </motion.div>
+  )
+}
+
+// ============================================
+// STAGGER ITEM (Child of StaggerContainer)
+// ============================================
+function StaggerItem({
+  children,
+  className = ""
+}: {
+  children: React.ReactNode
+  className?: string
+}) {
+  return (
+    <motion.div
+      variants={{
+        hidden: { opacity: 0, y: 30, scale: 0.95 },
+        visible: {
+          opacity: 1,
+          y: 0,
+          scale: 1,
+          transition: { duration: 0.5, ease: [0.25, 0.1, 0.25, 1] }
+        }
+      }}
+      className={className}
+    >
+      {children}
+    </motion.div>
+  )
+}
+
+// ============================================
+// FLOATING ELEMENT (Decorative floating shapes)
+// ============================================
+function FloatingElement({
+  children,
+  duration = 6,
+  delay = 0,
+  distance = 20,
+  className = ""
+}: {
+  children: React.ReactNode
+  duration?: number
+  delay?: number
+  distance?: number
+  className?: string
+}) {
+  return (
+    <motion.div
+      animate={{
+        y: [-distance, distance, -distance],
+        rotate: [-5, 5, -5],
+      }}
+      transition={{
+        duration,
+        delay,
+        repeat: Infinity,
+        ease: "easeInOut"
+      }}
+      className={className}
+    >
+      {children}
+    </motion.div>
+  )
+}
+
+// ============================================
+// FLOATING SHAPES (Decorative background shapes)
+// ============================================
+function FloatingShapes() {
+  return (
+    <div className="absolute inset-0 overflow-hidden pointer-events-none">
+      {/* Circle */}
+      <FloatingElement duration={8} delay={0} distance={15} className="absolute top-20 left-[10%]">
+        <div className="w-8 h-8 rounded-full border-2 border-red-200 opacity-40" />
+      </FloatingElement>
+
+      {/* Square */}
+      <FloatingElement duration={7} delay={1} distance={20} className="absolute top-40 right-[15%]">
+        <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-orange-200 to-red-200 opacity-30 rotate-12" />
+      </FloatingElement>
+
+      {/* Triangle */}
+      <FloatingElement duration={9} delay={2} distance={18} className="absolute bottom-32 left-[20%]">
+        <div className="w-0 h-0 border-l-[12px] border-l-transparent border-r-[12px] border-r-transparent border-b-[20px] border-b-indigo-200 opacity-40" />
+      </FloatingElement>
+
+      {/* Donut */}
+      <FloatingElement duration={6} delay={0.5} distance={12} className="absolute top-60 left-[5%]">
+        <div className="w-10 h-10 rounded-full border-4 border-purple-200 opacity-30" />
+      </FloatingElement>
+
+      {/* Small circle */}
+      <FloatingElement duration={5} delay={1.5} distance={25} className="absolute bottom-40 right-[10%]">
+        <div className="w-4 h-4 rounded-full bg-gradient-to-br from-green-200 to-emerald-200 opacity-40" />
+      </FloatingElement>
+
+      {/* Plus sign */}
+      <FloatingElement duration={7} delay={2.5} distance={15} className="absolute top-32 right-[25%]">
+        <div className="relative w-6 h-6 opacity-30">
+          <div className="absolute top-1/2 left-0 w-full h-1 bg-blue-300 -translate-y-1/2 rounded-full" />
+          <div className="absolute top-0 left-1/2 w-1 h-full bg-blue-300 -translate-x-1/2 rounded-full" />
+        </div>
+      </FloatingElement>
+
+      {/* Diamond */}
+      <FloatingElement duration={8} delay={3} distance={20} className="absolute bottom-20 left-[40%]">
+        <div className="w-5 h-5 bg-gradient-to-br from-amber-200 to-orange-200 opacity-30 rotate-45" />
+      </FloatingElement>
+    </div>
   )
 }
 
@@ -277,6 +613,11 @@ export default function Home() {
   const { scrollYProgress } = useScroll()
   const y = useTransform(scrollYProgress, [0, 1], [0, -50])
 
+  // Mouse parallax for hero section
+  const mouseParallax = useMouseParallax(15)
+  const mouseParallaxSlow = useMouseParallax(8)
+  const mouseParallaxFast = useMouseParallax(25)
+
   // Fetch plans from API
   useEffect(() => {
     async function fetchPlans() {
@@ -349,10 +690,22 @@ export default function Home() {
       {/* HERO SECTION */}
       {/* ============================================ */}
       <section ref={heroRef} className="relative pt-32 pb-20 lg:pt-40 lg:pb-32 overflow-hidden">
-        {/* Background Gradient Blobs */}
-        <GradientBlob className="w-[600px] h-[600px] bg-gradient-to-r from-red-200 to-orange-200 -top-40 -right-40" />
-        <GradientBlob className="w-[400px] h-[400px] bg-gradient-to-r from-indigo-200 to-purple-200 top-1/2 -left-20" />
-        <GradientBlob className="w-[300px] h-[300px] bg-gradient-to-r from-green-200 to-emerald-200 bottom-0 right-1/4" />
+        {/* Animated Gradient Orbs Background */}
+        <GradientOrbsBackground />
+
+        {/* Floating Shapes */}
+        <FloatingShapes />
+
+        {/* Background Gradient Blobs with Parallax (additional layer) */}
+        <motion.div style={{ x: mouseParallaxSlow.x, y: mouseParallaxSlow.y }}>
+          <GradientBlob className="w-[600px] h-[600px] bg-gradient-to-r from-red-200 to-orange-200 -top-40 -right-40" />
+        </motion.div>
+        <motion.div style={{ x: mouseParallax.x, y: mouseParallax.y }}>
+          <GradientBlob className="w-[400px] h-[400px] bg-gradient-to-r from-indigo-200 to-purple-200 top-1/2 -left-20" />
+        </motion.div>
+        <motion.div style={{ x: mouseParallaxFast.x, y: mouseParallaxFast.y }}>
+          <GradientBlob className="w-[300px] h-[300px] bg-gradient-to-r from-green-200 to-emerald-200 bottom-0 right-1/4" />
+        </motion.div>
 
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 relative">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
@@ -523,15 +876,20 @@ export default function Home() {
       {/* FEATURES SECTION */}
       {/* ============================================ */}
       <section id="features" className="py-24 relative">
+        {/* Floating Shapes for Features */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <FloatingElement duration={10} delay={0} distance={15} className="absolute top-10 right-[8%]">
+            <div className="w-6 h-6 rounded-full border-2 border-indigo-200 opacity-30" />
+          </FloatingElement>
+          <FloatingElement duration={8} delay={1} distance={20} className="absolute bottom-20 left-[12%]">
+            <div className="w-4 h-4 bg-purple-200 opacity-25 rotate-45" />
+          </FloatingElement>
+        </div>
+
         <GradientBlob className="w-[500px] h-[500px] bg-gradient-to-r from-indigo-100 to-purple-100 top-0 left-1/4" />
 
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 relative">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="text-center mb-16"
-          >
+          <ScrollReveal direction="up" className="text-center mb-16">
             <Badge className="mb-4 bg-indigo-50 text-indigo-600 border-indigo-200">
               Features
             </Badge>
@@ -544,18 +902,12 @@ export default function Home() {
             <p className="mt-4 text-lg text-gray-600 max-w-2xl mx-auto">
               Powerful tools designed for YouTube creators who want to scale their channels efficiently.
             </p>
-          </motion.div>
+          </ScrollReveal>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {features.map((feature, index) => (
-              <motion.div
-                key={feature.title}
-                initial={{ opacity: 0, y: 30 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: index * 0.1 }}
-              >
-                <Card className="h-full bg-white border-gray-100 hover:border-gray-200 hover:shadow-xl hover:shadow-gray-100/50 transition-all duration-300 group cursor-pointer">
+          <StaggerContainer staggerDelay={0.1} className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {features.map((feature) => (
+              <StaggerItem key={feature.title}>
+                <Card className="h-full bg-white border-gray-100 hover:border-gray-200 hover:shadow-xl hover:shadow-gray-100/50 transition-all duration-300 group cursor-pointer hover:-translate-y-1">
                   <CardContent className="p-6">
                     <div className={`w-12 h-12 rounded-xl bg-gradient-to-r ${feature.gradient} flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300`}>
                       <feature.icon className="w-6 h-6 text-white" />
@@ -568,9 +920,9 @@ export default function Home() {
                     </p>
                   </CardContent>
                 </Card>
-              </motion.div>
+              </StaggerItem>
             ))}
-          </div>
+          </StaggerContainer>
         </div>
       </section>
 
@@ -579,12 +931,7 @@ export default function Home() {
       {/* ============================================ */}
       <section className="py-24 bg-white relative overflow-hidden">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="text-center mb-16"
-          >
+          <ScrollReveal direction="up" className="text-center mb-16">
             <Badge className="mb-4 bg-green-50 text-green-600 border-green-200">
               Dashboard Preview
             </Badge>
@@ -597,15 +944,9 @@ export default function Home() {
             <p className="mt-4 text-lg text-gray-600 max-w-2xl mx-auto">
               Clean, intuitive, and packed with insights. See everything at a glance.
             </p>
-          </motion.div>
+          </ScrollReveal>
 
-          <motion.div
-            initial={{ opacity: 0, y: 40 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.8 }}
-            className="relative"
-          >
+          <ScrollReveal direction="scale" duration={0.8} className="relative">
             {/* Browser Frame */}
             <div className="bg-gray-900 rounded-t-2xl p-4">
               <div className="flex items-center gap-2">
@@ -689,23 +1030,37 @@ export default function Home() {
                 </div>
               </div>
             </div>
-          </motion.div>
+          </ScrollReveal>
         </div>
       </section>
 
       {/* ============================================ */}
       {/* HOW IT WORKS SECTION */}
       {/* ============================================ */}
-      <section id="how-it-works" className="py-24 relative">
-        <GradientBlob className="w-[400px] h-[400px] bg-gradient-to-r from-orange-100 to-red-100 bottom-0 right-0" />
+      <section id="how-it-works" className="py-24 relative overflow-hidden">
+        {/* Background */}
+        <div className="absolute inset-0 bg-gradient-to-b from-gray-50 to-white" />
+
+        {/* Animated Gradient Orbs */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <GradientOrb
+            size={350}
+            color="from-orange-200 to-red-200"
+            duration={20}
+            delay={0}
+            className="-top-20 -right-20"
+          />
+          <GradientOrb
+            size={300}
+            color="from-amber-200 to-orange-200"
+            duration={18}
+            delay={2}
+            className="bottom-0 -left-20"
+          />
+        </div>
 
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 relative">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="text-center mb-16"
-          >
+          <ScrollReveal direction="up" className="text-center mb-16">
             <Badge className="mb-4 bg-orange-50 text-orange-600 border-orange-200">
               How It Works
             </Badge>
@@ -715,35 +1070,60 @@ export default function Home() {
                 4 Simple Steps
               </span>
             </h2>
-          </motion.div>
+            <p className="mt-4 text-lg text-gray-600 max-w-2xl mx-auto">
+              From sign up to streaming in minutes. No technical expertise required.
+            </p>
+          </ScrollReveal>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
-            {steps.map((step, index) => (
-              <motion.div
-                key={step.number}
-                initial={{ opacity: 0, y: 30 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: index * 0.15 }}
-                className="relative"
-              >
-                {/* Connector Line */}
-                {index < steps.length - 1 && (
-                  <div className="hidden lg:block absolute top-12 left-1/2 w-full h-0.5 bg-gradient-to-r from-gray-200 to-gray-100" />
-                )}
+          {/* Steps Timeline */}
+          <div className="relative">
+            {/* Connection Line - Desktop */}
+            <div className="hidden lg:block absolute top-24 left-[12.5%] right-[12.5%] h-1 bg-gradient-to-r from-red-200 via-orange-300 to-amber-200 rounded-full" />
 
-                <div className="relative bg-white rounded-2xl p-6 border border-gray-100 hover:border-gray-200 hover:shadow-xl hover:shadow-gray-100/50 transition-all duration-300 text-center">
-                  <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gradient-to-r from-red-500 to-orange-500 text-white font-bold text-lg mb-4">
-                    {step.number}
+            <StaggerContainer staggerDelay={0.15} className="grid md:grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-6">
+              {steps.map((step, index) => (
+                <StaggerItem key={step.number} className="relative">
+                  <div className="group relative bg-white rounded-3xl p-8 border border-gray-100 hover:border-orange-200 shadow-lg shadow-gray-100/50 hover:shadow-xl hover:shadow-orange-100/50 transition-all duration-500 text-center hover:-translate-y-3">
+                    {/* Step Number Badge */}
+                    <div className="absolute -top-5 left-1/2 -translate-x-1/2">
+                      <div className="relative">
+                        <div className="absolute inset-0 bg-gradient-to-r from-red-500 to-orange-500 rounded-full blur-md opacity-40 group-hover:opacity-60 transition-opacity" />
+                        <div className="relative w-10 h-10 bg-gradient-to-r from-red-500 to-orange-500 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-lg">
+                          {index + 1}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Icon */}
+                    <div className="mt-4 mb-6">
+                      <div className="relative inline-flex">
+                        <div className="absolute inset-0 bg-gradient-to-br from-orange-100 to-red-100 rounded-2xl blur-sm opacity-0 group-hover:opacity-100 transition-opacity scale-110" />
+                        <div className="relative w-20 h-20 bg-gradient-to-br from-orange-50 to-red-50 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                          <step.icon className="w-10 h-10 text-orange-500 group-hover:text-red-500 transition-colors" />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Content */}
+                    <h3 className="text-xl font-bold text-gray-900 mb-3 group-hover:text-orange-600 transition-colors">
+                      {step.title}
+                    </h3>
+                    <p className="text-gray-600 leading-relaxed">
+                      {step.description}
+                    </p>
+
+                    {/* Arrow indicator for desktop */}
+                    {index < steps.length - 1 && (
+                      <div className="hidden lg:flex absolute -right-3 top-1/2 -translate-y-1/2 z-10">
+                        <div className="w-6 h-6 bg-white rounded-full shadow-md flex items-center justify-center">
+                          <ArrowRight className="w-3 h-3 text-orange-500" />
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div className="w-16 h-16 mx-auto mb-4 bg-gray-50 rounded-2xl flex items-center justify-center">
-                    <step.icon className="w-8 h-8 text-gray-600" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">{step.title}</h3>
-                  <p className="text-sm text-gray-600">{step.description}</p>
-                </div>
-              </motion.div>
-            ))}
+                </StaggerItem>
+              ))}
+            </StaggerContainer>
           </div>
         </div>
       </section>
@@ -751,14 +1131,27 @@ export default function Home() {
       {/* ============================================ */}
       {/* PRICING SECTION */}
       {/* ============================================ */}
-      <section id="pricing" className="py-24 bg-gradient-to-b from-white to-gray-50 relative">
-        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="text-center mb-16"
-          >
+      <section id="pricing" className="py-24 bg-gradient-to-b from-white to-gray-50 relative overflow-hidden">
+        {/* Animated Gradient Orbs for Pricing */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <GradientOrb
+            size={400}
+            color="from-purple-300 to-pink-300"
+            duration={22}
+            delay={0}
+            className="-top-32 -left-32"
+          />
+          <GradientOrb
+            size={350}
+            color="from-blue-300 to-indigo-300"
+            duration={18}
+            delay={3}
+            className="bottom-0 -right-20"
+          />
+        </div>
+
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8 relative">
+          <ScrollReveal direction="up" className="text-center mb-16">
             <Badge className="mb-4 bg-purple-50 text-purple-600 border-purple-200">
               Pricing
             </Badge>
@@ -780,7 +1173,7 @@ export default function Home() {
                 Yearly <Badge variant="secondary" className="ml-1 bg-green-100 text-green-700 text-xs">Save 20%</Badge>
               </span>
             </div>
-          </motion.div>
+          </ScrollReveal>
 
           {plansLoading ? (
             <div className="flex justify-center py-12">
@@ -860,47 +1253,49 @@ export default function Home() {
                       </div>
                     )}
 
-                    <Card className={`h-full transition-all duration-300 hover:shadow-xl border-2 ${colors.border} ${colors.shadow} ${plan.is_popular ? "shadow-xl border-orange-400" : ""
-                      }`}>
-                      <CardContent className="p-6">
-                        <div className="text-center mb-6">
-                          <div className={`inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-4 ${colors.iconBg} shadow-lg`}>
-                            <IconComponent className="w-7 h-7 text-white" />
+                    <TiltCard className="h-full">
+                      <Card className={`h-full transition-all duration-300 hover:shadow-xl border-2 ${colors.border} ${colors.shadow} ${plan.is_popular ? "shadow-xl border-orange-400" : ""
+                        }`}>
+                        <CardContent className="p-6">
+                          <div className="text-center mb-6">
+                            <div className={`inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-4 ${colors.iconBg} shadow-lg`}>
+                              <IconComponent className="w-7 h-7 text-white" />
+                            </div>
+                            <h3 className="text-xl font-bold text-gray-900">{plan.name}</h3>
+                            <p className="text-sm text-gray-500 mt-1 min-h-[40px]">{plan.description}</p>
+                            <div className="mt-4">
+                              {isFree ? (
+                                <span className="text-4xl font-bold text-gray-900">Free</span>
+                              ) : (
+                                <>
+                                  <span className="text-4xl font-bold text-gray-900">
+                                    ${price.toFixed(2)}
+                                  </span>
+                                  <span className="text-gray-500">/{isYearly ? "year" : "month"}</span>
+                                </>
+                              )}
+                            </div>
                           </div>
-                          <h3 className="text-xl font-bold text-gray-900">{plan.name}</h3>
-                          <p className="text-sm text-gray-500 mt-1 min-h-[40px]">{plan.description}</p>
-                          <div className="mt-4">
-                            {isFree ? (
-                              <span className="text-4xl font-bold text-gray-900">Free</span>
-                            ) : (
-                              <>
-                                <span className="text-4xl font-bold text-gray-900">
-                                  ${price.toFixed(2)}
-                                </span>
-                                <span className="text-gray-500">/{isYearly ? "year" : "month"}</span>
-                              </>
-                            )}
-                          </div>
-                        </div>
 
-                        <ul className="space-y-3 mb-6">
-                          {plan.display_features.filter(f => f.included).map((feature) => (
-                            <li key={feature.name} className="flex items-center gap-2 text-sm text-gray-600">
-                              <div className={`w-5 h-5 rounded-full ${colors.checkBg} flex items-center justify-center flex-shrink-0`}>
-                                <Check className={`w-3 h-3 ${colors.checkIcon}`} />
-                              </div>
-                              {feature.name}
-                            </li>
-                          ))}
-                        </ul>
+                          <ul className="space-y-3 mb-6">
+                            {plan.display_features.filter(f => f.included).map((feature) => (
+                              <li key={feature.name} className="flex items-center gap-2 text-sm text-gray-600">
+                                <div className={`w-5 h-5 rounded-full ${colors.checkBg} flex items-center justify-center flex-shrink-0`}>
+                                  <Check className={`w-3 h-3 ${colors.checkIcon}`} />
+                                </div>
+                                {feature.name}
+                              </li>
+                            ))}
+                          </ul>
 
-                        <Link href="/register" className="block">
-                          <Button className={`w-full h-12 text-base font-medium transition-all text-white shadow-lg ${colors.button}`}>
-                            {isFree ? "Get Started" : "Subscribe Now"}
-                          </Button>
-                        </Link>
-                      </CardContent>
-                    </Card>
+                          <Link href="/register" className="block">
+                            <Button className={`w-full h-12 text-base font-medium transition-all text-white shadow-lg ${colors.button}`}>
+                              {isFree ? "Get Started" : "Subscribe Now"}
+                            </Button>
+                          </Link>
+                        </CardContent>
+                      </Card>
+                    </TiltCard>
                   </motion.div>
                 )
               })}
@@ -908,15 +1303,12 @@ export default function Home() {
           )}
 
           {/* Money back guarantee */}
-          <motion.p
-            initial={{ opacity: 0 }}
-            whileInView={{ opacity: 1 }}
-            viewport={{ once: true }}
-            className="text-center mt-12 text-sm text-gray-500"
-          >
-            <Shield className="w-4 h-4 inline-block mr-1 text-green-500" />
-            30-day money-back guarantee • Cancel anytime • No hidden fees
-          </motion.p>
+          <ScrollReveal direction="up" delay={0.3} className="text-center mt-12">
+            <p className="text-sm text-gray-500">
+              <Shield className="w-4 h-4 inline-block mr-1 text-green-500" />
+              30-day money-back guarantee • Cancel anytime • No hidden fees
+            </p>
+          </ScrollReveal>
         </div>
       </section >
 
@@ -926,16 +1318,40 @@ export default function Home() {
       <section className="py-24 relative overflow-hidden">
         {/* Gradient Background */}
         <div className="absolute inset-0 bg-gradient-to-br from-red-500/5 via-orange-500/5 to-white" />
-        <GradientBlob className="w-[600px] h-[600px] bg-gradient-to-r from-red-200 to-orange-200 -bottom-40 -left-40" />
-        <GradientBlob className="w-[400px] h-[400px] bg-gradient-to-r from-indigo-200 to-purple-200 top-0 right-0" />
+
+        {/* Animated Gradient Orbs for CTA */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <GradientOrb
+            size={450}
+            color="from-red-300 to-orange-300"
+            duration={20}
+            delay={0}
+            className="-bottom-40 -left-40"
+          />
+          <GradientOrb
+            size={350}
+            color="from-indigo-300 to-purple-300"
+            duration={24}
+            delay={2}
+            className="-top-20 -right-20"
+          />
+        </div>
+
+        {/* Floating Shapes for CTA */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <FloatingElement duration={7} delay={0} distance={18} className="absolute top-16 left-[15%]">
+            <div className="w-8 h-8 rounded-full border-2 border-red-200 opacity-30" />
+          </FloatingElement>
+          <FloatingElement duration={9} delay={1.5} distance={22} className="absolute bottom-24 right-[18%]">
+            <div className="w-5 h-5 bg-orange-200 opacity-25 rotate-45" />
+          </FloatingElement>
+          <FloatingElement duration={6} delay={2} distance={15} className="absolute top-1/2 right-[8%]">
+            <div className="w-6 h-6 rounded-lg border-2 border-purple-200 opacity-25" />
+          </FloatingElement>
+        </div>
 
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 relative">
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="text-center max-w-3xl mx-auto"
-          >
+          <ScrollReveal direction="scale" className="text-center max-w-3xl mx-auto">
             <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-gray-900 leading-tight">
               Ready to Automate Your{" "}
               <span className="bg-gradient-to-r from-red-500 to-orange-500 bg-clip-text text-transparent">
@@ -962,7 +1378,7 @@ export default function Home() {
             <p className="mt-6 text-sm text-gray-500">
               No credit card required • Free plan forever • Upgrade anytime
             </p>
-          </motion.div>
+          </ScrollReveal>
         </div>
       </section>
 
