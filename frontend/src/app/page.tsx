@@ -1473,28 +1473,28 @@ export default function Home() {
               </h4>
               <ul className="space-y-3">
                 <li>
-                  <a href="#" className="text-gray-400 hover:text-white transition-colors flex items-center gap-2 group">
+                  <Link href="/about" className="text-gray-400 hover:text-white transition-colors flex items-center gap-2 group">
                     <ArrowRight className="w-3 h-3 opacity-0 -ml-5 group-hover:opacity-100 group-hover:ml-0 transition-all" />
                     About Us
-                  </a>
+                  </Link>
                 </li>
                 <li>
-                  <a href="#" className="text-gray-400 hover:text-white transition-colors flex items-center gap-2 group">
+                  <Link href="/blog" className="text-gray-400 hover:text-white transition-colors flex items-center gap-2 group">
                     <ArrowRight className="w-3 h-3 opacity-0 -ml-5 group-hover:opacity-100 group-hover:ml-0 transition-all" />
                     Blog
-                  </a>
+                  </Link>
                 </li>
                 <li>
-                  <a href="#" className="text-gray-400 hover:text-white transition-colors flex items-center gap-2 group">
+                  <Link href="/careers" className="text-gray-400 hover:text-white transition-colors flex items-center gap-2 group">
                     <ArrowRight className="w-3 h-3 opacity-0 -ml-5 group-hover:opacity-100 group-hover:ml-0 transition-all" />
                     Careers
-                  </a>
+                  </Link>
                 </li>
                 <li>
-                  <a href="#" className="text-gray-400 hover:text-white transition-colors flex items-center gap-2 group">
+                  <Link href="/contact" className="text-gray-400 hover:text-white transition-colors flex items-center gap-2 group">
                     <ArrowRight className="w-3 h-3 opacity-0 -ml-5 group-hover:opacity-100 group-hover:ml-0 transition-all" />
                     Contact
-                  </a>
+                  </Link>
                 </li>
               </ul>
             </div>
