@@ -50,3 +50,5 @@ build/
 **/*.spec.tsx
 vitest.config.*
 jest.config.*
+
+.rules

@@ -13,7 +13,6 @@ import {
     Menu,
     Youtube,
     HelpCircle,
-    AlertTriangle,
     Monitor,
     Wallet,
     Shield,
@@ -30,7 +29,6 @@ const navigation = [
     { name: "Streams", href: "/dashboard/streams", icon: Radio },
     { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
     { name: "Moderation", href: "/dashboard/moderation/settings", icon: Shield },
-    { name: "Strikes", href: "/dashboard/strikes", icon: AlertTriangle },
     { name: "Monitoring", href: "/dashboard/monitoring", icon: Monitor },
     { name: "Billing", href: "/dashboard/billing", icon: Wallet },
     { name: "Settings", href: "/dashboard/settings", icon: Settings },
@@ -84,10 +82,6 @@ export function Sidebar({ className }: SidebarProps) {
         // Handle videos routes - check if pathname starts with /dashboard/videos
         if (href.startsWith("/dashboard/videos")) {
             return pathname.startsWith("/dashboard/videos");
-        }
-        // Handle strikes routes - check if pathname starts with /dashboard/strikes
-        if (href.startsWith("/dashboard/strikes")) {
-            return pathname.startsWith("/dashboard/strikes");
         }
         // Handle moderation routes
         if (href.startsWith("/dashboard/moderation")) {

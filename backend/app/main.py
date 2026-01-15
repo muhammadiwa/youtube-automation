@@ -30,7 +30,6 @@ from app.modules.monitoring import monitoring_router
 from app.modules.agent import agent_router
 from app.modules.job.router import router as job_router
 from app.modules.notification import notification_router
-from app.modules.strike.router import router as strike_router
 from app.modules.system_monitoring import system_monitoring_router
 from app.modules.security.router import router as security_router
 from app.modules.billing import router as billing_router
@@ -291,7 +290,6 @@ app.include_router(monitoring_router, prefix=settings.API_V1_PREFIX)
 app.include_router(agent_router, prefix=settings.API_V1_PREFIX)
 app.include_router(job_router, prefix=settings.API_V1_PREFIX)
 app.include_router(notification_router, prefix=settings.API_V1_PREFIX)
-app.include_router(strike_router, prefix=settings.API_V1_PREFIX)
 app.include_router(system_monitoring_router, prefix=settings.API_V1_PREFIX)
 app.include_router(security_router, prefix=settings.API_V1_PREFIX)
 app.include_router(billing_router, prefix=settings.API_V1_PREFIX)

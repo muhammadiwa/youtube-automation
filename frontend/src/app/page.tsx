@@ -474,7 +474,7 @@ const features = [
   {
     icon: Zap,
     title: "Instant Notifications",
-    description: "Get alerts for strikes, milestones, and important channel events.",
+    description: "Get alerts for milestones, quota usage, and important channel events.",
     gradient: "from-yellow-500 to-orange-500",
   },
 ]

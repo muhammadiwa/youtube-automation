@@ -11,17 +11,9 @@ export { ConnectAccountModal } from "./connect-account-modal";
 export { LiveChatPanel } from "./live-chat-panel";
 export { SentimentBadge, SentimentIcon, SentimentDot, AttentionIndicator, SentimentSummary } from "./sentiment-indicator";
 export { AIInsightsPanel } from "./ai-insights-panel";
-export {
-    StrikeWarningBanner,
-    PausedStreamsIndicator,
-    useStrikeNotifications,
-    StrikeAlertBadge,
-    StrikeStatusMiniCard,
-    InlineStrikeWarning,
-} from "./strike-alerts";
-export { ChannelTile } from "./channel-tile";
 export { PaymentGatewaySelector } from "./payment-gateway-selector";
 export { PaymentRetryModal } from "./payment-retry-modal";
 export { LiveStreamCard } from "./live-stream-card";
 export { ScheduleTimeline } from "./schedule-timeline";
 export { AlertCenter } from "./alert-center";
+export { ChannelCard } from "./channel-card";

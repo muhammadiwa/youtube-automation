@@ -87,7 +87,6 @@ export function AccountCard({ account, view = "grid", onSync, onDisconnect }: Ac
     const thumbnailUrl = account.thumbnailUrl || ""
     const subscriberCount = account.subscriberCount ?? 0
     const videoCount = account.videoCount ?? 0
-    const strikeCount = account.strikeCount ?? 0
     const isMonetized = account.isMonetized ?? false
 
     if (view === "list") {
@@ -155,12 +154,6 @@ export function AccountCard({ account, view = "grid", onSync, onDisconnect }: Ac
                                         <StatusIcon className="h-3.5 w-3.5" />
                                         {status.label}
                                     </Badge>
-
-                                    {strikeCount > 0 && (
-                                        <Badge variant="destructive" className="px-2.5 py-1">
-                                            {strikeCount} Strike{strikeCount > 1 ? "s" : ""}
-                                        </Badge>
-                                    )}
 
                                     <DropdownMenu>
                                         <DropdownMenuTrigger asChild>
@@ -283,11 +276,6 @@ export function AccountCard({ account, view = "grid", onSync, onDisconnect }: Ac
                                     </TooltipProvider>
                                 )}
                             </div>
-                            {strikeCount > 0 && (
-                                <Badge variant="destructive" className="text-xs">
-                                    {strikeCount} Strike{strikeCount > 1 ? "s" : ""}
-                                </Badge>
-                            )}
                         </div>
 
                         {/* Stats */}

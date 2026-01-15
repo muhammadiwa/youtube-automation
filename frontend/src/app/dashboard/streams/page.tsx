@@ -8,7 +8,7 @@ import {
     BarChart3,
     History,
 } from "lucide-react"
-import { DashboardLayout, PausedStreamsIndicator } from "@/components/dashboard"
+import { DashboardLayout } from "@/components/dashboard"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
@@ -81,9 +81,6 @@ export default function StreamsPage() {
                         </Button>
                     </div>
                 </div>
-
-                {/* Paused Streams Warning */}
-                <PausedStreamsIndicator />
 
                 {/* Filters */}
                 <Card className="border-0 shadow-lg">

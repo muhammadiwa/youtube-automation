@@ -448,9 +448,18 @@ export default function ModerationSettingsPage() {
             }
             setDialogOpen(false)
             loadRules()
-        } catch (error) {
+        } catch (error: unknown) {
             console.error("Failed to save rule:", error)
-            addToast({ type: "error", title: "Error", description: "Failed to save rule. Please try again." })
+            const err = error as { status?: number; detail?: string; message?: string }
+
+            // Handle 409 Conflict - duplicate rule name
+            if (err.status === 409) {
+                const errorMessage = err.detail || err.message || `Rule with name "${formData.name}" already exists`
+                addToast({ type: "error", title: "Duplicate Rule", description: errorMessage })
+            } else {
+                const errorMessage = err.detail || err.message || "Failed to save rule. Please try again."
+                addToast({ type: "error", title: "Error", description: errorMessage })
+            }
         } finally {
             setSaving(false)
         }

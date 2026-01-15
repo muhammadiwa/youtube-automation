@@ -620,16 +620,12 @@ class MonitoringService:
             return HealthStatus.CRITICAL
         if account.status == "error":
             return HealthStatus.CRITICAL
-        if (account.strike_count or 0) >= 2:
-            return HealthStatus.CRITICAL
         
         # Warning conditions
         if account.is_token_expiring_soon(hours=24) if hasattr(account, 'is_token_expiring_soon') else False:
             return HealthStatus.WARNING
         quota_percent = account.get_quota_usage_percent() if hasattr(account, 'get_quota_usage_percent') else 0
         if quota_percent >= 80:
-            return HealthStatus.WARNING
-        if (account.strike_count or 0) >= 1:
             return HealthStatus.WARNING
         
         return HealthStatus.HEALTHY
@@ -648,9 +644,6 @@ class MonitoringService:
         
         quota_percent = account.get_quota_usage_percent() if hasattr(account, 'get_quota_usage_percent') else 0
         if quota_percent >= 80:
-            count += 1
-        
-        if (account.strike_count or 0) > 0:
             count += 1
         
         return count
@@ -719,20 +712,6 @@ class MonitoringService:
                 channel_title=account.channel_title,
                 message=f"API quota at {status.quota_percent:.0f}%",
                 details="Consider reducing API calls",
-                created_at=now,
-            ))
-        
-        # Strikes
-        if status.strike_count > 0:
-            severity = AlertSeverity.CRITICAL if status.strike_count >= 2 else AlertSeverity.WARNING
-            alerts.append(Alert(
-                id=f"strike-{account.id}",
-                type=AlertType.STRIKE_DETECTED,
-                severity=severity,
-                channel_id=account.channel_id,
-                channel_title=account.channel_title,
-                message=f"Channel has {status.strike_count} strike(s)",
-                details="Review strikes in YouTube Studio",
                 created_at=now,
             ))
         
