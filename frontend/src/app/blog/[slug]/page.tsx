@@ -1,10 +1,11 @@
 import { Metadata } from "next"
 import { notFound } from "next/navigation"
 import Link from "next/link"
-import { ArrowLeft, Calendar, Clock, User, Eye, Video, Tag, Share2, Bookmark } from "lucide-react"
+import { ArrowLeft, Calendar, Clock, User, Eye, Video, Tag } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { LegalLink } from "@/components/legal-modal"
+import { ShareButtons } from "./share-buttons"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 // Base URL without /api/v1 for serving images
@@ -110,7 +111,7 @@ export default async function ArticlePage({ params }: PageProps) {
             {/* Hero Image */}
             {getImageUrl(article.featured_image) && (
                 <div className="pt-16">
-                    <div className="relative h-[50vh] min-h-[400px]">
+                    <div className="relative h-[70vh] min-h-[400px]">
                         <img src={getImageUrl(article.featured_image)!} alt={article.title} className="absolute inset-0 w-full h-full object-cover" />
                         <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
                     </div>
@@ -150,10 +151,8 @@ export default async function ArticlePage({ params }: PageProps) {
                                 </div>
 
                                 {/* Share buttons */}
-                                <div className="flex items-center gap-3 mt-6 pt-6 border-t">
-                                    <span className="text-sm text-gray-500">Share:</span>
-                                    <Button variant="outline" size="sm"><Share2 className="w-4 h-4 mr-2" />Share</Button>
-                                    <Button variant="outline" size="sm"><Bookmark className="w-4 h-4 mr-2" />Save</Button>
+                                <div className="mt-6 pt-6 border-t">
+                                    <ShareButtons title={article.title} slug={slug} />
                                 </div>
                             </div>
                         </header>

@@ -19,6 +19,8 @@ import {
     Upload,
     X,
     ImageIcon,
+    Sparkles,
+    Wand2,
 } from "lucide-react"
 import { AdminLayout } from "@/components/admin"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -109,12 +111,21 @@ export default function BlogAdminPage() {
     const [formMetaDescription, setFormMetaDescription] = useState("")
     const [formImage, setFormImage] = useState<File | null>(null)
     const [formImagePreview, setFormImagePreview] = useState<string | null>(null)
+    const [formImageStorageKey, setFormImageStorageKey] = useState<string | null>(null)  // For AI-generated images
     const [isSaving, setIsSaving] = useState(false)
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     // Delete state
     const [deleteArticleItem, setDeleteArticleItem] = useState<Article | null>(null)
     const [isDeleting, setIsDeleting] = useState(false)
+
+    // AI Generation state
+    const [isAIDialogOpen, setIsAIDialogOpen] = useState(false)
+    const [aiTopic, setAiTopic] = useState("")
+    const [aiCategory, setAiCategory] = useState("Tutorial")
+    const [aiLanguage, setAiLanguage] = useState("id")
+    const [aiGenerateThumbnail, setAiGenerateThumbnail] = useState(true)
+    const [isGenerating, setIsGenerating] = useState(false)
 
     const fetchArticles = useCallback(async () => {
         setIsLoading(true)
@@ -151,7 +162,7 @@ export default function BlogAdminPage() {
         setFormTitle(""); setFormSlug(""); setFormExcerpt(""); setFormContent("")
         setFormCategory("Tutorial"); setFormTags(""); setFormFeatured(false)
         setFormReadTime(5); setFormMetaTitle(""); setFormMetaDescription("")
-        setFormImage(null); setFormImagePreview(null); setEditingArticle(null)
+        setFormImage(null); setFormImagePreview(null); setFormImageStorageKey(null); setEditingArticle(null)
     }
 
     const openCreateForm = () => { resetForm(); setIsFormOpen(true) }
@@ -188,7 +199,7 @@ export default function BlogAdminPage() {
         }
     }
 
-    const removeImage = () => { setFormImage(null); setFormImagePreview(null) }
+    const removeImage = () => { setFormImage(null); setFormImagePreview(null); setFormImageStorageKey(null) }
 
     const handleSave = async () => {
         if (!formTitle.trim() || !formContent.trim() || !formSlug.trim()) return
@@ -205,7 +216,14 @@ export default function BlogAdminPage() {
             if (formMetaDescription) formData.append("meta_description", formMetaDescription)
             formData.append("featured", formFeatured.toString())
             formData.append("read_time_minutes", formReadTime.toString())
-            if (formImage) formData.append("featured_image", formImage)
+
+            // Handle image: either upload new file or use existing storage key
+            if (formImage) {
+                formData.append("featured_image", formImage)
+            } else if (formImageStorageKey) {
+                // Use storage key from AI generation
+                formData.append("featured_image_key", formImageStorageKey)
+            }
 
             const url = editingArticle
                 ? `${API_URL}/blog/admin/articles/${editingArticle.id}`
@@ -272,6 +290,77 @@ export default function BlogAdminPage() {
         return `${BASE_URL}${image}`
     }
 
+    // AI Generation handler
+    const handleAIGenerate = async () => {
+        if (!aiTopic.trim()) {
+            addToast({ type: "error", title: "Error", description: "Please enter a topic" })
+            return
+        }
+        setIsGenerating(true)
+        try {
+            const formData = new FormData()
+            formData.append("topic", aiTopic)
+            formData.append("category", aiCategory)
+            formData.append("language", aiLanguage)
+            formData.append("generate_thumbnail", aiGenerateThumbnail.toString())
+
+            const res = await fetchWithAuth(`${API_URL}/blog/admin/generate`, {
+                method: "POST",
+                body: formData,
+            })
+
+            if (!res.ok) {
+                const errorData = await res.json().catch(() => ({}))
+                throw new Error(errorData.detail || "Failed to generate")
+            }
+
+            const result = await res.json()
+            if (result.success && result.data) {
+                const data = result.data
+                // Fill form with generated content
+                setFormTitle(data.title || "")
+                setFormSlug(data.slug || generateSlug(data.title || ""))
+                setFormExcerpt(data.excerpt || "")
+                setFormContent(data.content || "")
+                setFormCategory(aiCategory)
+                setFormTags(data.tags?.join(", ") || "")
+                setFormMetaTitle(data.meta_title || "")
+                setFormMetaDescription(data.meta_description || "")
+                setFormReadTime(data.read_time_minutes || 5)
+                setFormFeatured(false)
+
+                // Handle generated thumbnail - use featured_image_url for preview
+                if (data.featured_image_url) {
+                    setFormImagePreview(data.featured_image_url)
+                    setFormImageStorageKey(data.featured_image || null)  // Save storage key for saving
+                } else if (data.featured_image) {
+                    // Fallback: try to construct URL
+                    const imageUrl = data.featured_image.startsWith("http")
+                        ? data.featured_image
+                        : getImageUrl(data.featured_image)
+                    setFormImagePreview(imageUrl)
+                    setFormImageStorageKey(data.featured_image)
+                }
+
+                setIsAIDialogOpen(false)
+                setIsFormOpen(true)
+                addToast({ type: "success", title: "Content Generated", description: "AI has generated your blog content. Review and edit before saving." })
+            }
+        } catch (err: any) {
+            addToast({ type: "error", title: "Generation Failed", description: err.message || "Failed to generate content" })
+        } finally {
+            setIsGenerating(false)
+        }
+    }
+
+    const openAIDialog = () => {
+        setAiTopic("")
+        setAiCategory("Tutorial")
+        setAiLanguage("id")
+        setAiGenerateThumbnail(true)
+        setIsAIDialogOpen(true)
+    }
+
     return (
         <AdminLayout breadcrumbs={[{ label: "Blog" }]}>
             <div className="space-y-8">
@@ -288,6 +377,10 @@ export default function BlogAdminPage() {
                     </div>
                     <div className="flex items-center gap-2">
                         <Button variant="outline" size="icon" onClick={fetchArticles} disabled={isLoading}><RefreshCcw className={cn("h-4 w-4", isLoading && "animate-spin")} /></Button>
+                        <Button variant="outline" onClick={openAIDialog} className="bg-gradient-to-r from-violet-500/10 to-purple-500/10 border-violet-500/20 hover:border-violet-500/40">
+                            <Sparkles className="h-4 w-4 mr-2 text-violet-500" />
+                            <span className="bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent font-medium">Generate with AI</span>
+                        </Button>
                         <Button onClick={openCreateForm}><Plus className="h-4 w-4 mr-2" />New Article</Button>
                     </div>
                 </motion.div>
@@ -488,6 +581,94 @@ export default function BlogAdminPage() {
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setDeleteArticleItem(null)}>Cancel</Button>
                         <Button variant="destructive" onClick={handleDelete} disabled={isDeleting}>{isDeleting ? "Deleting..." : "Delete"}</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* AI Generation Dialog */}
+            <Dialog open={isAIDialogOpen} onOpenChange={setIsAIDialogOpen}>
+                <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Sparkles className="h-5 w-5 text-violet-500" />
+                            Generate Blog with AI
+                        </DialogTitle>
+                        <DialogDescription>
+                            Let AI create a complete blog post for you. Just describe the topic and select options.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                            <Label>Topic / Subject *</Label>
+                            <Textarea
+                                placeholder="e.g., How to grow YouTube subscribers fast in 2024, Tips for better video SEO, etc."
+                                value={aiTopic}
+                                onChange={(e) => setAiTopic(e.target.value)}
+                                rows={3}
+                            />
+                            <p className="text-xs text-muted-foreground">Be specific for better results</p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label>Category</Label>
+                                <Select value={aiCategory} onValueChange={setAiCategory}>
+                                    <SelectTrigger><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        {defaultCategories.map(cat => (
+                                            <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Language</Label>
+                                <Select value={aiLanguage} onValueChange={setAiLanguage}>
+                                    <SelectTrigger><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="id">Indonesian</SelectItem>
+                                        <SelectItem value="en">English</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                        <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                            <div>
+                                <Label>Generate Thumbnail</Label>
+                                <p className="text-xs text-muted-foreground">AI will create a matching image</p>
+                            </div>
+                            <Switch checked={aiGenerateThumbnail} onCheckedChange={setAiGenerateThumbnail} />
+                        </div>
+                        {isGenerating && (
+                            <div className="p-4 rounded-lg bg-violet-500/10 border border-violet-500/20">
+                                <div className="flex items-center gap-3">
+                                    <div className="h-8 w-8 rounded-full border-2 border-violet-500/30 border-t-violet-500 animate-spin" />
+                                    <div>
+                                        <p className="font-medium text-violet-700 dark:text-violet-300">Generating content...</p>
+                                        <p className="text-xs text-muted-foreground">This may take 30-60 seconds</p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsAIDialogOpen(false)} disabled={isGenerating}>Cancel</Button>
+                        <Button
+                            onClick={handleAIGenerate}
+                            disabled={!aiTopic.trim() || isGenerating}
+                            className="bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700"
+                        >
+                            {isGenerating ? (
+                                <>
+                                    <RefreshCcw className="h-4 w-4 mr-2 animate-spin" />
+                                    Generating...
+                                </>
+                            ) : (
+                                <>
+                                    <Wand2 className="h-4 w-4 mr-2" />
+                                    Generate
+                                </>
+                            )}
+                        </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

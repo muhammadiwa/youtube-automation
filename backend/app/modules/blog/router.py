@@ -175,6 +175,7 @@ async def create_article(
     featured: bool = Form(False),
     read_time_minutes: int = Form(5),
     featured_image: Optional[UploadFile] = File(None),
+    featured_image_key: Optional[str] = Form(None),  # For AI-generated images (storage key)
     db: AsyncSession = Depends(get_db),
     admin: Admin = Depends(verify_admin_access),
 ):
@@ -184,10 +185,13 @@ async def create_article(
     user = result.scalar_one_or_none()
     author_name = user.name if user and user.name else (user.email if user else "Admin")
     
-    # Upload image if provided
+    # Upload image if provided, or use storage key from AI generation
     image_url = None
     if featured_image and featured_image.filename:
         image_url = await upload_blog_image(featured_image)
+    elif featured_image_key:
+        # Use existing storage key (from AI generation)
+        image_url = featured_image_key
     
     # Parse tags
     tags_list = None
@@ -360,3 +364,63 @@ async def upload_image(
         "url": f"/api/v1/blog/images/{storage_key.split('/')[-1]}",
         "storage_key": storage_key,
     }
+
+
+# AI Generation endpoints
+@router.post("/admin/generate")
+async def generate_blog_with_ai(
+    topic: str = Form(...),
+    category: str = Form(...),
+    language: str = Form("en"),
+    generate_thumbnail: bool = Form(True),
+    admin: Admin = Depends(verify_admin_access),
+):
+    """
+    Generate blog content using AI (admin only).
+    
+    Uses OpenRouter API with free models for text generation
+    and Pollinations.ai for free thumbnail generation.
+    
+    - topic: The topic/subject for the blog post
+    - category: Blog category (Growth, Tutorial, Analytics, SEO, Monetization, Community, News, Updates)
+    - language: Language code (en, id, etc.)
+    - generate_thumbnail: Whether to generate a thumbnail image
+    
+    Returns generated blog data that can be used to create an article.
+    """
+    from app.modules.blog.ai_service import ai_blog_service
+    from app.modules.blog.service import get_image_url
+    
+    try:
+        result = await ai_blog_service.generate_blog_with_thumbnail(
+            topic=topic,
+            category=category,
+            language=language,
+            generate_image=generate_thumbnail,
+        )
+        
+        # Convert storage key to URL for frontend preview
+        # But also keep the storage_key for saving to database
+        featured_image_key = result.get("featured_image")
+        featured_image_url = None
+        if featured_image_key:
+            featured_image_url = get_image_url(featured_image_key)
+        
+        return {
+            "success": True,
+            "data": {
+                **result,
+                "featured_image": featured_image_key,  # Storage key for saving
+                "featured_image_url": featured_image_url,  # URL for preview
+            },
+        }
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate blog content: {str(e)}",
+        )
