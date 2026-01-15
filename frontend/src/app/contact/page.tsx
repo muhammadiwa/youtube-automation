@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import Link from "next/link"
 import { motion } from "framer-motion"
 import {
@@ -11,15 +12,15 @@ import {
     Phone,
     Clock,
     Send,
-    // eslint-disable-next-line @typescript-eslint/no-deprecated
-    Youtube
+    Loader2,
+    CheckCircle,
+    AlertCircle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { LegalLink } from "@/components/legal-modal"
 
-// Contact info data
 const contactInfo = [
     { icon: Mail, title: "Email Us", value: "support@ytautomation.com", description: "We'll respond within 24 hours" },
     { icon: MessageSquare, title: "Live Chat", value: "Available 24/7", description: "Chat with our support team" },
@@ -27,7 +28,6 @@ const contactInfo = [
     { icon: MapPin, title: "Office", value: "San Francisco, CA", description: "Visit us by appointment" },
 ]
 
-// FAQ data
 const faqs = [
     { q: "How quickly do you respond to inquiries?", a: "We typically respond within 24 hours on business days." },
     { q: "Do you offer phone support?", a: "Yes, phone support is available for Pro and Enterprise plans." },
@@ -35,7 +35,68 @@ const faqs = [
     { q: "Where are you located?", a: "Our headquarters is in San Francisco, but we're a remote-first company." },
 ]
 
+interface FormData {
+    firstName: string
+    lastName: string
+    email: string
+    subject: string
+    message: string
+}
+
 export default function ContactPage() {
+    const [formData, setFormData] = useState<FormData>({
+        firstName: "",
+        lastName: "",
+        email: "",
+        subject: "",
+        message: "",
+    })
+    const [isSubmitting, setIsSubmitting] = useState(false)
+    const [submitStatus, setSubmitStatus] = useState<"idle" | "success" | "error">("idle")
+    const [errorMessage, setErrorMessage] = useState("")
+
+    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        const { name, value } = e.target
+        setFormData(prev => ({ ...prev, [name]: value }))
+    }
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault()
+        setIsSubmitting(true)
+        setSubmitStatus("idle")
+        setErrorMessage("")
+
+        try {
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+            const response = await fetch(`${apiUrl}/api/v1/contact/submit`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    first_name: formData.firstName,
+                    last_name: formData.lastName,
+                    email: formData.email,
+                    subject: formData.subject,
+                    message: formData.message,
+                }),
+            })
+
+            const data = await response.json()
+
+            if (response.ok && data.success) {
+                setSubmitStatus("success")
+                setFormData({ firstName: "", lastName: "", email: "", subject: "", message: "" })
+            } else {
+                setSubmitStatus("error")
+                setErrorMessage(data.detail || "Failed to send message. Please try again.")
+            }
+        } catch {
+            setSubmitStatus("error")
+            setErrorMessage("Network error. Please check your connection and try again.")
+        } finally {
+            setIsSubmitting(false)
+        }
+    }
+
     return (
         <div className="min-h-screen bg-[#F9FAFB]">
             {/* HEADER */}
@@ -46,7 +107,7 @@ export default function ContactPage() {
                             <div className="relative">
                                 <div className="absolute inset-0 bg-gradient-to-r from-red-500 to-orange-500 rounded-lg blur opacity-50 group-hover:opacity-75 transition-opacity" />
                                 <div className="relative bg-gradient-to-r from-red-500 to-orange-500 p-2 rounded-lg">
-                                    <Youtube className="h-5 w-5 text-white" />
+                                    <Video className="h-5 w-5 text-white" />
                                 </div>
                             </div>
                             <span className="text-xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 bg-clip-text text-transparent">YT Automation</span>
@@ -102,31 +163,55 @@ export default function ContactPage() {
                         {/* Contact Form */}
                         <motion.div initial={{ opacity: 0, x: -30 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }}>
                             <h2 className="text-2xl font-bold text-gray-900 mb-6">Send Us a Message</h2>
-                            <form className="space-y-6">
+
+                            {submitStatus === "success" && (
+                                <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl flex items-center gap-3">
+                                    <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0" />
+                                    <p className="text-green-700">Thank you for your message! We'll get back to you within 24 hours.</p>
+                                </div>
+                            )}
+
+                            {submitStatus === "error" && (
+                                <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3">
+                                    <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
+                                    <p className="text-red-700">{errorMessage}</p>
+                                </div>
+                            )}
+
+                            <form onSubmit={handleSubmit} className="space-y-6">
                                 <div className="grid sm:grid-cols-2 gap-4">
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-2">First Name</label>
-                                        <Input placeholder="John" />
+                                        <Input name="firstName" value={formData.firstName} onChange={handleInputChange} placeholder="John" required />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-2">Last Name</label>
-                                        <Input placeholder="Doe" />
+                                        <Input name="lastName" value={formData.lastName} onChange={handleInputChange} placeholder="Doe" required />
                                     </div>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
-                                    <Input type="email" placeholder="john@example.com" />
+                                    <Input type="email" name="email" value={formData.email} onChange={handleInputChange} placeholder="john@example.com" required />
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-2">Subject</label>
-                                    <Input placeholder="How can we help?" />
+                                    <Input name="subject" value={formData.subject} onChange={handleInputChange} placeholder="How can we help?" required />
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-2">Message</label>
-                                    <Textarea placeholder="Tell us more about your inquiry..." rows={5} />
+                                    <Textarea name="message" value={formData.message} onChange={handleInputChange} placeholder="Tell us more about your inquiry..." rows={5} required minLength={10} />
                                 </div>
-                                <Button size="lg" className="w-full bg-gradient-to-r from-blue-500 to-cyan-500 text-white hover:from-blue-600 hover:to-cyan-600">
-                                    Send Message <Send className="ml-2 w-5 h-5" />
+                                <Button type="submit" size="lg" disabled={isSubmitting} className="w-full bg-gradient-to-r from-blue-500 to-cyan-500 text-white hover:from-blue-600 hover:to-cyan-600 disabled:opacity-50">
+                                    {isSubmitting ? (
+                                        <>
+                                            <Loader2 className="mr-2 w-5 h-5 animate-spin" />
+                                            Sending...
+                                        </>
+                                    ) : (
+                                        <>
+                                            Send Message <Send className="ml-2 w-5 h-5" />
+                                        </>
+                                    )}
                                 </Button>
                             </form>
                         </motion.div>

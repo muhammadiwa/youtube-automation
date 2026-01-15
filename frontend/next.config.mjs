@@ -27,6 +27,30 @@ const nextConfig = {
                 hostname: 'www.youtube.com',
                 pathname: '/**',
             },
+            // Cloudflare R2 storage
+            {
+                protocol: 'https',
+                hostname: '*.r2.dev',
+                pathname: '/**',
+            },
+            // AWS S3
+            {
+                protocol: 'https',
+                hostname: '*.s3.amazonaws.com',
+                pathname: '/**',
+            },
+            {
+                protocol: 'https',
+                hostname: '*.s3.*.amazonaws.com',
+                pathname: '/**',
+            },
+            // MinIO (local development)
+            {
+                protocol: 'http',
+                hostname: 'localhost',
+                port: '9000',
+                pathname: '/**',
+            },
         ],
     },
 };

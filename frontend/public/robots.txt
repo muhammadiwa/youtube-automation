@@ -1,0 +1,23 @@
+# robots.txt for YT Automation
+User-agent: *
+Allow: /
+
+# Disallow admin and private areas
+Disallow: /dashboard/
+Disallow: /api/
+Disallow: /login
+Disallow: /register
+Disallow: /forgot-password
+Disallow: /reset-password
+
+# Allow search engines to crawl public pages
+Allow: /
+Allow: /about
+Allow: /blog
+Allow: /blog/*
+Allow: /contact
+Allow: /careers
+Allow: /pricing
+
+# Sitemap location
+Sitemap: https://ytautomation.com/sitemap.xml

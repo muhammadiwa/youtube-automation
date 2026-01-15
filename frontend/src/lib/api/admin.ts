@@ -1037,6 +1037,75 @@ const adminApi = {
     async rejectRestore(restoreId: string, data: import("@/types/admin").RejectRestoreRequest): Promise<import("@/types/admin").RejectRestoreResponse> {
         return apiClient.post(`/admin/backups/restore/${restoreId}/reject`, data)
     },
+
+    // ==================== Blog Articles API ====================
+
+    /**
+     * Get paginated list of articles (admin)
+     */
+    async getArticles(params: {
+        page?: number
+        page_size?: number
+        category?: string
+        article_status?: string
+    }): Promise<ArticleListResponse> {
+        const searchParams = new URLSearchParams()
+        if (params.page) searchParams.set("page", params.page.toString())
+        if (params.page_size) searchParams.set("page_size", params.page_size.toString())
+        if (params.category) searchParams.set("category", params.category)
+        if (params.article_status) searchParams.set("article_status", params.article_status)
+        const query = searchParams.toString()
+        return apiClient.get(`/blog/admin/articles${query ? `?${query}` : ""}`)
+    },
+
+    /**
+     * Get article by ID (admin)
+     */
+    async getArticle(articleId: string): Promise<Article> {
+        return apiClient.get(`/blog/admin/articles/${articleId}`)
+    },
+
+    /**
+     * Create a new article
+     */
+    async createArticle(data: ArticleCreateRequest): Promise<Article> {
+        return apiClient.post("/blog/admin/articles", data)
+    },
+
+    /**
+     * Update an article
+     */
+    async updateArticle(articleId: string, data: ArticleUpdateRequest): Promise<Article> {
+        return apiClient.put(`/blog/admin/articles/${articleId}`, data)
+    },
+
+    /**
+     * Publish an article
+     */
+    async publishArticle(articleId: string): Promise<Article> {
+        return apiClient.post(`/blog/admin/articles/${articleId}/publish`, {})
+    },
+
+    /**
+     * Unpublish an article
+     */
+    async unpublishArticle(articleId: string): Promise<Article> {
+        return apiClient.post(`/blog/admin/articles/${articleId}/unpublish`, {})
+    },
+
+    /**
+     * Delete an article
+     */
+    async deleteArticle(articleId: string): Promise<void> {
+        return apiClient.delete(`/blog/admin/articles/${articleId}`)
+    },
+
+    /**
+     * Get all categories
+     */
+    async getArticleCategories(): Promise<string[]> {
+        return apiClient.get("/blog/categories")
+    },
 }
 
 // Payment Gateway types for admin API - matches backend response exactly
@@ -1149,6 +1218,66 @@ export interface AnnouncementUpdateRequest {
     start_date?: string
     end_date?: string | null
     target_plans?: string[] | null
+}
+
+// ==================== Blog Article Types ====================
+
+export interface Article {
+    id: string
+    title: string
+    slug: string
+    excerpt: string | null
+    content: string
+    category: string
+    tags: string[] | null
+    featured_image: string | null
+    meta_title: string | null
+    meta_description: string | null
+    status: "draft" | "published" | "archived"
+    featured: boolean
+    author_id: string
+    author_name: string
+    view_count: number
+    read_time_minutes: number
+    created_at: string
+    updated_at: string
+    published_at: string | null
+}
+
+export interface ArticleListResponse {
+    items: Article[]
+    total: number
+    page: number
+    page_size: number
+    total_pages: number
+}
+
+export interface ArticleCreateRequest {
+    title: string
+    slug: string
+    excerpt?: string
+    content: string
+    category: string
+    tags?: string[]
+    featured_image?: string
+    meta_title?: string
+    meta_description?: string
+    featured?: boolean
+    read_time_minutes?: number
+}
+
+export interface ArticleUpdateRequest {
+    title?: string
+    slug?: string
+    excerpt?: string
+    content?: string
+    category?: string
+    tags?: string[]
+    featured_image?: string
+    meta_title?: string
+    meta_description?: string
+    featured?: boolean
+    read_time_minutes?: number
 }
 
 export default adminApi

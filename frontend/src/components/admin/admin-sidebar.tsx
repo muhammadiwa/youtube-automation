@@ -68,6 +68,7 @@ const adminNavigation: NavSection[] = [
         key: "content",
         icon: Shield,
         items: [
+            { name: "Blog", href: "/admin/blog", icon: FileText },
             { name: "Moderation", href: "/admin/moderation", icon: Shield },
             { name: "Support Tickets", href: "/admin/support", icon: MessageSquare },
         ],
