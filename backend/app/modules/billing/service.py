@@ -593,13 +593,13 @@ class BillingService:
         accounts_count = accounts_result.scalar() or 0
         
         # 2. Count videos uploaded to YouTube this billing period
-        # Only count videos with youtube_video_id (actually published to YouTube)
+        # Only count videos with youtube_id (actually published to YouTube)
         # Library videos without YouTube upload don't count toward this limit
         videos_result = await self.session.execute(
             select(sql_func.count(Video.id))
             .where(Video.user_id == user_id)
             .where(Video.created_at >= subscription.current_period_start)
-            .where(Video.youtube_video_id.isnot(None))
+            .where(Video.youtube_id.isnot(None))
         )
         videos_count = videos_result.scalar() or 0
         
