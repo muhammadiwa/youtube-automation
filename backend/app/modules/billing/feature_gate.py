@@ -128,7 +128,7 @@ class FeatureGateService:
                 current=current_count,
                 limit=limit,
                 plan_name=plan.name,
-                message=f"Anda sudah mencapai batas maksimal {limit} akun YouTube untuk plan {plan.name}. Upgrade plan untuk menambah lebih banyak akun."
+                message=f"You have reached the maximum limit of {limit} YouTube accounts for the {plan.name} plan. Upgrade your plan to add more accounts."
             )
         
         return can_add, current_count, limit, plan.name
@@ -138,7 +138,10 @@ class FeatureGateService:
         user_id: uuid.UUID,
         raise_on_exceed: bool = True,
     ) -> Tuple[bool, int, int, str]:
-        """Check if user can upload more videos this month.
+        """Check if user can upload more videos to YouTube this month.
+        
+        Only counts videos that have been published to YouTube (have youtube_video_id),
+        not videos in library that haven't been uploaded yet.
         
         Args:
             user_id: User UUID
@@ -154,11 +157,13 @@ class FeatureGateService:
         
         plan, subscription = await self.get_user_plan(user_id)
         
-        # Count videos uploaded in current billing period
+        # Count videos uploaded to YouTube in current billing period
+        # Only count videos with youtube_video_id (actually published to YouTube)
         result = await self.session.execute(
             select(sql_func.count(Video.id))
             .where(Video.user_id == user_id)
             .where(Video.created_at >= subscription.current_period_start)
+            .where(Video.youtube_video_id.isnot(None))
         )
         current_count = result.scalar() or 0
         
@@ -172,11 +177,11 @@ class FeatureGateService:
         
         if not can_upload and raise_on_exceed:
             raise LimitExceededError(
-                resource="Videos per Month",
+                resource="YouTube Uploads per Month",
                 current=current_count,
                 limit=limit,
                 plan_name=plan.name,
-                message=f"Anda sudah mencapai batas maksimal {limit} video per bulan untuk plan {plan.name}. Upgrade plan untuk upload lebih banyak video."
+                message=f"You have reached the maximum limit of {limit} YouTube uploads per month for the {plan.name} plan. Upgrade your plan to upload more videos."
             )
         
         return can_upload, current_count, limit, plan.name
@@ -238,7 +243,7 @@ class FeatureGateService:
                 current=current_count,
                 limit=limit,
                 plan_name=plan.name,
-                message=f"Anda sudah mencapai batas maksimal {limit} stream per bulan untuk plan {plan.name}. Upgrade plan untuk membuat lebih banyak stream."
+                message=f"You have reached the maximum limit of {limit} streams per month for the {plan.name} plan. Upgrade your plan to create more streams."
             )
         
         return can_create, current_count, limit, plan.name
@@ -300,7 +305,7 @@ class FeatureGateService:
                 current=current_count,
                 limit=limit,
                 plan_name=plan.name,
-                message=f"Anda sudah mencapai batas maksimal {limit} stream bersamaan untuk plan {plan.name}. Hentikan stream lain atau upgrade plan."
+                message=f"You have reached the maximum limit of {limit} concurrent streams for the {plan.name} plan. Stop another stream or upgrade your plan."
             )
         
         return can_start, current_count, limit, plan.name
@@ -328,11 +333,12 @@ class FeatureGateService:
         
         plan, subscription = await self.get_user_plan(user_id)
         
-        # Calculate current storage usage
+        # Calculate current storage usage - exclude archived videos
         result = await self.session.execute(
             select(sql_func.coalesce(sql_func.sum(Video.file_size), 0))
             .where(Video.user_id == user_id)
             .where(Video.file_size.isnot(None))
+            .where(Video.status != "archived")
         )
         current_bytes = result.scalar() or 0
         current_gb = current_bytes / (1024 * 1024 * 1024)
@@ -355,7 +361,7 @@ class FeatureGateService:
                 current=int(current_gb * 100) / 100,  # Round to 2 decimal
                 limit=int(limit_gb),
                 plan_name=plan.name,
-                message=f"Storage penuh: {current_gb:.2f}GB / {limit_gb}GB untuk plan {plan.name}. Hapus video lama atau upgrade plan."
+                message=f"Storage full: {current_gb:.2f}GB / {limit_gb}GB for the {plan.name} plan. Delete old videos or upgrade your plan."
             )
         
         return has_space, current_gb, limit_gb, plan.name

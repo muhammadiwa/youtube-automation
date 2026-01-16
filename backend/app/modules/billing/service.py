@@ -592,13 +592,14 @@ class BillingService:
         )
         accounts_count = accounts_result.scalar() or 0
         
-        # 2. Count videos uploaded this billing period
-        # Note: Videos can be uploaded without account_id (library videos)
-        # So we count by user_id directly, not via account join
+        # 2. Count videos uploaded to YouTube this billing period
+        # Only count videos with youtube_video_id (actually published to YouTube)
+        # Library videos without YouTube upload don't count toward this limit
         videos_result = await self.session.execute(
             select(sql_func.count(Video.id))
             .where(Video.user_id == user_id)
             .where(Video.created_at >= subscription.current_period_start)
+            .where(Video.youtube_video_id.isnot(None))
         )
         videos_count = videos_result.scalar() or 0
         
@@ -735,11 +736,12 @@ class BillingService:
             warning_threshold_reached=concurrent_warning,
         ))
         
-        # Calculate storage from video file sizes (in GB)
+        # Calculate storage from video file sizes (in GB) - exclude archived videos
         storage_result = await self.session.execute(
             select(sql_func.coalesce(sql_func.sum(Video.file_size), 0))
             .where(Video.user_id == user_id)
             .where(Video.file_size.isnot(None))
+            .where(Video.status != "archived")
         )
         total_bytes = storage_result.scalar() or 0
         storage_used = total_bytes / (1024 * 1024 * 1024)  # Convert bytes to GB

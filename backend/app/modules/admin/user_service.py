@@ -644,20 +644,23 @@ class AdminUserService:
             accounts_result = await self.session.execute(accounts_query)
             account_ids = [row[0] for row in accounts_result.fetchall()]
             
-            if account_ids:
-                # Count videos
-                videos_query = select(func.count(Video.id)).where(Video.account_id.in_(account_ids))
-                videos_result = await self.session.execute(videos_query)
-                total_videos = videos_result.scalar() or 0
-                
-                # Calculate storage used (sum of file sizes)
-                storage_query = select(func.sum(Video.file_size)).where(
-                    Video.account_id.in_(account_ids),
-                    Video.file_size.isnot(None)
-                )
-                storage_result = await self.session.execute(storage_query)
-                total_bytes = storage_result.scalar() or 0
-                storage_used_gb = total_bytes / (1024 * 1024 * 1024)  # Convert to GB
+            # Count all videos for user (including library videos without account)
+            videos_query = select(func.count(Video.id)).where(
+                Video.user_id == user_id,
+                Video.status != "archived"
+            )
+            videos_result = await self.session.execute(videos_query)
+            total_videos = videos_result.scalar() or 0
+            
+            # Calculate storage used (sum of file sizes) - exclude archived videos
+            storage_query = select(func.sum(Video.file_size)).where(
+                Video.user_id == user_id,
+                Video.file_size.isnot(None),
+                Video.status != "archived"
+            )
+            storage_result = await self.session.execute(storage_query)
+            total_bytes = storage_result.scalar() or 0
+            storage_used_gb = total_bytes / (1024 * 1024 * 1024)  # Convert to GB
         except Exception as e:
             logging.warning(f"Failed to get video stats for user {user_id}: {e}")
         

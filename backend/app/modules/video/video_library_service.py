@@ -159,11 +159,31 @@ class VideoLibraryService:
             tmp_file_path = str(temp_dir / f"upload_{video.id}{original_ext}")
             
             content = await file.read()
+            file_size = len(content)
+            
+            # Check storage limit with actual file size
+            from app.modules.billing.feature_gate import FeatureGateService, LimitExceededError
+            feature_gate = FeatureGateService(self.db)
+            try:
+                await feature_gate.check_storage_limit(
+                    user_id, 
+                    additional_bytes=file_size, 
+                    raise_on_exceed=True
+                )
+            except LimitExceededError as e:
+                # Delete the video record we just created
+                await self.db.delete(video)
+                await self.db.commit()
+                raise HTTPException(
+                    status_code=403,
+                    detail=e.message,
+                )
+            
             with open(tmp_file_path, 'wb') as tmp_file:
                 tmp_file.write(content)
             
             # Get file size for initial record
-            video.file_size = len(content)
+            video.file_size = file_size
             
             logger.info(f"📁 Saved upload to temp: {tmp_file_path} ({video.file_size} bytes)")
             

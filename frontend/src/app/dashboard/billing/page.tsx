@@ -612,7 +612,7 @@ function BillingContent() {
                                     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                                         {[
                                             { key: "accounts", label: "YouTube Accounts", icon: Users, used: usage.accounts_used, limit: usage.accounts_limit, gradient: "from-blue-500 to-cyan-500", description: "Connected channels" },
-                                            { key: "videos", label: "Videos This Month", icon: Video, used: usage.videos_this_month, limit: usage.videos_limit, gradient: "from-red-500 to-rose-500", description: "Uploaded videos" },
+                                            { key: "videos", label: "YouTube Uploads", icon: Video, used: usage.videos_this_month, limit: usage.videos_limit, gradient: "from-red-500 to-rose-500", description: "Published to YouTube this month" },
                                             { key: "streams", label: "Streams This Month", icon: Radio, used: usage.streams_this_month, limit: usage.streams_limit, gradient: "from-violet-500 to-purple-500", description: "Live streams created" },
                                             { key: "concurrent", label: "Concurrent Streams", icon: Zap, used: usage.concurrent_streams, limit: usage.concurrent_streams_limit, gradient: "from-amber-500 to-orange-500", description: "Streams running now" },
                                         ].map((metric) => {

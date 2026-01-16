@@ -59,7 +59,6 @@ import { BulkActionsBar } from "@/components/videos/bulk-actions-bar"
 import { BulkUploadDialog } from "@/components/videos/bulk-upload-dialog"
 import { BulkMoveDialog } from "@/components/videos/bulk-move-dialog"
 import { BulkDeleteDialog } from "@/components/videos/bulk-delete-dialog"
-import { AdvancedFilterPanel, type AdvancedFilters } from "@/components/videos/advanced-filter-panel"
 import { videoLibraryApi, type LibraryVideoFilters, type VideoFolder } from "@/lib/api/video-library"
 import { accountsApi } from "@/lib/api/accounts"
 import type { Video, YouTubeAccount } from "@/types"
@@ -116,7 +115,6 @@ export default function VideoLibraryPage() {
         sortOrder: "desc",
     })
     const [searchQuery, setSearchQuery] = useState("")
-    const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>({})
     const [pagination, setPagination] = useState({
         total: 0,
         page: 1,
@@ -562,13 +560,6 @@ export default function VideoLibraryPage() {
                                 </Button>
                             </div>
                         </div>
-
-                        {/* Advanced Filters */}
-                        <AdvancedFilterPanel
-                            filters={advancedFilters}
-                            onFiltersChange={setAdvancedFilters}
-                            availableTags={[]} // TODO: Extract from videos
-                        />
                     </div>
 
                     {/* Videos Grid/List */}

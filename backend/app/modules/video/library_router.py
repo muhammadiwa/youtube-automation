@@ -100,9 +100,30 @@ async def upload_to_library(
     
     Uploads video file to storage and extracts metadata.
     Does not upload to YouTube - that's a separate action.
+    
+    Only checks storage limit (not video count per month).
+    Video count limit is enforced when uploading to YouTube.
     """
-    service = VideoLibraryService(db)
+    from app.modules.billing.feature_gate import FeatureGateService, LimitExceededError
+    
     user_id = current_user.id
+    feature_gate = FeatureGateService(db)
+    
+    # Check storage limit (estimate from content-length if available)
+    if file.size:
+        try:
+            await feature_gate.check_storage_limit(
+                user_id, 
+                additional_bytes=file.size, 
+                raise_on_exceed=True
+            )
+        except LimitExceededError as e:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=e.message,
+            )
+    
+    service = VideoLibraryService(db)
     
     # Parse tags
     tag_list = None
