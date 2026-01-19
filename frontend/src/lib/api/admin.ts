@@ -830,6 +830,73 @@ const adminApi = {
         return apiClient.get(`/admin/payment-gateways/${provider}/health`)
     },
 
+    // ==================== Support Tickets API (Requirements 10.1-10.4) ====================
+
+    /**
+     * Get paginated list of support tickets
+     * Requirements: 10.1
+     */
+    async getSupportTickets(params: {
+        page?: number
+        page_size?: number
+        status?: string
+        priority?: string
+        assigned_to?: string
+        category?: string
+    }): Promise<AdminTicketListResponse> {
+        const searchParams = new URLSearchParams()
+        if (params.page) searchParams.set("page", params.page.toString())
+        if (params.page_size) searchParams.set("page_size", params.page_size.toString())
+        if (params.status) searchParams.set("status", params.status)
+        if (params.priority) searchParams.set("priority", params.priority)
+        if (params.assigned_to) searchParams.set("assigned_to", params.assigned_to)
+        if (params.category) searchParams.set("category", params.category)
+        const query = searchParams.toString()
+        return apiClient.get(`/admin/support/tickets${query ? `?${query}` : ""}`)
+    },
+
+    /**
+     * Get support ticket detail with messages
+     * Requirements: 10.1, 10.2
+     */
+    async getSupportTicketDetail(ticketId: string): Promise<AdminTicketDetail> {
+        return apiClient.get(`/admin/support/tickets/${ticketId}`)
+    },
+
+    /**
+     * Reply to a support ticket
+     * Requirements: 10.2
+     */
+    async replyToTicket(ticketId: string, data: {
+        content: string
+        update_status?: string
+        send_email?: boolean
+    }): Promise<{ message_id: string; ticket_id: string; content: string; email_sent: boolean; created_at: string }> {
+        return apiClient.post(`/admin/support/tickets/${ticketId}/reply`, data)
+    },
+
+    /**
+     * Update ticket status
+     * Requirements: 10.2
+     */
+    async updateTicketStatus(ticketId: string, data: {
+        status: string
+        notify_user?: boolean
+    }): Promise<{ ticket_id: string; old_status: string; new_status: string; updated_at: string; resolved_at?: string }> {
+        return apiClient.put(`/admin/support/tickets/${ticketId}/status`, data)
+    },
+
+    /**
+     * Assign ticket to admin
+     * Requirements: 10.2
+     */
+    async assignTicket(ticketId: string, data: {
+        admin_id: string
+        notify_admin?: boolean
+    }): Promise<{ ticket_id: string; assigned_to: string | null; assigned_admin_name: string | null; updated_at: string }> {
+        return apiClient.put(`/admin/support/tickets/${ticketId}/assign`, data)
+    },
+
     // ==================== Announcements API ====================
 
     /**
@@ -1663,6 +1730,69 @@ export interface BrandingConfig {
     footer_text: string
     maintenance_mode: boolean
     maintenance_message: string | null
+}
+
+// ==================== Admin Support Types (Requirements 10.1-10.5) ====================
+
+export interface AdminSupportTicket {
+    id: string
+    subject: string
+    category: string | null
+    status: string
+    priority: string
+    user_id: string
+    user_email: string | null
+    user_name: string | null
+    assigned_to: string | null
+    assigned_admin_name: string | null
+    message_count: number
+    created_at: string
+    updated_at: string
+    resolved_at: string | null
+}
+
+export interface AdminTicketMessage {
+    id: string
+    ticket_id: string
+    sender_id: string
+    sender_type: "user" | "admin"
+    sender_name: string | null
+    sender_email: string | null
+    content: string
+    attachments: string[] | null
+    created_at: string
+}
+
+export interface AdminTicketDetail {
+    id: string
+    subject: string
+    description: string
+    category: string | null
+    status: string
+    priority: string
+    user: {
+        id: string
+        email: string
+        name: string
+    }
+    assigned_to: {
+        id: string
+        user_id: string
+        email: string | null
+        name: string | null
+    } | null
+    messages: AdminTicketMessage[]
+    created_at: string
+    updated_at: string
+    resolved_at: string | null
+}
+
+export interface AdminTicketListResponse {
+    items: AdminSupportTicket[]
+    total: number
+    page: number
+    page_size: number
+    total_pages: number
 }
 
 export { configApi }

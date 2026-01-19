@@ -279,6 +279,13 @@ class AdminSupportService:
         
         sender_id = admin.user_id if admin else admin_id
         
+        # Get admin user name for WebSocket broadcast
+        from app.modules.auth.models import User
+        admin_user_query = select(User).where(User.id == sender_id)
+        admin_user_result = await self.session.execute(admin_user_query)
+        admin_user = admin_user_result.scalar_one_or_none()
+        sender_name = admin_user.name if admin_user else "Support Team"
+        
         # Create message
         message = TicketMessage(
             ticket_id=ticket_id,
@@ -308,6 +315,27 @@ class AdminSupportService:
         
         await self.session.commit()
         await self.session.refresh(message)
+        
+        # Broadcast new message via WebSocket
+        from app.modules.support.websocket import broadcast_new_message
+        print(f"[AdminSupport] Sending WebSocket broadcast for new message in ticket {ticket_id}")
+        message_data = {
+            "id": str(message.id),
+            "ticket_id": str(ticket_id),
+            "sender_id": str(sender_id),
+            "sender_type": "admin",
+            "sender_name": sender_name,
+            "content": content,
+            "attachments": attachments,
+            "created_at": message.created_at.isoformat(),
+        }
+        await broadcast_new_message(
+            ticket_id=str(ticket_id),
+            user_id=str(ticket.user_id),
+            message_data=message_data,
+            sender_id=str(sender_id),
+        )
+        print(f"[AdminSupport] WebSocket broadcast sent")
         
         # TODO: Send email notification if send_email is True
         email_sent = send_email  # Placeholder
@@ -353,6 +381,17 @@ class AdminSupportService:
         
         await self.session.commit()
         await self.session.refresh(ticket)
+        
+        # Broadcast status change via WebSocket
+        from app.modules.support.websocket import broadcast_status_change
+        print(f"[AdminSupport] Sending WebSocket broadcast for status change in ticket {ticket_id}")
+        await broadcast_status_change(
+            ticket_id=str(ticket_id),
+            user_id=str(ticket.user_id),
+            old_status=old_status,
+            new_status=new_status,
+        )
+        print(f"[AdminSupport] WebSocket broadcast sent")
         
         return TicketStatusUpdateResponse(
             ticket_id=ticket_id,

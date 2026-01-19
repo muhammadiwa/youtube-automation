@@ -16,6 +16,7 @@ import {
     Monitor,
     Wallet,
     Shield,
+    LifeBuoy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -31,6 +32,7 @@ const navigation = [
     { name: "Moderation", href: "/dashboard/moderation/settings", icon: Shield },
     { name: "Monitoring", href: "/dashboard/monitoring", icon: Monitor },
     { name: "Billing", href: "/dashboard/billing", icon: Wallet },
+    { name: "Support", href: "/dashboard/support", icon: LifeBuoy },
     { name: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 
@@ -98,6 +100,10 @@ export function Sidebar({ className }: SidebarProps) {
         // Handle billing routes
         if (href.startsWith("/dashboard/billing")) {
             return pathname.startsWith("/dashboard/billing");
+        }
+        // Handle support routes
+        if (href.startsWith("/dashboard/support")) {
+            return pathname.startsWith("/dashboard/support");
         }
         return pathname.startsWith(href);
     };

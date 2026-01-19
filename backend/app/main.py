@@ -39,6 +39,7 @@ from app.modules.admin import admin_router
 from app.modules.admin.public_router import router as public_announcements_router
 from app.modules.blog import blog_router
 from app.modules.blog.contact_router import router as contact_router
+from app.modules.support import support_router
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -302,3 +303,4 @@ app.include_router(admin_router, prefix=settings.API_V1_PREFIX)
 app.include_router(public_announcements_router, prefix=settings.API_V1_PREFIX)
 app.include_router(blog_router, prefix=settings.API_V1_PREFIX)
 app.include_router(contact_router, prefix=settings.API_V1_PREFIX)
+app.include_router(support_router, prefix=settings.API_V1_PREFIX)

@@ -33,36 +33,14 @@ import {
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import Link from "next/link"
-
-// Types
-interface SupportTicket {
-    id: string
-    user_id: string
-    user_email: string
-    user_name: string
-    subject: string
-    status: "open" | "in_progress" | "waiting" | "resolved" | "closed"
-    priority: "low" | "medium" | "high" | "urgent"
-    category: string
-    message_count: number
-    last_reply_at: string | null
-    created_at: string
-    updated_at: string
-}
-
-interface TicketsResponse {
-    tickets: SupportTicket[]
-    total: number
-    page: number
-    page_size: number
-    total_pages: number
-}
+import { adminApi } from "@/lib/api"
+import type { AdminSupportTicket, AdminTicketListResponse } from "@/lib/api/admin"
 
 // Status config
 const statusConfig = {
     open: { label: "Open", color: "bg-blue-500/10 text-blue-500 border-blue-500/20" },
     in_progress: { label: "In Progress", color: "bg-amber-500/10 text-amber-500 border-amber-500/20" },
-    waiting: { label: "Waiting", color: "bg-purple-500/10 text-purple-500 border-purple-500/20" },
+    waiting_user: { label: "Waiting User", color: "bg-purple-500/10 text-purple-500 border-purple-500/20" },
     resolved: { label: "Resolved", color: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" },
     closed: { label: "Closed", color: "bg-gray-500/10 text-gray-500 border-gray-500/20" },
 }
@@ -76,7 +54,7 @@ const priorityConfig = {
 }
 
 export default function SupportTicketsPage() {
-    const [tickets, setTickets] = useState<SupportTicket[]>([])
+    const [tickets, setTickets] = useState<AdminSupportTicket[]>([])
     const [total, setTotal] = useState(0)
     const [page, setPage] = useState(1)
     const [pageSize] = useState(20)
@@ -94,38 +72,58 @@ export default function SupportTicketsPage() {
     const fetchTickets = useCallback(async () => {
         setIsLoading(true)
         try {
-            const token = localStorage.getItem("access_token")
-            const params = new URLSearchParams({
-                page: page.toString(),
-                page_size: pageSize.toString(),
-                ...(searchQuery && { search: searchQuery }),
-                ...(statusFilter !== "all" && { status: statusFilter }),
-                ...(priorityFilter !== "all" && { priority: priorityFilter }),
-            })
-            const response = await fetch(`/api/admin/support/tickets?${params}`, {
-                headers: { Authorization: `Bearer ${token}` },
-            })
-            if (!response.ok) throw new Error("Failed to fetch tickets")
-            const data: TicketsResponse = await response.json()
-            setTickets(data.tickets)
+            const params: {
+                page?: number
+                page_size?: number
+                status?: string
+                priority?: string
+                search?: string
+            } = {
+                page,
+                page_size: pageSize,
+            }
+
+            if (searchQuery) params.search = searchQuery
+            if (statusFilter !== "all") params.status = statusFilter
+            if (priorityFilter !== "all") params.priority = priorityFilter
+
+            const data: AdminTicketListResponse = await adminApi.getSupportTickets(params)
+
+            setTickets(data.items)
             setTotal(data.total)
             setTotalPages(data.total_pages)
-        } catch {
-            // Mock data
-            const mockTickets: SupportTicket[] = [
-                { id: "1", user_id: "u1", user_email: "john@example.com", user_name: "John Doe", subject: "Cannot upload video", status: "open", priority: "high", category: "Technical", message_count: 3, last_reply_at: new Date().toISOString(), created_at: new Date(Date.now() - 3600000).toISOString(), updated_at: new Date().toISOString() },
-                { id: "2", user_id: "u2", user_email: "jane@example.com", user_name: "Jane Smith", subject: "Billing question", status: "in_progress", priority: "medium", category: "Billing", message_count: 5, last_reply_at: new Date().toISOString(), created_at: new Date(Date.now() - 86400000).toISOString(), updated_at: new Date().toISOString() },
-                { id: "3", user_id: "u3", user_email: "bob@example.com", user_name: "Bob Wilson", subject: "Feature request", status: "waiting", priority: "low", category: "Feature", message_count: 2, last_reply_at: null, created_at: new Date(Date.now() - 172800000).toISOString(), updated_at: new Date().toISOString() },
-                { id: "4", user_id: "u4", user_email: "alice@example.com", user_name: "Alice Brown", subject: "Stream not working", status: "resolved", priority: "urgent", category: "Technical", message_count: 8, last_reply_at: new Date().toISOString(), created_at: new Date(Date.now() - 259200000).toISOString(), updated_at: new Date().toISOString() },
-            ]
-            setTickets(mockTickets)
-            setTotal(mockTickets.length)
+
+            // Fetch stats separately for all tickets (not filtered)
+            await fetchStats()
+        } catch (error) {
+            console.error("Failed to fetch tickets:", error)
+            setTickets([])
+            setTotal(0)
             setTotalPages(1)
-            setStats({ open: 12, in_progress: 5, resolved: 45, avg_response_time: 2.5 })
         } finally {
             setIsLoading(false)
         }
     }, [page, pageSize, searchQuery, statusFilter, priorityFilter])
+
+    const fetchStats = async () => {
+        try {
+            // Fetch counts for each status
+            const [openData, inProgressData, resolvedData] = await Promise.all([
+                adminApi.getSupportTickets({ status: "open", page: 1, page_size: 1 }),
+                adminApi.getSupportTickets({ status: "in_progress", page: 1, page_size: 1 }),
+                adminApi.getSupportTickets({ status: "resolved", page: 1, page_size: 1 }),
+            ])
+
+            setStats({
+                open: openData.total,
+                in_progress: inProgressData.total,
+                resolved: resolvedData.total,
+                avg_response_time: 2.5 // TODO: Calculate from actual data
+            })
+        } catch (error) {
+            console.error("Failed to fetch stats:", error)
+        }
+    }
 
     useEffect(() => {
         fetchTickets()
@@ -221,7 +219,7 @@ export default function SupportTicketsPage() {
                                             <SelectItem value="all">All Status</SelectItem>
                                             <SelectItem value="open">Open</SelectItem>
                                             <SelectItem value="in_progress">In Progress</SelectItem>
-                                            <SelectItem value="waiting">Waiting</SelectItem>
+                                            <SelectItem value="waiting_user">Waiting User</SelectItem>
                                             <SelectItem value="resolved">Resolved</SelectItem>
                                             <SelectItem value="closed">Closed</SelectItem>
                                         </SelectContent>

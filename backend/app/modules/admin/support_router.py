@@ -425,3 +425,66 @@ async def delete_announcement(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e),
         )
+
+
+
+# ==================== WebSocket Endpoint for Admin ====================
+
+from fastapi import WebSocket, WebSocketDisconnect
+from app.modules.support.websocket import support_ws_manager
+
+
+@router.websocket("/support/ws/{admin_id}")
+async def admin_websocket_endpoint(
+    websocket: WebSocket,
+    admin_id: str,
+):
+    """WebSocket endpoint for admin real-time support updates.
+    
+    Admins connect to receive real-time notifications about:
+    - New messages on tickets they're viewing
+    - Status changes on tickets
+    - New tickets created by users
+    
+    Message format:
+    {
+        "type": "new_message" | "status_change" | "new_ticket",
+        "ticket_id": "uuid",
+        "payload": {...},
+        "timestamp": "ISO datetime"
+    }
+    """
+    await support_ws_manager.connect_admin(websocket, admin_id)
+    
+    try:
+        while True:
+            # Receive messages from client (for subscriptions, ping, etc.)
+            data = await websocket.receive_json()
+            
+            if data.get("type") == "subscribe":
+                ticket_id = data.get("ticket_id")
+                if ticket_id:
+                    support_ws_manager.subscribe_to_ticket(ticket_id, admin_id, is_admin=True)
+                    await websocket.send_json({
+                        "type": "subscribed",
+                        "ticket_id": ticket_id,
+                    })
+            
+            elif data.get("type") == "unsubscribe":
+                ticket_id = data.get("ticket_id")
+                if ticket_id:
+                    support_ws_manager.unsubscribe_from_ticket(ticket_id, admin_id, is_admin=True)
+                    await websocket.send_json({
+                        "type": "unsubscribed",
+                        "ticket_id": ticket_id,
+                    })
+            
+            elif data.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
+    
+    except WebSocketDisconnect:
+        # Clean up subscriptions for this admin
+        for ticket_id in list(support_ws_manager.ticket_subscriptions.keys()):
+            support_ws_manager.unsubscribe_from_ticket(ticket_id, admin_id, is_admin=True)
+        support_ws_manager.disconnect_admin(websocket, admin_id)
+        print(f"[SupportWS] Admin {admin_id} disconnected and cleaned up")
