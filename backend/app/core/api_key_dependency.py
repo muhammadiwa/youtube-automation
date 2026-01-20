@@ -54,6 +54,11 @@ class AuthenticatedUser:
         self.api_key = api_key
     
     @property
+    def id(self) -> uuid.UUID:
+        """Get the user ID (for compatibility with existing code using current_user.id)."""
+        return self.user.id
+    
+    @property
     def user_id(self) -> uuid.UUID:
         """Get the user ID."""
         return self.user.id

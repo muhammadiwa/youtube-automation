@@ -149,13 +149,15 @@ export function Sidebar({ className }: SidebarProps) {
                     <p className="text-xs text-muted-foreground leading-relaxed">
                         Check our docs for guides and tutorials.
                     </p>
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        className="mt-3 w-full text-xs h-8 rounded-lg border-red-500/20 hover:bg-red-500/10 hover:text-red-500 transition-colors"
-                    >
-                        View Documentation
-                    </Button>
+                    <Link href="/dashboard/docs">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            className="mt-3 w-full text-xs h-8 rounded-lg border-red-500/20 hover:bg-red-500/10 hover:text-red-500 transition-colors"
+                        >
+                            View Documentation
+                        </Button>
+                    </Link>
                 </div>
             </div>
         </div>
@@ -227,13 +229,15 @@ export function MobileSidebar() {
                             <p className="text-xs text-muted-foreground leading-relaxed">
                                 Check our docs for guides.
                             </p>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                className="mt-3 w-full text-xs h-8 rounded-lg border-red-500/20 hover:bg-red-500/10 hover:text-red-500 transition-colors"
-                            >
-                                View Docs
-                            </Button>
+                            <Link href="/dashboard/docs" onClick={() => setOpen(false)}>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="mt-3 w-full text-xs h-8 rounded-lg border-red-500/20 hover:bg-red-500/10 hover:text-red-500 transition-colors"
+                                >
+                                    View Docs
+                                </Button>
+                            </Link>
                         </div>
                     </div>
                 </div>

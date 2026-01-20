@@ -134,11 +134,17 @@ const WEBHOOK_EVENTS = [
     { value: "account.connected", label: "Account Connected", category: "Accounts" },
     { value: "account.disconnected", label: "Account Disconnected", category: "Accounts" },
     { value: "account.token_expired", label: "Account Token Expired", category: "Accounts" },
+    { value: "comment.received", label: "Comment Received", category: "Comments" },
+    { value: "comment.replied", label: "Comment Replied", category: "Comments" },
+    { value: "analytics.updated", label: "Analytics Updated", category: "Analytics" },
+    { value: "revenue.updated", label: "Revenue Updated", category: "Analytics" },
+    { value: "job.completed", label: "Job Completed", category: "Jobs" },
+    { value: "job.failed", label: "Job Failed", category: "Jobs" },
     { value: "payment.completed", label: "Payment Completed", category: "Billing" },
     { value: "payment.failed", label: "Payment Failed", category: "Billing" },
 ]
 
-const EVENT_CATEGORIES = ["Videos", "Streams", "Accounts", "Billing"]
+const EVENT_CATEGORIES = ["Videos", "Streams", "Accounts", "Comments", "Analytics", "Jobs", "Billing"]
 
 export default function WebhooksPage() {
     const [webhooks, setWebhooks] = useState<WebhookType[]>([])
