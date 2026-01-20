@@ -63,10 +63,6 @@ router.include_router(billing_router, prefix="", tags=["admin-billing"])
 from app.modules.admin.promotional_router import router as promotional_router
 router.include_router(promotional_router, prefix="/promotions", tags=["admin-promotions"])
 
-# Include moderation router
-from app.modules.admin.moderation_router import router as moderation_router
-router.include_router(moderation_router, prefix="", tags=["admin-moderation"])
-
 # Include system router
 from app.modules.admin.system_router import router as system_router
 router.include_router(system_router, prefix="", tags=["admin-system"])
@@ -652,11 +648,6 @@ async def reset_user_password(
         )
 
 
-# ==================== User Warning (Requirements 6.5) ====================
-
-from app.modules.admin.schemas import UserWarnRequest, UserWarnResponse
-from app.modules.admin.moderation_service import AdminModerationService
-from app.modules.admin.moderation_service import UserNotFoundError as ModerationUserNotFoundError
 from app.modules.admin.promotional_schemas import TrialExtensionRequest, TrialExtensionResponse
 from app.modules.admin.promotional_service import (
     AdminPromotionalService,
@@ -692,45 +683,6 @@ async def extend_user_trial(
             user_agent=request.headers.get("user-agent"),
         )
     except TrialCodeNotFoundError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e),
-        )
-
-
-# ==================== User Warning (Requirements 6.5) ====================
-
-
-@router.post("/users/{user_id}/warn", response_model=UserWarnResponse)
-async def warn_user(
-    request: Request,
-    user_id: uuid.UUID,
-    data: UserWarnRequest,
-    admin: Admin = Depends(require_permission(AdminPermission.MANAGE_MODERATION)),
-    session: AsyncSession = Depends(get_session),
-):
-    """Issue a warning to a user.
-    
-    Requirements: 6.5 - Send warning notification and increment user warning count
-    
-    Property 11: User Warning Counter
-    - Increments user's warning_count by 1
-    - Creates a UserWarning record
-    
-    Requires MANAGE_MODERATION permission.
-    """
-    service = AdminModerationService(session)
-    
-    try:
-        return await service.warn_user(
-            user_id=user_id,
-            admin_id=admin.user_id,
-            reason=data.reason,
-            related_report_id=data.related_report_id,
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-        )
-    except ModerationUserNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e),
