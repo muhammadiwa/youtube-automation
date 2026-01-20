@@ -12,6 +12,9 @@ import {
     EyeOff,
     Clock,
     AlertTriangle,
+    Activity,
+    ChevronDown,
+    ChevronUp,
 } from "lucide-react"
 import { DashboardLayout } from "@/components/dashboard"
 import { Button } from "@/components/ui/button"
@@ -50,6 +53,12 @@ import {
     Alert,
     AlertDescription,
 } from "@/components/ui/alert"
+import {
+    Collapsible,
+    CollapsibleContent,
+    CollapsibleTrigger,
+} from "@/components/ui/collapsible"
+import { Progress } from "@/components/ui/progress"
 import { apiClient } from "@/lib/api/client"
 
 interface ApiKey {
@@ -57,10 +66,29 @@ interface ApiKey {
     name: string
     key_prefix: string
     scopes: string[]
+    rate_limit_per_minute: number
+    rate_limit_per_hour: number
+    rate_limit_per_day: number
+    total_requests: number
     last_used_at?: string
     expires_at?: string
     created_at: string
     is_active: boolean
+}
+
+interface RateLimitStatus {
+    api_key_id: string
+    minute_limit: number
+    minute_used: number
+    minute_remaining: number
+    hour_limit: number
+    hour_used: number
+    hour_remaining: number
+    day_limit: number
+    day_used: number
+    day_remaining: number
+    is_rate_limited: boolean
+    reset_at: string
 }
 
 interface CreateApiKeyResponse {
@@ -108,6 +136,11 @@ export default function ApiKeysPage() {
     const [newKey, setNewKey] = useState<CreateApiKeyResponse | null>(null)
     const [showKey, setShowKey] = useState(false)
 
+    // Rate limit state
+    const [expandedKey, setExpandedKey] = useState<string | null>(null)
+    const [rateLimits, setRateLimits] = useState<Record<string, RateLimitStatus>>({})
+    const [loadingRateLimits, setLoadingRateLimits] = useState<string | null>(null)
+
     useEffect(() => {
         loadApiKeys()
     }, [])
@@ -125,6 +158,54 @@ export default function ApiKeysPage() {
         } finally {
             setLoading(false)
         }
+    }
+
+    const loadRateLimitStatus = async (keyId: string) => {
+        try {
+            setLoadingRateLimits(keyId)
+            const userId = localStorage.getItem("user_id") || "current"
+            const response = await apiClient.get<RateLimitStatus>(`/integration/api-keys/${keyId}/rate-limit?user_id=${userId}`)
+            setRateLimits((prev) => ({ ...prev, [keyId]: response }))
+        } catch (error) {
+            console.error("Failed to load rate limit status:", error)
+        } finally {
+            setLoadingRateLimits(null)
+        }
+    }
+
+    const toggleExpandKey = (keyId: string) => {
+        if (expandedKey === keyId) {
+            setExpandedKey(null)
+        } else {
+            setExpandedKey(keyId)
+            if (!rateLimits[keyId]) {
+                loadRateLimitStatus(keyId)
+            }
+        }
+    }
+
+    const formatResetTime = (resetAt: string) => {
+        const reset = new Date(resetAt)
+        const now = new Date()
+        const diffMs = reset.getTime() - now.getTime()
+        const diffSecs = Math.max(0, Math.floor(diffMs / 1000))
+
+        if (diffSecs < 60) {
+            return `${diffSecs}s`
+        }
+        const diffMins = Math.floor(diffSecs / 60)
+        return `${diffMins}m ${diffSecs % 60}s`
+    }
+
+    const getUsagePercentage = (used: number, limit: number) => {
+        if (limit === 0) return 0
+        return Math.min(100, (used / limit) * 100)
+    }
+
+    const getUsageColor = (percentage: number) => {
+        if (percentage >= 90) return "bg-red-500"
+        if (percentage >= 70) return "bg-yellow-500"
+        return "bg-green-500"
     }
 
     const openCreateDialog = () => {
@@ -306,73 +387,192 @@ export default function ApiKeysPage() {
                         ) : (
                             <div className="space-y-4">
                                 {apiKeys.map((key) => (
-                                    <div
+                                    <Collapsible
                                         key={key.id}
-                                        className={`flex items-center gap-4 p-4 border rounded-lg ${isExpired(key.expires_at) || !key.is_active ? "opacity-60 bg-muted/30" : ""
-                                            }`}
+                                        open={expandedKey === key.id}
+                                        onOpenChange={() => key.is_active && toggleExpandKey(key.id)}
                                     >
-                                        <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
-                                            <Key className="h-6 w-6 text-primary" />
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2 flex-wrap">
-                                                <p className="font-semibold">{key.name}</p>
-                                                {!key.is_active && (
-                                                    <Badge variant="destructive" className="text-xs">
-                                                        Revoked
-                                                    </Badge>
-                                                )}
-                                                {isExpired(key.expires_at) && key.is_active && (
-                                                    <Badge variant="destructive" className="text-xs">
-                                                        Expired
-                                                    </Badge>
-                                                )}
+                                        <div className={`border rounded-lg ${isExpired(key.expires_at) || !key.is_active ? "opacity-60 bg-muted/30" : ""}`}>
+                                            <div className="flex items-center gap-4 p-4">
+                                                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
+                                                    <Key className="h-6 w-6 text-primary" />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <p className="font-semibold">{key.name}</p>
+                                                        {!key.is_active && (
+                                                            <Badge variant="destructive" className="text-xs">
+                                                                Revoked
+                                                            </Badge>
+                                                        )}
+                                                        {isExpired(key.expires_at) && key.is_active && (
+                                                            <Badge variant="destructive" className="text-xs">
+                                                                Expired
+                                                            </Badge>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex items-center gap-4 text-sm text-muted-foreground mt-1">
+                                                        <code className="bg-muted px-2 py-0.5 rounded text-xs">
+                                                            {key.key_prefix}...
+                                                        </code>
+                                                        <span className="flex items-center gap-1">
+                                                            <Clock className="h-3 w-3" />
+                                                            {key.last_used_at
+                                                                ? `Last used ${formatDate(key.last_used_at)}`
+                                                                : "Never used"}
+                                                        </span>
+                                                        {key.total_requests > 0 && (
+                                                            <span className="flex items-center gap-1">
+                                                                <Activity className="h-3 w-3" />
+                                                                {key.total_requests.toLocaleString()} requests
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-1 mt-2">
+                                                        {key.scopes.slice(0, 4).map((scope) => (
+                                                            <Badge key={scope} variant="secondary" className="text-xs">
+                                                                {scope}
+                                                            </Badge>
+                                                        ))}
+                                                        {key.scopes.length > 4 && (
+                                                            <Badge variant="secondary" className="text-xs">
+                                                                +{key.scopes.length - 4} more
+                                                            </Badge>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    {key.expires_at && key.is_active && !isExpired(key.expires_at) && (
+                                                        <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                                            Expires {formatDate(key.expires_at)}
+                                                        </span>
+                                                    )}
+                                                    {key.is_active && (
+                                                        <>
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation()
+                                                                    setKeyToDelete(key)
+                                                                    setDeleteDialogOpen(true)
+                                                                }}
+                                                            >
+                                                                <Trash2 className="h-4 w-4 mr-1" />
+                                                                Revoke
+                                                            </Button>
+                                                            <CollapsibleTrigger asChild>
+                                                                <Button variant="ghost" size="icon">
+                                                                    {expandedKey === key.id ? (
+                                                                        <ChevronUp className="h-4 w-4" />
+                                                                    ) : (
+                                                                        <ChevronDown className="h-4 w-4" />
+                                                                    )}
+                                                                </Button>
+                                                            </CollapsibleTrigger>
+                                                        </>
+                                                    )}
+                                                </div>
                                             </div>
-                                            <div className="flex items-center gap-4 text-sm text-muted-foreground mt-1">
-                                                <code className="bg-muted px-2 py-0.5 rounded text-xs">
-                                                    {key.key_prefix}...
-                                                </code>
-                                                <span className="flex items-center gap-1">
-                                                    <Clock className="h-3 w-3" />
-                                                    {key.last_used_at
-                                                        ? `Last used ${formatDate(key.last_used_at)}`
-                                                        : "Never used"}
-                                                </span>
-                                            </div>
-                                            <div className="flex flex-wrap gap-1 mt-2">
-                                                {key.scopes.slice(0, 4).map((scope) => (
-                                                    <Badge key={scope} variant="secondary" className="text-xs">
-                                                        {scope}
-                                                    </Badge>
-                                                ))}
-                                                {key.scopes.length > 4 && (
-                                                    <Badge variant="secondary" className="text-xs">
-                                                        +{key.scopes.length - 4} more
-                                                    </Badge>
-                                                )}
-                                            </div>
+                                            <CollapsibleContent>
+                                                <div className="border-t p-4 bg-muted/30">
+                                                    <div className="flex items-center justify-between mb-3">
+                                                        <h4 className="font-medium text-sm flex items-center gap-2">
+                                                            <Activity className="h-4 w-4" />
+                                                            Rate Limit Usage
+                                                        </h4>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            onClick={() => loadRateLimitStatus(key.id)}
+                                                            disabled={loadingRateLimits === key.id}
+                                                        >
+                                                            {loadingRateLimits === key.id ? (
+                                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                                            ) : (
+                                                                "Refresh"
+                                                            )}
+                                                        </Button>
+                                                    </div>
+                                                    {loadingRateLimits === key.id ? (
+                                                        <div className="space-y-3">
+                                                            {[...Array(3)].map((_, i) => (
+                                                                <Skeleton key={i} className="h-8 w-full" />
+                                                            ))}
+                                                        </div>
+                                                    ) : rateLimits[key.id] ? (
+                                                        <div className="space-y-4">
+                                                            {rateLimits[key.id].is_rate_limited && (
+                                                                <Alert variant="destructive" className="mb-4">
+                                                                    <AlertTriangle className="h-4 w-4" />
+                                                                    <AlertDescription>
+                                                                        Rate limit exceeded. Resets in {formatResetTime(rateLimits[key.id].reset_at)}
+                                                                    </AlertDescription>
+                                                                </Alert>
+                                                            )}
+                                                            <div className="grid gap-4 md:grid-cols-3">
+                                                                {/* Per Minute */}
+                                                                <div className="space-y-2">
+                                                                    <div className="flex justify-between text-sm">
+                                                                        <span className="text-muted-foreground">Per Minute</span>
+                                                                        <span className="font-medium">
+                                                                            {rateLimits[key.id].minute_used} / {rateLimits[key.id].minute_limit}
+                                                                        </span>
+                                                                    </div>
+                                                                    <Progress
+                                                                        value={getUsagePercentage(rateLimits[key.id].minute_used, rateLimits[key.id].minute_limit)}
+                                                                        className="h-2"
+                                                                    />
+                                                                    <p className="text-xs text-muted-foreground">
+                                                                        {rateLimits[key.id].minute_remaining} remaining
+                                                                    </p>
+                                                                </div>
+                                                                {/* Per Hour */}
+                                                                <div className="space-y-2">
+                                                                    <div className="flex justify-between text-sm">
+                                                                        <span className="text-muted-foreground">Per Hour</span>
+                                                                        <span className="font-medium">
+                                                                            {rateLimits[key.id].hour_used} / {rateLimits[key.id].hour_limit}
+                                                                        </span>
+                                                                    </div>
+                                                                    <Progress
+                                                                        value={getUsagePercentage(rateLimits[key.id].hour_used, rateLimits[key.id].hour_limit)}
+                                                                        className="h-2"
+                                                                    />
+                                                                    <p className="text-xs text-muted-foreground">
+                                                                        {rateLimits[key.id].hour_remaining} remaining
+                                                                    </p>
+                                                                </div>
+                                                                {/* Per Day */}
+                                                                <div className="space-y-2">
+                                                                    <div className="flex justify-between text-sm">
+                                                                        <span className="text-muted-foreground">Per Day</span>
+                                                                        <span className="font-medium">
+                                                                            {rateLimits[key.id].day_used} / {rateLimits[key.id].day_limit}
+                                                                        </span>
+                                                                    </div>
+                                                                    <Progress
+                                                                        value={getUsagePercentage(rateLimits[key.id].day_used, rateLimits[key.id].day_limit)}
+                                                                        className="h-2"
+                                                                    />
+                                                                    <p className="text-xs text-muted-foreground">
+                                                                        {rateLimits[key.id].day_remaining} remaining
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                            <div className="text-xs text-muted-foreground mt-2">
+                                                                Next reset: {new Date(rateLimits[key.id].reset_at).toLocaleTimeString()}
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <p className="text-sm text-muted-foreground text-center py-4">
+                                                            Click refresh to load rate limit status
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </CollapsibleContent>
                                         </div>
-                                        <div className="flex items-center gap-3">
-                                            {key.expires_at && key.is_active && !isExpired(key.expires_at) && (
-                                                <span className="text-xs text-muted-foreground whitespace-nowrap">
-                                                    Expires {formatDate(key.expires_at)}
-                                                </span>
-                                            )}
-                                            {key.is_active && (
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => {
-                                                        setKeyToDelete(key)
-                                                        setDeleteDialogOpen(true)
-                                                    }}
-                                                >
-                                                    <Trash2 className="h-4 w-4 mr-1" />
-                                                    Revoke
-                                                </Button>
-                                            )}
-                                        </div>
-                                    </div>
+                                    </Collapsible>
                                 ))}
                             </div>
                         )}
