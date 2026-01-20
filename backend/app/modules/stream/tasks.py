@@ -5,6 +5,7 @@ Requirements: 6.1, 6.4, 6.5
 """
 
 import asyncio
+import logging
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional
@@ -30,6 +31,8 @@ from app.modules.stream.repository import (
     StreamHealthLogRepository,
 )
 from app.modules.account.repository import YouTubeAccountRepository
+
+logger = logging.getLogger(__name__)
 
 
 def _run_async(coro):
@@ -836,6 +839,41 @@ async def _collect_health_metrics_async(session_id: str) -> dict:
             stream_session,
             connection_status=ConnectionStatus(connection_status),
         )
+        
+        # Check if health status changed and trigger webhook
+        previous_status = previous_log.connection_status if previous_log else None
+        if previous_status and previous_status != connection_status:
+            try:
+                from app.modules.integration.webhook_trigger import trigger_stream_health_changed
+                from app.modules.stream.repository import LiveEventRepository
+                from app.modules.account.repository import YouTubeAccountRepository
+                
+                event_repo = LiveEventRepository(session)
+                account_repo = YouTubeAccountRepository(session)
+                
+                event = await event_repo.get_by_id(stream_session.live_event_id)
+                if event:
+                    account = await account_repo.get_by_id(event.account_id)
+                    if account:
+                        await trigger_stream_health_changed(
+                            session=session,
+                            user_id=account.user_id,
+                            stream_id=event.id,
+                            stream_data={
+                                "title": event.title,
+                                "youtube_broadcast_id": event.youtube_broadcast_id,
+                                "previous_status": previous_status,
+                                "current_status": connection_status,
+                                "bitrate": bitrate,
+                                "frame_rate": frame_rate,
+                                "dropped_frames_delta": dropped_frames_delta,
+                                "latency_ms": latency_ms,
+                            },
+                            account_id=event.account_id,
+                        )
+                        logger.info(f"Triggered stream.health_changed webhook for session {session_id}")
+            except Exception as e:
+                logger.error(f"Failed to trigger stream.health_changed webhook: {e}")
         
         await session.commit()
         

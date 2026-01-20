@@ -14,6 +14,9 @@ import {
     ChevronDown,
     ChevronUp,
     RefreshCw,
+    Copy,
+    Eye,
+    EyeOff,
 } from "lucide-react"
 import { DashboardLayout } from "@/components/dashboard"
 import { Button } from "@/components/ui/button"
@@ -65,6 +68,16 @@ interface WebhookType {
     total_deliveries: number
     successful_deliveries: number
     failed_deliveries: number
+    created_at: string
+}
+
+interface WebhookCreateResponse {
+    id: string
+    name: string
+    url: string
+    events: string[]
+    secret: string
+    is_active: boolean
     created_at: string
 }
 
@@ -124,6 +137,12 @@ export default function WebhooksPage() {
     const [expandedWebhook, setExpandedWebhook] = useState<string | null>(null)
     const [deliveries, setDeliveries] = useState<Record<string, WebhookDelivery[]>>({})
     const [loadingDeliveries, setLoadingDeliveries] = useState<string | null>(null)
+
+    // New webhook secret dialog
+    const [newWebhookDialogOpen, setNewWebhookDialogOpen] = useState(false)
+    const [newWebhook, setNewWebhook] = useState<WebhookCreateResponse | null>(null)
+    const [showSecret, setShowSecret] = useState(false)
+    const [secretCopied, setSecretCopied] = useState(false)
 
     useEffect(() => {
         loadWebhooks()

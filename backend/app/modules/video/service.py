@@ -305,6 +305,35 @@ class VideoService:
             change_reason="Manual metadata update",
         )
 
+        # Trigger webhook for video metadata updated
+        try:
+            from app.modules.integration.webhook_trigger import trigger_video_metadata_updated
+            from app.modules.account.repository import YouTubeAccountRepository
+            
+            account_repo = YouTubeAccountRepository(self.session)
+            account = await account_repo.get_by_id(video.account_id)
+            
+            if account:
+                await trigger_video_metadata_updated(
+                    session=self.session,
+                    user_id=account.user_id,
+                    video_id=video_id,
+                    video_data={
+                        "title": video.title,
+                        "description": video.description,
+                        "tags": video.tags,
+                        "category_id": video.category_id,
+                        "visibility": video.visibility,
+                        "youtube_id": video.youtube_id,
+                    },
+                    account_id=video.account_id,
+                )
+                import logging
+                logging.info(f"Triggered video.metadata_updated webhook for video {video_id}")
+        except Exception as e:
+            import logging
+            logging.error(f"Failed to trigger video.metadata_updated webhook: {e}")
+
         return video
 
     async def bulk_update_metadata(
@@ -478,6 +507,11 @@ class VideoService:
         if video.is_deleted():
             raise VideoServiceError("Video already deleted")
         
+        # Get account info for webhook before deletion
+        account_id = video.account_id
+        video_title = video.title
+        video_youtube_id = video.youtube_id
+        
         storage = get_storage()
         
         # Hard delete video file from storage
@@ -519,6 +553,31 @@ class VideoService:
         # Soft delete the video record (preserves VideoUsageLog for billing)
         video.soft_delete()
         await self.session.flush()
+        
+        # Trigger webhook for video deleted
+        try:
+            from app.modules.integration.webhook_trigger import trigger_video_deleted
+            from app.modules.account.repository import YouTubeAccountRepository
+            
+            account_repo = YouTubeAccountRepository(self.session)
+            account = await account_repo.get_by_id(account_id)
+            
+            if account:
+                await trigger_video_deleted(
+                    session=self.session,
+                    user_id=account.user_id,
+                    video_id=video_id,
+                    video_data={
+                        "title": video_title,
+                        "youtube_id": video_youtube_id,
+                    },
+                    account_id=account_id,
+                )
+                import logging
+                logging.info(f"Triggered video.deleted webhook for video {video_id}")
+        except Exception as e:
+            import logging
+            logging.error(f"Failed to trigger video.deleted webhook: {e}")
 
     # Template methods
     async def create_template(

@@ -388,6 +388,33 @@ def upload_video_task(self: VideoUploadTask, video_id: str) -> dict:
 
             await _send_upload_notification(session, video, success=True)
 
+            # Trigger webhook for video uploaded
+            try:
+                from app.modules.integration.webhook_trigger import trigger_video_uploaded
+                from app.modules.account.repository import YouTubeAccountRepository
+                
+                account_repo = YouTubeAccountRepository(session)
+                account = await account_repo.get_by_id(video.account_id)
+                
+                if account:
+                    await trigger_video_uploaded(
+                        session=session,
+                        user_id=account.user_id,
+                        video_id=video.id,
+                        video_data={
+                            "title": video.title,
+                            "description": video.description,
+                            "youtube_id": video.youtube_id,
+                            "status": video.status,
+                            "visibility": video.visibility,
+                        },
+                        account_id=video.account_id,
+                    )
+                    await session.commit()
+                    logger.info(f"Triggered video.uploaded webhook for video {video_id}")
+            except Exception as e:
+                logger.error(f"Failed to trigger video.uploaded webhook: {e}")
+
             return {
                 "status": "success",
                 "video_id": str(video.id),
@@ -548,6 +575,34 @@ def check_video_processing_status(self, video_id: str) -> dict:
                             )
                     except Exception as e:
                         logger.error(f"Failed to send publish notification: {e}")
+
+                    # Trigger webhook for video published
+                    try:
+                        from app.modules.integration.webhook_trigger import trigger_video_published
+                        from app.modules.account.repository import YouTubeAccountRepository
+
+                        account_repo = YouTubeAccountRepository(session)
+                        account = await account_repo.get_by_id(video.account_id)
+
+                        if account:
+                            await trigger_video_published(
+                                session=session,
+                                user_id=account.user_id,
+                                video_id=video.id,
+                                video_data={
+                                    "title": video.title,
+                                    "description": video.description,
+                                    "youtube_id": video.youtube_id,
+                                    "youtube_url": f"https://youtube.com/watch?v={video.youtube_id}",
+                                    "status": video.status,
+                                    "visibility": video.visibility,
+                                },
+                                account_id=video.account_id,
+                            )
+                            await session.commit()
+                            logger.info(f"Triggered video.published webhook for video {video_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to trigger video.published webhook: {e}")
 
                     return {"status": "success", "youtube_status": "processed"}
 

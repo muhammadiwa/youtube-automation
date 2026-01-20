@@ -223,6 +223,24 @@ async def check_expired_tokens(session: AsyncSession) -> int:
                 account_id=str(account.id),
             )
             
+            # Trigger account.token_expired webhook event
+            # Requirements: 3.7 (token expired notification)
+            try:
+                from app.modules.integration.webhook_trigger import trigger_account_token_expired
+                await trigger_account_token_expired(
+                    session=session,
+                    user_id=account.user_id,
+                    account_id=account.id,
+                    account_data={
+                        "channel_id": account.channel_id,
+                        "channel_title": account.channel_title,
+                        "token_expires_at": account.token_expires_at.isoformat() if account.token_expires_at else None,
+                    },
+                )
+                logger.info(f"Triggered account.token_expired webhook for account {account.id}")
+            except Exception as webhook_error:
+                logger.error(f"Failed to trigger account.token_expired webhook: {webhook_error}")
+            
             notifications_sent += 1
             logger.info(f"Sent token expired notification to user {account.user_id}")
         except Exception as e:

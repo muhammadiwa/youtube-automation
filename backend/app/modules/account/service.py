@@ -4,6 +4,7 @@ Implements OAuth2 flow, token management, and account operations.
 Requirements: 2.1, 2.2, 2.3, 2.5
 """
 
+import logging
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional
@@ -21,6 +22,8 @@ from app.modules.account.schemas import (
     QuotaUsageResponse,
     YouTubeAccountResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class AccountExistsError(Exception):
@@ -138,6 +141,30 @@ class YouTubeAccountService:
         await self.session.commit()
         # Refresh account to get updated data after commit
         await self.session.refresh(account)
+        
+        # Trigger account.connected webhook event
+        # Requirements: 3.6 - Trigger account.connected event
+        try:
+            from app.modules.integration.webhook_trigger import trigger_account_connected
+            await trigger_account_connected(
+                session=self.session,
+                user_id=user_id,
+                account_id=account.id,
+                account_data={
+                    "channel_id": account.channel_id,
+                    "channel_title": account.channel_title,
+                    "thumbnail_url": account.thumbnail_url,
+                    "subscriber_count": account.subscriber_count,
+                    "video_count": account.video_count,
+                    "is_monetized": account.is_monetized,
+                    "has_live_streaming_enabled": account.has_live_streaming_enabled,
+                },
+            )
+            logger.info(f"Triggered account.connected webhook for account {account.id}")
+        except Exception as e:
+            # Don't fail the account connection if webhook fails
+            logger.error(f"Failed to trigger account.connected webhook: {e}")
+        
         return account
 
     async def get_account(self, account_id: uuid.UUID) -> Optional[YouTubeAccount]:
@@ -368,8 +395,33 @@ class YouTubeAccountService:
         if not account:
             raise AccountNotFoundError(f"Account {account_id} not found")
 
+        # Store account data for webhook before deletion
+        user_id = account.user_id
+        account_data = {
+            "channel_id": account.channel_id,
+            "channel_title": account.channel_title,
+            "thumbnail_url": account.thumbnail_url,
+            "subscriber_count": account.subscriber_count,
+            "video_count": account.video_count,
+        }
+
         await self.repository.delete(account)
         await self.session.commit()
+        
+        # Trigger account.disconnected webhook event
+        # Requirements: 3.7 - Trigger account.disconnected event
+        try:
+            from app.modules.integration.webhook_trigger import trigger_account_disconnected
+            await trigger_account_disconnected(
+                session=self.session,
+                user_id=user_id,
+                account_id=account_id,
+                account_data=account_data,
+            )
+            logger.info(f"Triggered account.disconnected webhook for account {account_id}")
+        except Exception as e:
+            # Don't fail the disconnect if webhook fails
+            logger.error(f"Failed to trigger account.disconnected webhook: {e}")
 
     async def refresh_account_token(
         self,
@@ -520,6 +572,26 @@ class YouTubeAccountService:
                 AccountStatus.EXPIRED,
                 error=str(e),
             )
+            
+            # Trigger account.token_expired webhook event
+            # Requirements: 3.7 (token expired notification)
+            try:
+                from app.modules.integration.webhook_trigger import trigger_account_token_expired
+                await trigger_account_token_expired(
+                    session=self.session,
+                    user_id=account.user_id,
+                    account_id=account.id,
+                    account_data={
+                        "channel_id": account.channel_id,
+                        "channel_title": account.channel_title,
+                        "error": str(e),
+                    },
+                )
+                logger.info(f"Triggered account.token_expired webhook for account {account.id}")
+            except Exception as webhook_error:
+                # Don't fail if webhook fails
+                logger.error(f"Failed to trigger account.token_expired webhook: {webhook_error}")
+            
             raise
 
     async def get_valid_access_token(self, account: YouTubeAccount) -> str:

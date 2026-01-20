@@ -790,6 +790,30 @@ class StreamService:
         except Exception as e:
             logger.error(f"Failed to send stream started notification: {e}")
         
+        # Trigger webhook for stream started
+        try:
+            from app.modules.integration.webhook_trigger import trigger_stream_started
+            account = await self.account_repository.get_by_id(event.account_id)
+            if account:
+                await trigger_stream_started(
+                    session=self.session,
+                    user_id=account.user_id,
+                    stream_id=event.id,
+                    stream_data={
+                        "title": event.title,
+                        "description": event.description,
+                        "youtube_broadcast_id": event.youtube_broadcast_id,
+                        "youtube_url": f"https://youtube.com/watch?v={event.youtube_broadcast_id}" if event.youtube_broadcast_id else None,
+                        "status": event.status,
+                        "privacy_status": event.privacy_status,
+                    },
+                    account_id=event.account_id,
+                )
+                await self.session.commit()
+                logger.info(f"Triggered stream.started webhook for event {event_id}")
+        except Exception as e:
+            logger.error(f"Failed to trigger stream.started webhook: {e}")
+        
         return session
 
     async def stop_stream(
@@ -855,6 +879,30 @@ class StreamService:
                 )
         except Exception as e:
             logger.error(f"Failed to send stream ended notification: {e}")
+        
+        # Trigger webhook for stream ended
+        try:
+            from app.modules.integration.webhook_trigger import trigger_stream_ended
+            account = await self.account_repository.get_by_id(event.account_id)
+            if account:
+                await trigger_stream_ended(
+                    session=self.session,
+                    user_id=account.user_id,
+                    stream_id=event.id,
+                    stream_data={
+                        "title": event.title,
+                        "youtube_broadcast_id": event.youtube_broadcast_id,
+                        "status": event.status,
+                        "end_reason": reason,
+                        "duration_minutes": duration_minutes,
+                        "peak_viewers": active_session.peak_viewers if active_session and hasattr(active_session, 'peak_viewers') else None,
+                    },
+                    account_id=event.account_id,
+                )
+                await self.session.commit()
+                logger.info(f"Triggered stream.ended webhook for event {event_id}")
+        except Exception as e:
+            logger.error(f"Failed to trigger stream.ended webhook: {e}")
 
     async def handle_disconnection(
         self,

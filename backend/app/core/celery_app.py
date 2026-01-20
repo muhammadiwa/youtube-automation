@@ -58,4 +58,5 @@ celery_app.autodiscover_tasks([
     "app.modules.transcoding",
     "app.modules.backup",
     "app.modules.analytics",
+    "app.modules.integration",
 ])
