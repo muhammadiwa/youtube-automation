@@ -1,15 +1,23 @@
 """Rate limiting middleware and utilities for API key authentication.
 
-Requirements: 29.2 - Per-key rate limits, reject exceeded requests
+Requirements: 2.1, 2.2, 2.3, 2.4, 2.5
+- 2.1: Check usage against minute/hour/day limits
+- 2.2: Return 429 Too Many Requests with Retry-After header when exceeded
+- 2.3: Track usage per time window (minute, hour, day) separately
+- 2.4: Increment usage counter for all applicable windows
+- 2.5: Include rate limit status in response headers (X-RateLimit-Remaining, X-RateLimit-Reset)
 """
 
 import uuid
-from typing import Optional, Callable
+from datetime import datetime
+from typing import Optional, Callable, Dict
 from functools import wraps
 
-from fastapi import Request, HTTPException, status, Depends
+from fastapi import Request, HTTPException, status, Depends, Response
 from fastapi.security import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
 from app.core.database import get_session
 from app.modules.integration.service import APIKeyService
@@ -23,27 +31,43 @@ api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 class RateLimitExceeded(HTTPException):
     """Exception raised when rate limit is exceeded.
     
-    Requirements: 29.2 - Reject exceeded requests
+    Requirements: 2.2 - Return 429 Too Many Requests with Retry-After header
     """
     
-    def __init__(self, limit_type: str, retry_after: int):
+    def __init__(self, limit_type: str, retry_after: int, rate_limit_headers: Optional[Dict[str, str]] = None):
+        """Initialize rate limit exceeded exception.
+        
+        Args:
+            limit_type: The type of limit exceeded (minute, hour, day)
+            retry_after: Seconds until the rate limit resets
+            rate_limit_headers: Optional rate limit headers to include
+        """
+        headers = {"Retry-After": str(retry_after)}
+        if rate_limit_headers:
+            headers.update(rate_limit_headers)
+        
         super().__init__(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail={
-                "error": "rate_limit_exceeded",
-                "message": f"Rate limit exceeded for {limit_type}",
+                "error": "RATE_LIMIT_EXCEEDED",
+                "message": f"Rate limit exceeded for {limit_type} window",
                 "retry_after_seconds": retry_after,
                 "limit_type": limit_type,
             },
-            headers={"Retry-After": str(retry_after)},
+            headers=headers,
         )
 
 
 class APIKeyAuth:
     """API Key authentication and rate limiting dependency.
     
-    Requirements: 29.1 - Authenticate API requests
-    Requirements: 29.2 - Rate limiting per key
+    Requirements: 
+    - 1.1: Authenticate API requests
+    - 2.1: Check usage against minute/hour/day limits
+    - 2.2: Return 429 with Retry-After header when exceeded
+    - 2.3: Track usage per time window separately
+    - 2.4: Increment usage counter for all applicable windows
+    - 2.5: Include rate limit status in response headers
     """
     
     def __init__(
@@ -90,15 +114,21 @@ class APIKeyAuth:
                 headers={"WWW-Authenticate": "ApiKey"},
             )
         
-        # Check rate limit
+        # Check rate limit (Requirement 2.1)
         if self.check_rate_limit:
             is_allowed, limit_type, retry_after = await service.check_rate_limit(key_obj)
             
             if not is_allowed:
-                raise RateLimitExceeded(limit_type, retry_after)
+                # Get rate limit headers for the response (Requirement 2.5)
+                rate_limit_headers = await get_rate_limit_headers(key_obj, session)
+                raise RateLimitExceeded(limit_type, retry_after, rate_limit_headers)
         
-        # Record the request
+        # Record the request (Requirement 2.4)
         await service.record_request(key_obj)
+        
+        # Store rate limit info in request state for response headers
+        request.state.api_key = key_obj
+        request.state.api_key_session = session
         
         return key_obj
 
@@ -109,8 +139,9 @@ def require_api_key(
 ) -> Callable:
     """Decorator to require API key authentication on an endpoint.
     
-    Requirements: 29.1 - Scoped permissions
-    Requirements: 29.2 - Rate limiting
+    Requirements: 
+    - 1.4: Scoped permissions
+    - 2.1-2.5: Rate limiting
     
     Usage:
         @router.get("/protected")
@@ -138,20 +169,85 @@ require_full_access = APIKeyAuth(required_scope="*")
 async def get_rate_limit_headers(
     api_key: APIKey,
     session: AsyncSession,
-) -> dict[str, str]:
+) -> Dict[str, str]:
     """Get rate limit headers to include in response.
     
-    Requirements: 29.2 - Rate limit information
+    Requirements: 2.5 - Include rate limit status in response headers
+    (X-RateLimit-Remaining, X-RateLimit-Reset)
+    
+    Args:
+        api_key: The validated API key
+        session: Database session
+        
+    Returns:
+        Dictionary of rate limit headers
     """
     service = APIKeyService(session)
-    status = await service.get_rate_limit_status(api_key)
+    rate_status = await service.get_rate_limit_status(api_key)
     
     return {
-        "X-RateLimit-Limit-Minute": str(status.minute_limit),
-        "X-RateLimit-Remaining-Minute": str(status.minute_remaining),
-        "X-RateLimit-Limit-Hour": str(status.hour_limit),
-        "X-RateLimit-Remaining-Hour": str(status.hour_remaining),
-        "X-RateLimit-Limit-Day": str(status.day_limit),
-        "X-RateLimit-Remaining-Day": str(status.day_remaining),
-        "X-RateLimit-Reset": status.reset_at.isoformat(),
+        "X-RateLimit-Limit-Minute": str(rate_status.minute_limit),
+        "X-RateLimit-Remaining-Minute": str(rate_status.minute_remaining),
+        "X-RateLimit-Limit-Hour": str(rate_status.hour_limit),
+        "X-RateLimit-Remaining-Hour": str(rate_status.hour_remaining),
+        "X-RateLimit-Limit-Day": str(rate_status.day_limit),
+        "X-RateLimit-Remaining-Day": str(rate_status.day_remaining),
+        "X-RateLimit-Reset": rate_status.reset_at.isoformat(),
     }
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """Middleware to add rate limit headers to all API key authenticated responses.
+    
+    Requirements: 2.5 - Include rate limit status in response headers
+    
+    This middleware checks if the request was authenticated with an API key
+    and adds rate limit headers to the response.
+    """
+    
+    async def dispatch(self, request: Request, call_next) -> Response:
+        """Process request and add rate limit headers to response.
+        
+        Args:
+            request: The incoming request
+            call_next: The next middleware/handler
+            
+        Returns:
+            Response with rate limit headers if applicable
+        """
+        response = await call_next(request)
+        
+        # Check if request was authenticated with API key
+        if hasattr(request.state, 'api_key') and hasattr(request.state, 'api_key_session'):
+            try:
+                headers = await get_rate_limit_headers(
+                    request.state.api_key,
+                    request.state.api_key_session
+                )
+                for key, value in headers.items():
+                    response.headers[key] = value
+            except Exception:
+                # Don't fail the request if we can't add headers
+                pass
+        
+        return response
+
+
+def add_rate_limit_headers_to_response(
+    response: Response,
+    rate_limit_headers: Dict[str, str]
+) -> Response:
+    """Add rate limit headers to a response object.
+    
+    Requirements: 2.5 - Include rate limit status in response headers
+    
+    Args:
+        response: The response object to modify
+        rate_limit_headers: Dictionary of rate limit headers
+        
+    Returns:
+        The modified response with headers added
+    """
+    for key, value in rate_limit_headers.items():
+        response.headers[key] = value
+    return response

@@ -75,13 +75,16 @@ interface CreateApiKeyResponse {
 
 const SCOPES = [
     { value: "read:accounts", label: "Read Accounts", description: "View connected YouTube accounts" },
-    { value: "write:accounts", label: "Write Accounts", description: "Manage YouTube account connections" },
     { value: "read:videos", label: "Read Videos", description: "View video library and metadata" },
     { value: "write:videos", label: "Write Videos", description: "Upload and manage videos" },
     { value: "read:streams", label: "Read Streams", description: "View live stream information" },
     { value: "write:streams", label: "Write Streams", description: "Create and manage live streams" },
     { value: "read:analytics", label: "Read Analytics", description: "Access analytics data" },
-    { value: "read:billing", label: "Read Billing", description: "View billing and usage information" },
+    { value: "read:comments", label: "Read Comments", description: "View comments" },
+    { value: "write:comments", label: "Write Comments", description: "Post and manage comments" },
+    { value: "admin:accounts", label: "Admin Accounts", description: "Full account management" },
+    { value: "admin:webhooks", label: "Admin Webhooks", description: "Manage webhooks" },
+    { value: "*", label: "Full Access", description: "Access to all resources" },
 ]
 
 export default function ApiKeysPage() {

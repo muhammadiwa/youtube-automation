@@ -76,6 +76,10 @@ class WebhookEventType(str, Enum):
     # Job events
     JOB_COMPLETED = "job.completed"
     JOB_FAILED = "job.failed"
+    
+    # Payment events
+    PAYMENT_COMPLETED = "payment.completed"
+    PAYMENT_FAILED = "payment.failed"
 
 
 class WebhookDeliveryStatus(str, Enum):
