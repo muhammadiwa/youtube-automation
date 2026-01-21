@@ -122,9 +122,9 @@ class SystemMonitoringService:
         start_time = time.perf_counter()
         
         try:
-            from app.core.redis import get_redis_client
+            from app.core.redis import get_redis
             
-            redis = await get_redis_client()
+            redis = await get_redis()
             await redis.ping()
             
             latency = (time.perf_counter() - start_time) * 1000
@@ -309,9 +309,9 @@ class SystemMonitoringService:
         queues = []
         
         try:
-            from app.core.redis import get_redis_client
+            from app.core.redis import get_redis
             
-            redis = await get_redis_client()
+            redis = await get_redis()
             
             # Get default queue metrics
             queue_names = ["celery", "high_priority", "low_priority"]

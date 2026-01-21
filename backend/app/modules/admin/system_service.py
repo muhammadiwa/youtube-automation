@@ -6,9 +6,11 @@ Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 12.2
 
 import uuid
 import time
+import asyncio
 import logging
 from datetime import datetime
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor
 
 from app.core.config import settings
 from app.core.alerting import alert_manager, AlertSeverity, AlertThreshold
@@ -28,6 +30,9 @@ from app.modules.admin.system_schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Thread pool for blocking Celery operations
+_executor = ThreadPoolExecutor(max_workers=2)
 
 # Track application start time for uptime calculation
 _app_start_time = time.time()
@@ -143,8 +148,22 @@ class AdminSystemService:
             from app.core.database import engine
             from sqlalchemy import text
             
-            async with engine.connect() as conn:
-                await conn.execute(text("SELECT 1"))
+            # Add timeout for database check
+            try:
+                async with asyncio.timeout(5.0):
+                    async with engine.connect() as conn:
+                        await conn.execute(text("SELECT 1"))
+            except asyncio.TimeoutError:
+                latency = (time.perf_counter() - start_time) * 1000
+                return AdminComponentHealth(
+                    name="database",
+                    status=ComponentStatus.DEGRADED,
+                    message="Database query timed out",
+                    latency_ms=round(latency, 2),
+                    last_check=to_naive_utc(utcnow()),
+                    details={"type": "postgresql"},
+                    suggested_action="Database may be overloaded or connection pool exhausted",
+                )
             
             latency = (time.perf_counter() - start_time) * 1000
             
@@ -189,15 +208,31 @@ class AdminSystemService:
         start_time = time.perf_counter()
         
         try:
-            from app.core.redis import get_redis_client
+            from app.core.redis import get_redis
             
-            redis = await get_redis_client()
-            await redis.ping()
+            redis = await get_redis()
+            
+            # Add timeout for Redis operations
+            try:
+                await asyncio.wait_for(redis.ping(), timeout=3.0)
+            except asyncio.TimeoutError:
+                latency = (time.perf_counter() - start_time) * 1000
+                return AdminComponentHealth(
+                    name="redis",
+                    status=ComponentStatus.DEGRADED,
+                    message="Redis ping timed out",
+                    latency_ms=round(latency, 2),
+                    last_check=to_naive_utc(utcnow()),
+                    suggested_action="Redis may be overloaded or network is slow",
+                )
             
             latency = (time.perf_counter() - start_time) * 1000
             
-            # Get Redis info
-            info = await redis.info("memory")
+            # Get Redis info with timeout
+            try:
+                info = await asyncio.wait_for(redis.info("memory"), timeout=2.0)
+            except asyncio.TimeoutError:
+                info = {}
             
             status = ComponentStatus.HEALTHY
             message = "Redis connection successful"
@@ -237,6 +272,22 @@ class AdminSystemService:
                 suggested_action="Check Redis server status and connection settings",
             )
     
+    def _sync_celery_inspect(self, timeout: float = 3.0):
+        """Synchronous Celery inspect with timeout.
+        
+        Returns tuple of (active_workers, stats) or (None, None) on timeout/error.
+        """
+        try:
+            from app.core.celery_app import celery_app
+            
+            inspect = celery_app.control.inspect(timeout=timeout)
+            active_workers = inspect.active()
+            stats = inspect.stats()
+            return active_workers, stats
+        except Exception as e:
+            logger.warning(f"Celery inspect failed: {e}")
+            return None, None
+    
     async def _check_workers_health(self) -> AdminComponentHealth:
         """Check Celery workers health.
         
@@ -246,12 +297,23 @@ class AdminSystemService:
         start_time = time.perf_counter()
         
         try:
-            from app.core.celery_app import celery_app
-            
-            # Inspect active workers with timeout
-            inspect = celery_app.control.inspect(timeout=5.0)
-            active_workers = inspect.active()
-            stats = inspect.stats()
+            # Run blocking Celery inspect in thread pool with timeout
+            loop = asyncio.get_event_loop()
+            try:
+                active_workers, stats = await asyncio.wait_for(
+                    loop.run_in_executor(_executor, self._sync_celery_inspect, 3.0),
+                    timeout=5.0
+                )
+            except asyncio.TimeoutError:
+                latency = (time.perf_counter() - start_time) * 1000
+                return AdminComponentHealth(
+                    name="workers",
+                    status=ComponentStatus.DEGRADED,
+                    message="Worker check timed out",
+                    latency_ms=round(latency, 2),
+                    last_check=to_naive_utc(utcnow()),
+                    suggested_action="Workers may be busy or broker connection slow",
+                )
             
             latency = (time.perf_counter() - start_time) * 1000
             
@@ -353,9 +415,9 @@ class AdminSystemService:
         total_dlq = 0
         
         try:
-            from app.core.redis import get_redis_client
+            from app.core.redis import get_redis
             
-            redis = await get_redis_client()
+            redis = await get_redis()
             
             # Standard Celery queue names
             queue_names = ["celery", "high_priority", "low_priority", "default"]
