@@ -1,198 +1,316 @@
 # YouTube Automation Backend
 
-Platform SaaS untuk mengelola multiple akun YouTube, mengotomatisasi live streaming, dan memanfaatkan AI untuk optimasi konten.
+FastAPI backend for the YouTube Automation platform. This service handles authentication, YouTube account connections, video library operations, video-to-live streaming, AI features, analytics, billing, admin operations, notifications, realtime support, and external integrations.
 
-## Tech Stack
+## Overview
 
-- **Framework**: FastAPI (Python 3.11+)
-- **Database**: PostgreSQL dengan SQLAlchemy 2.0 (async)
-- **Cache/Queue**: Redis dengan Celery
-- **Migrations**: Alembic
-- **Testing**: pytest + Hypothesis (property-based testing)
+Main stack:
 
-## Quick Start
-
-### 1. Prerequisites
-
-- Python 3.11+
+- Python 3.11
+- FastAPI
+- SQLAlchemy async
 - PostgreSQL
 - Redis
+- Celery
+- Alembic
+- OpenTelemetry + Prometheus
 
-### 2. Setup Virtual Environment
+The application entry point is [app/main.py](/d:/Project/youtube-automation/backend/app/main.py:1). All primary API routes are mounted under `"/api/v1"`.
+
+## API Modules
+
+Active modules in `app/modules`:
+
+- `auth`
+- `account`
+- `video`
+- `stream`
+- `ai`
+- `analytics`
+- `moderation`
+- `monitoring`
+- `agent`
+- `job`
+- `notification`
+- `system_monitoring`
+- `security`
+- `billing`
+- `payment_gateway`
+- `integration`
+- `admin`
+- `blog`
+- `support`
+- `transcoding`
+
+Currently registered route areas:
+
+- `/auth`
+- `/accounts`
+- `/videos`
+- `/videos/library`
+- `/streams`
+- `/stream-jobs`
+- `/ai`
+- `/analytics`
+- `/moderation`
+- `/monitoring`
+- `/agents`
+- `/jobs`
+- `/notifications`
+- `/system`
+- `/security`
+- `/billing`
+- `/admin/payment-gateways`
+- `/payments`
+- `/integration`
+- `/admin`
+- `/blog`
+- `/contact`
+- `/support`
+
+## Backend Capabilities
+
+- JWT authentication, password reset, audit logging, and TOTP/2FA
+- Multi-account YouTube OAuth
+- Video upload, metadata management, bulk actions, folders/library, thumbnails, and YouTube publishing
+- Stream creation and video-to-live automation
+- Stream jobs with health WebSocket updates
+- AI title, description, thumbnail, and chatbot features
+- Analytics aggregation and dashboard data services
+- Moderation rules and chatbot moderation
+- Notification delivery and escalation flows
+- Billing, subscriptions, metering, and feature gating
+- Payment gateway abstraction for Stripe, PayPal, Midtrans, and Xendit
+- API key auth, webhooks, rate limiting, and external integrations
+- Admin tooling for users, quotas, compliance, support, backups, AI config, and system config
+- Realtime support via WebSocket
+- Security, auditability, tracing, metrics, and alerting
+
+## Directory Structure
+
+```text
+backend/
+├── app/
+│   ├── core/
+│   └── modules/
+├── alembic/
+│   └── versions/
+├── scripts/
+├── tests/
+├── docs/
+├── supervisor/
+├── systemd/
+├── Dockerfile
+├── pyproject.toml
+├── requirements.txt
+└── .env.example
+```
+
+## Configuration
+
+Primary configuration reference:
+
+- [backend/.env.example](/d:/Project/youtube-automation/backend/.env.example:1)
+
+Important variables:
+
+```env
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/youtube_automation
+REDIS_URL=redis://localhost:6379/0
+SECRET_KEY=change-me
+KMS_ENCRYPTION_KEY=32-byte-key
+YOUTUBE_CLIENT_ID=...
+YOUTUBE_CLIENT_SECRET=...
+YOUTUBE_REDIRECT_URI=http://localhost:8000/api/v1/accounts/oauth/callback
+CORS_ORIGINS=["http://localhost:3000"]
+OPENAI_API_KEY=...
+OPENROUTER_API_KEY=...
+STRIPE_SECRET_KEY=...
+STRIPE_PUBLISHABLE_KEY=...
+STRIPE_WEBHOOK_SECRET=...
+```
+
+The backend configuration also covers:
+
+- `local`, `s3`, and `minio` storage backends
+- CDN support
+- SMTP
+- Telegram bot integration
+- separate Celery broker/result backend settings
+- moderation/chatbot timeouts
+- stream health settings
+
+Runtime settings are defined in [app/core/config.py](/d:/Project/youtube-automation/backend/app/core/config.py:1).
+
+## Running Locally
+
+### 1. Start service dependencies
+
+From the repository root:
 
 ```bash
-# Windows
-cd backend
-scripts\setup_venv.bat
+make dev-db
+```
 
-# Manual (semua OS)
+This starts PostgreSQL and Redis via `docker-compose.dev.yml`.
+
+### 2. Install Python dependencies
+
+```bash
+cd backend
 python -m venv venv
-venv\Scripts\activate  # Windows
-source venv/bin/activate  # Linux/Mac
+venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 3. Configure Environment
-
-Copy `.env.example` ke `.env` dan sesuaikan:
+### 3. Set up environment variables
 
 ```bash
 copy .env.example .env
 ```
 
-Edit `.env`:
-```env
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/youtube_automation
-REDIS_URL=redis://localhost:6379/0
-SECRET_KEY=your-secret-key-change-in-production
-```
+Then update the credentials and integration values as needed.
 
-### 4. Setup Database
+### 4. Run migrations
 
-**Option 1: Using Python script (Recommended)**
 ```bash
-# Create database automatically
-python scripts\create_database.py
-
-# Run migrations
-scripts\run_migrations.bat
-```
-
-**Option 2: Manual setup**
-```bash
-# Connect to PostgreSQL and create database
-psql -U postgres -c "CREATE DATABASE youtube_automation;"
-
-# Run migrations
-scripts\run_migrations.bat
-# atau
 alembic upgrade head
 ```
 
-**Option 3: Using pgAdmin or other GUI**
-1. Open pgAdmin or your PostgreSQL GUI
-2. Create a new database named `youtube_automation`
-3. Run migrations: `scripts\run_migrations.bat`
-
-### 5. Run Development Server
+### 5. Start the API server
 
 ```bash
-# Windows
-scripts\run_dev.bat
-
-# Manual
 uvicorn app.main:app --reload
 ```
 
-Server akan berjalan di http://localhost:8000
+Access:
 
-- API Docs (Swagger): http://localhost:8000/docs
-- API Docs (ReDoc): http://localhost:8000/redoc
+- API: `http://localhost:8000`
+- Health: `http://localhost:8000/health`
+- Swagger: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
 
-### 6. Run Celery Worker (untuk background jobs)
+## Running Background Workers
+
+Worker:
 
 ```bash
-# Windows
-scripts\run_celery.bat
-
-# Manual
+cd backend
 celery -A app.core.celery_app worker --loglevel=info --pool=solo
 ```
 
-### 7. Run Tests
+Beat:
 
 ```bash
-# Windows
+cd backend
+celery -A app.core.celery_app beat --loglevel=info
+```
+
+Windows helper scripts:
+
+- `scripts\run_celery.bat`
+- `scripts\run_celery_beat.bat`
+- `scripts\run_celery_all.bat`
+
+Linux/macOS helper scripts:
+
+- `scripts/run_celery_prod.sh`
+- `scripts/run_celery_beat_prod.sh`
+
+## Docker
+
+From the repository root, the backend is started through:
+
+```bash
+make prod
+```
+
+Relevant services:
+
+- `backend`
+- `celery-worker`
+- `celery-beat`
+- `postgres`
+- `redis`
+
+Optional Celery monitoring:
+
+```bash
+make prod-monitor
+```
+
+Flower is available at `http://localhost:5555`.
+
+## Operational Scripts
+
+The `scripts/` directory includes a large number of operational utilities, such as:
+
+- local dev setup and run scripts
+- migrations
+- admin setup
+- seed data for plans, announcements, compliance, and moderation rules
+- Stripe, PayPal, Midtrans, and Xendit configuration
+- backup and billing utilities
+- video conversion utilities
+- data repair and debugging scripts
+
+## Testing
+
+The backend test suite includes:
+
+- unit tests
+- integration tests
+- end-to-end flows
+- property-based tests with Hypothesis
+
+Visible coverage areas:
+
+- auth
+- account
+- admin
+- agent
+- ai
+- analytics
+- billing
+- integration
+- job
+- moderation
+- monitoring
+- notification
+- payment gateway
+- stream
+- transcoding
+- video
+- e2e scenarios
+
+Run tests:
+
+```bash
+cd backend
+pytest
+```
+
+Or use the helper script:
+
+```bash
 scripts\run_tests.bat
-
-# Manual
-pytest app/ -v --cov=app
 ```
 
-## Project Structure
+## Observability
 
-```
-backend/
-├── alembic/                 # Database migrations
-│   ├── versions/            # Migration files
-│   └── env.py               # Alembic config
-├── app/
-│   ├── core/                # Core configuration
-│   │   ├── config.py        # Settings from env
-│   │   ├── database.py      # SQLAlchemy setup
-│   │   ├── celery_app.py    # Celery configuration
-│   │   └── redis.py         # Redis client
-│   ├── modules/             # Feature modules
-│   │   ├── auth/            # Authentication
-│   │   ├── account/         # YouTube accounts
-│   │   ├── video/           # Video management
-│   │   ├── stream/          # Live streaming
-│   │   ├── ai/              # AI services
-│   │   ├── analytics/       # Analytics
-│   │   ├── moderation/      # Chat/comment moderation
-│   │   ├── notification/    # Notifications
-│   │   ├── billing/         # Billing
-│   │   ├── agent/           # Worker agents
-│   │   └── job/             # Job queue
-│   └── main.py              # FastAPI app entry
-├── scripts/                 # Helper scripts
-├── .env                     # Environment variables
-├── .env.example             # Example env file
-├── requirements.txt         # Dependencies
-└── pyproject.toml           # Project config
-```
+Backend startup enables:
 
-## Available Scripts
+- JSON logging
+- request logging middleware
+- correlation ID middleware
+- tracing middleware
+- metrics middleware
+- usage metering middleware
+- default alert thresholds
 
-| Script | Description |
-|--------|-------------|
-| `scripts\setup_venv.bat` | Setup virtual environment dan install dependencies |
-| `scripts\run_dev.bat` | Jalankan development server |
-| `scripts\run_celery.bat` | Jalankan Celery worker |
-| `scripts\run_tests.bat` | Jalankan tests dengan coverage |
-| `scripts\run_migrations.bat` | Jalankan database migrations |
+This is configured in [app/main.py](/d:/Project/youtube-automation/backend/app/main.py:1).
 
-## API Endpoints
+## Notes
 
-### Health Check
-- `GET /health` - Check API health status
-
-### Authentication (Coming Soon)
-- `POST /api/v1/auth/register` - Register new user
-- `POST /api/v1/auth/login` - Login
-- `POST /api/v1/auth/refresh` - Refresh token
-- `POST /api/v1/auth/2fa/enable` - Enable 2FA
-- `POST /api/v1/auth/2fa/verify` - Verify 2FA
-
-### YouTube Accounts (Coming Soon)
-- `GET /api/v1/accounts` - List connected accounts
-- `POST /api/v1/accounts/connect` - Initiate OAuth
-- `GET /api/v1/accounts/{id}` - Get account details
-
-## Testing Strategy
-
-Project ini menggunakan dual testing approach:
-
-1. **Unit Tests**: Verify specific examples dan edge cases
-2. **Property-Based Tests**: Verify universal properties dengan Hypothesis
-
-Contoh property test untuk retry logic:
-```python
-@given(attempt=st.integers(min_value=1, max_value=20))
-def test_delay_follows_exponential_pattern(self, attempt):
-    """Delay SHALL follow exponential backoff formula."""
-    config = RetryConfig(...)
-    delay = config.calculate_delay(attempt)
-    expected = initial_delay * (multiplier ** (attempt - 1))
-    assert delay == min(expected, max_delay)
-```
-
-## Development Progress
-
-Lihat `.kiro/specs/youtube-automation/tasks.md` untuk progress implementasi.
-
-Current Phase: **Phase 1 - Project Setup & Core Infrastructure**
-- [x] FastAPI project setup
-- [x] Database & migrations
-- [x] Redis & Celery setup
-- [ ] Property tests for retry logic (in progress)
+- `backend/.env.example` is currently a more accurate backend setup reference than the root `.env.example`.
+- Additional deployment documentation is available in [../DEPLOYMENT.md](/d:/Project/youtube-automation/DEPLOYMENT.md:1).
