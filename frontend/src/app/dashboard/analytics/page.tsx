@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { DashboardLayout } from "@/components/dashboard";
 import { OverviewCard } from "@/components/dashboard/overview-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,17 +12,13 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
 import {
     Eye,
     Users,
     Clock,
-    DollarSign,
-    TrendingUp,
     Calendar,
-    ArrowRight,
-    BarChart3,
+    RefreshCw,
+    Loader2,
 } from "lucide-react";
 import {
     XAxis,
@@ -32,70 +28,172 @@ import {
     ResponsiveContainer,
     Area,
     AreaChart,
-    Legend,
 } from "recharts";
 import { useTheme } from "next-themes";
-import Link from "next/link";
 import analyticsApi, { AnalyticsOverview, TimeSeriesData } from "@/lib/api/analytics";
 import { AIInsightsPanel } from "@/components/dashboard/ai-insights-panel";
 import accountsApi from "@/lib/api/accounts";
 import { YouTubeAccount } from "@/types";
+import { useToast } from "@/hooks/use-toast";
 
 type Period = "7d" | "30d" | "90d" | "1y";
+
+// Helper function to calculate date range from period
+function getDateRange(period: Period): { start_date: string; end_date: string; startLabel: string; endLabel: string } {
+    const end = new Date();
+    const start = new Date();
+
+    switch (period) {
+        case "7d":
+            start.setDate(end.getDate() - 7);
+            break;
+        case "30d":
+            start.setDate(end.getDate() - 30);
+            break;
+        case "90d":
+            start.setDate(end.getDate() - 90);
+            break;
+        case "1y":
+            start.setFullYear(end.getFullYear() - 1);
+            break;
+    }
+
+    const formatDate = (d: Date) => d.toISOString().split('T')[0];
+    const formatLabel = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+    return {
+        start_date: formatDate(start),
+        end_date: formatDate(end),
+        startLabel: formatLabel(start),
+        endLabel: formatLabel(end),
+    };
+}
 
 export default function AnalyticsPage() {
     const { theme } = useTheme();
     const isDark = theme === "dark";
+    const { addToast } = useToast();
 
     const [period, setPeriod] = useState<Period>("30d");
-    const [compareEnabled, setCompareEnabled] = useState(false);
     const [selectedAccount, setSelectedAccount] = useState<string>("all");
     const [accounts, setAccounts] = useState<YouTubeAccount[]>([]);
     const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
     const [viewsData, setViewsData] = useState<TimeSeriesData[]>([]);
     const [subscribersData, setSubscribersData] = useState<TimeSeriesData[]>([]);
     const [loading, setLoading] = useState(true);
+    const [syncing, setSyncing] = useState(false);
 
     useEffect(() => {
         loadAccounts();
     }, []);
 
     useEffect(() => {
-        loadAnalytics();
-    }, [period, selectedAccount]);
+        // Only load analytics after accounts are loaded
+        if (accounts.length > 0 || selectedAccount === "all") {
+            loadAnalytics();
+        }
+    }, [period, selectedAccount, accounts.length]);
 
     const loadAccounts = async () => {
-        const data = await accountsApi.getAccounts();
-        setAccounts(data);
+        try {
+            const data = await accountsApi.getAccounts();
+            setAccounts(data);
+        } catch (error) {
+            console.error("Failed to load accounts:", error);
+        }
     };
+
+    // Calculate date range based on period
+    const dateRange = useMemo(() => getDateRange(period), [period]);
 
     const loadAnalytics = async () => {
         setLoading(true);
         try {
-            const params = {
+            const params: { period: Period; account_id?: string } = {
                 period,
-                account_id: selectedAccount !== "all" ? selectedAccount : undefined,
             };
+
+            // Only add account_id if specific account is selected
+            if (selectedAccount !== "all") {
+                params.account_id = selectedAccount;
+            }
+
+            // Calculate granularity based on period for better chart display
+            // 7d = daily (7 points), 30d = daily (30 points), 90d = weekly (~13 points), 1y = monthly (12 points)
+            const granularity = period === "7d" ? "day" : period === "30d" ? "day" : period === "90d" ? "week" : "month";
 
             const [overviewData, views, subscribers] = await Promise.all([
                 analyticsApi.getOverview(params),
                 analyticsApi.getViewsTimeSeries({
-                    ...params,
-                    granularity: period === "7d" ? "day" : period === "30d" ? "day" : "week",
+                    account_id: params.account_id,
+                    start_date: dateRange.start_date,
+                    end_date: dateRange.end_date,
+                    granularity,
                 }),
                 analyticsApi.getSubscribersTimeSeries({
-                    ...params,
-                    granularity: period === "7d" ? "day" : period === "30d" ? "day" : "week",
+                    account_id: params.account_id,
+                    start_date: dateRange.start_date,
+                    end_date: dateRange.end_date,
+                    granularity,
                 }),
             ]);
 
-            setOverview(overviewData);
+            // If no analytics data, use account stats as fallback
+            if (overviewData.total_views === 0 && overviewData.total_subscribers === 0 && accounts.length > 0) {
+                const relevantAccounts = selectedAccount !== "all"
+                    ? accounts.filter(a => a.id === selectedAccount)
+                    : accounts;
+
+                const totalViews = relevantAccounts.reduce((sum, a) => sum + (a.viewCount || 0), 0);
+                const totalSubscribers = relevantAccounts.reduce((sum, a) => sum + (a.subscriberCount || 0), 0);
+
+                setOverview({
+                    ...overviewData,
+                    total_views: totalViews,
+                    total_subscribers: totalSubscribers,
+                });
+            } else {
+                setOverview(overviewData);
+            }
+
             setViewsData(views);
             setSubscribersData(subscribers);
         } catch (error) {
             console.error("Failed to load analytics:", error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleSync = async () => {
+        setSyncing(true);
+        try {
+            if (selectedAccount !== "all") {
+                await analyticsApi.syncAccount(selectedAccount);
+                addToast({
+                    title: "Sync Started",
+                    description: "Analytics sync has been queued for this channel.",
+                    type: "success",
+                });
+            } else {
+                await analyticsApi.syncAllAccounts();
+                addToast({
+                    title: "Sync Started",
+                    description: "Analytics sync has been queued for all channels.",
+                    type: "success",
+                });
+            }
+            // Reload data after a delay
+            setTimeout(() => loadAnalytics(), 5000);
+        } catch (error) {
+            console.error("Failed to sync analytics:", error);
+            addToast({
+                title: "Sync Failed",
+                description: "Failed to start analytics sync. Please try again.",
+                type: "error",
+            });
+        } finally {
+            setSyncing(false);
         }
     };
 
@@ -114,11 +212,37 @@ export default function AnalyticsPage() {
     };
 
     // Combine views and subscribers data for chart
-    const chartData = viewsData.map((v, i) => ({
-        date: new Date(v.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-        views: v.value,
-        subscribers: subscribersData[i]?.value || 0,
-    }));
+    const chartData = viewsData.map((v, i) => {
+        const dateObj = new Date(v.date);
+        let dateLabel: string;
+
+        // Format date label based on period
+        if (period === "1y") {
+            // Monthly: "Jan", "Feb", etc.
+            dateLabel = dateObj.toLocaleDateString("en-US", { month: "short" });
+        } else if (period === "90d") {
+            // Weekly: "Jan 1", "Jan 8", etc.
+            dateLabel = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+        } else {
+            // Daily: "Jan 1", "Jan 2", etc.
+            dateLabel = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+        }
+
+        return {
+            date: dateLabel,
+            views: v.value,
+            subscribers: subscribersData[i]?.value || 0,
+        };
+    });
+
+    // Calculate XAxis interval based on data points for clean display
+    const getXAxisInterval = () => {
+        const dataLength = chartData.length;
+        if (dataLength <= 7) return 0; // Show all
+        if (dataLength <= 14) return 1; // Show every 2nd
+        if (dataLength <= 31) return 4; // Show every 5th (for 30 days)
+        return Math.floor(dataLength / 6); // Show ~6 labels
+    };
 
     const CustomTooltip = ({ active, payload, label }: any) => {
         if (active && payload && payload.length) {
@@ -141,12 +265,8 @@ export default function AnalyticsPage() {
         return null;
     };
 
-    const periodLabels: Record<Period, string> = {
-        "7d": "Last 7 days",
-        "30d": "Last 30 days",
-        "90d": "Last 90 days",
-        "1y": "Last year",
-    };
+    // Format date range for display
+    const dateRangeLabel = `${dateRange.startLabel} - ${dateRange.endLabel}`;
 
     return (
         <DashboardLayout
@@ -194,22 +314,53 @@ export default function AnalyticsPage() {
                             </SelectContent>
                         </Select>
 
-                        {/* Period Comparison Toggle */}
-                        <div className="flex items-center gap-2 px-3 py-2 bg-muted/50 rounded-lg">
-                            <Switch
-                                id="compare"
-                                checked={compareEnabled}
-                                onCheckedChange={setCompareEnabled}
-                            />
-                            <Label htmlFor="compare" className="text-sm cursor-pointer">
-                                Compare
-                            </Label>
-                        </div>
+                        {/* Sync Button */}
+                        <Button variant="outline" onClick={handleSync} disabled={syncing}>
+                            {syncing ? (
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            ) : (
+                                <RefreshCw className="h-4 w-4 mr-2" />
+                            )}
+                            Sync
+                        </Button>
                     </div>
                 </div>
 
+                {/* No Data Warning */}
+                {!loading && overview && overview.total_views === 0 && overview.total_subscribers === 0 && (
+                    <Card className="border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30">
+                        <CardContent className="p-4">
+                            <div className="flex items-center gap-3">
+                                <RefreshCw className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                                <div className="flex-1">
+                                    <p className="font-medium text-amber-800 dark:text-amber-200">
+                                        No Analytics Data Available
+                                    </p>
+                                    <p className="text-sm text-amber-600 dark:text-amber-400">
+                                        Click the Sync button to fetch analytics data from YouTube. This may take a few moments.
+                                    </p>
+                                </div>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleSync}
+                                    disabled={syncing}
+                                    className="border-amber-300 hover:bg-amber-100 dark:border-amber-700 dark:hover:bg-amber-900"
+                                >
+                                    {syncing ? (
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    ) : (
+                                        <RefreshCw className="h-4 w-4 mr-2" />
+                                    )}
+                                    Sync Now
+                                </Button>
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
+
                 {/* Key Metrics Cards */}
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     <OverviewCard
                         title="Total Views"
                         value={formatNumber(overview?.total_views || 0)}
@@ -240,16 +391,6 @@ export default function AnalyticsPage() {
                         } : undefined}
                         gradient="from-purple-500 to-purple-600"
                     />
-                    <OverviewCard
-                        title="Revenue"
-                        value={`$${formatNumber(overview?.total_revenue || 0)}`}
-                        icon={DollarSign}
-                        trend={overview ? {
-                            value: Math.abs(overview.revenue_change),
-                            isPositive: overview.revenue_change >= 0,
-                        } : undefined}
-                        gradient="from-amber-500 to-amber-600"
-                    />
                 </div>
 
                 {/* Charts Section */}
@@ -263,7 +404,7 @@ export default function AnalyticsPage() {
                                     <CardTitle className="text-lg">Views Over Time</CardTitle>
                                 </div>
                                 <span className="text-sm text-muted-foreground">
-                                    {periodLabels[period]}
+                                    {dateRangeLabel}
                                 </span>
                             </div>
                         </CardHeader>
@@ -287,6 +428,7 @@ export default function AnalyticsPage() {
                                         fontSize={12}
                                         tickLine={false}
                                         axisLine={false}
+                                        interval={getXAxisInterval()}
                                     />
                                     <YAxis
                                         stroke={isDark ? "#6b7280" : "#9ca3af"}
@@ -319,7 +461,7 @@ export default function AnalyticsPage() {
                                     <CardTitle className="text-lg">Subscribers Growth</CardTitle>
                                 </div>
                                 <span className="text-sm text-muted-foreground">
-                                    {periodLabels[period]}
+                                    {dateRangeLabel}
                                 </span>
                             </div>
                         </CardHeader>
@@ -343,6 +485,7 @@ export default function AnalyticsPage() {
                                         fontSize={12}
                                         tickLine={false}
                                         axisLine={false}
+                                        interval={getXAxisInterval()}
                                     />
                                     <YAxis
                                         stroke={isDark ? "#6b7280" : "#9ca3af"}
@@ -365,72 +508,6 @@ export default function AnalyticsPage() {
                             </ResponsiveContainer>
                         </CardContent>
                     </Card>
-                </div>
-
-                {/* Quick Links */}
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    <Link href="/dashboard/analytics/compare">
-                        <Card className="border-0 bg-card shadow-lg hover:shadow-xl transition-all cursor-pointer group">
-                            <CardContent className="p-6">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 shadow-lg">
-                                            <BarChart3 className="h-5 w-5 text-white" />
-                                        </div>
-                                        <div>
-                                            <h3 className="font-semibold">Compare Channels</h3>
-                                            <p className="text-sm text-muted-foreground">
-                                                Side-by-side metrics
-                                            </p>
-                                        </div>
-                                    </div>
-                                    <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:translate-x-1 transition-transform" />
-                                </div>
-                            </CardContent>
-                        </Card>
-                    </Link>
-
-                    <Link href="/dashboard/analytics/reports">
-                        <Card className="border-0 bg-card shadow-lg hover:shadow-xl transition-all cursor-pointer group">
-                            <CardContent className="p-6">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 shadow-lg">
-                                            <TrendingUp className="h-5 w-5 text-white" />
-                                        </div>
-                                        <div>
-                                            <h3 className="font-semibold">Generate Reports</h3>
-                                            <p className="text-sm text-muted-foreground">
-                                                Export PDF & CSV
-                                            </p>
-                                        </div>
-                                    </div>
-                                    <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:translate-x-1 transition-transform" />
-                                </div>
-                            </CardContent>
-                        </Card>
-                    </Link>
-
-                    <Link href="/dashboard/revenue">
-                        <Card className="border-0 bg-card shadow-lg hover:shadow-xl transition-all cursor-pointer group">
-                            <CardContent className="p-6">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-amber-600 shadow-lg">
-                                            <DollarSign className="h-5 w-5 text-white" />
-                                        </div>
-                                        <div>
-                                            <h3 className="font-semibold">Revenue Dashboard</h3>
-                                            <p className="text-sm text-muted-foreground">
-                                                Track earnings
-                                            </p>
-                                        </div>
-                                    </div>
-                                    <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:translate-x-1 transition-transform" />
-                                </div>
-                            </CardContent>
-                        </Card>
-                    </Link>
                 </div>
 
                 {/* AI Insights Panel */}

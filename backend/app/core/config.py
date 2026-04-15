@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     OPENAI_MAX_TOKENS: int = 2000
     OPENAI_TEMPERATURE: float = 0.7
 
+    # OpenRouter API (for AI blog generation)
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_MODEL: str = "meta-llama/llama-3.2-3b-instruct:free"  # Free model
+    OPENROUTER_SITE_URL: str = ""  # Your site URL for rankings
+    OPENROUTER_SITE_NAME: str = "YT Automation"
+
     # Celery
     CELERY_BROKER_URL: str = ""
     CELERY_RESULT_BACKEND: str = ""

@@ -12,6 +12,8 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
+
 from app.modules.moderation.models import (
     ChatMessage,
     CustomCommand,
@@ -356,13 +358,13 @@ class ModerationService:
 
     async def get_rules(
         self,
-        account_id: uuid.UUID,
+        account_id: Optional[uuid.UUID] = None,
         enabled_only: bool = True,
     ) -> list[ModerationRule]:
         """Get moderation rules for an account.
         
         Args:
-            account_id: YouTube account ID
+            account_id: YouTube account ID (optional, if None returns all rules)
             enabled_only: Only return enabled rules
             
         Returns:
@@ -495,7 +497,7 @@ class ModerationService:
 
         # Use the highest severity violation
         violation = result.violations[0]
-        processing_started = datetime.utcnow()
+        processing_started = to_naive_utc(utcnow())
 
         # Create action log
         action_log = ModerationActionLog(
@@ -512,11 +514,11 @@ class ModerationService:
             was_successful=True,
             timeout_duration_seconds=violation.timeout_duration_seconds,
             processing_started_at=processing_started,
-            processing_completed_at=datetime.utcnow(),
+            processing_completed_at=to_naive_utc(utcnow()),
         )
 
         if violation.timeout_duration_seconds:
-            action_log.timeout_expires_at = datetime.utcnow() + timedelta(
+            action_log.timeout_expires_at = to_naive_utc(utcnow()) + timedelta(
                 seconds=violation.timeout_duration_seconds
             )
 
@@ -670,13 +672,13 @@ class ModerationService:
 
     async def get_commands(
         self,
-        account_id: uuid.UUID,
+        account_id: Optional[uuid.UUID] = None,
         enabled_only: bool = True,
     ) -> list[CustomCommand]:
         """Get custom commands for an account.
         
         Args:
-            account_id: YouTube account ID
+            account_id: YouTube account ID (optional, if None returns all commands)
             enabled_only: Only return enabled commands
             
         Returns:

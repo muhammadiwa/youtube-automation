@@ -38,7 +38,6 @@ class JobType(str, Enum):
     NOTIFICATION_SEND = "notification_send"
     COMMENT_SYNC = "comment_sync"
     REVENUE_SYNC = "revenue_sync"
-    COMPETITOR_SYNC = "competitor_sync"
     STRIKE_SYNC = "strike_sync"
 
 

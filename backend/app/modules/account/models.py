@@ -4,7 +4,7 @@ Implements encrypted token storage for OAuth credentials as per Requirements 2.1
 """
 
 import uuid
-from datetime import datetime
+from datetime import timedelta
 from enum import Enum
 from typing import Optional
 
@@ -12,9 +12,14 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
+from typing import TYPE_CHECKING
 
 from app.core.database import Base
 from app.core.encryption import decrypt_token, encrypt_token, is_encrypted
+from app.core.datetime_utils import utcnow, to_naive_utc, datetime
+
+if TYPE_CHECKING:
+    from app.modules.auth.models import User
 
 
 class AccountStatus(str, Enum):
@@ -41,6 +46,9 @@ class YouTubeAccount(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    
+    # Relationship to User
+    user: Mapped["User"] = relationship("User", back_populates="youtube_accounts", lazy="selectin")
 
     # YouTube channel information
     channel_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
@@ -84,6 +92,17 @@ class YouTubeAccount(Base):
         DateTime(timezone=True), nullable=True
     )
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Live streaming configuration (encrypted stream key)
+    _stream_key: Mapped[Optional[str]] = mapped_column(
+        "stream_key", Text, nullable=True
+    )
+    rtmp_url: Mapped[Optional[str]] = mapped_column(
+        String(512), nullable=True, default="rtmp://a.rtmp.youtube.com/live2"
+    )
+    default_stream_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # YouTube liveStream ID for the default stream
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
@@ -157,7 +176,7 @@ class YouTubeAccount(Base):
         """
         if self.token_expires_at is None:
             return True
-        return datetime.utcnow() >= self.token_expires_at.replace(tzinfo=None)
+        return to_naive_utc(utcnow()) >= self.token_expires_at.replace(tzinfo=None)
 
     def is_token_expiring_soon(self, hours: int = 24) -> bool:
         """Check if the token is expiring within the specified hours.
@@ -170,9 +189,52 @@ class YouTubeAccount(Base):
         """
         if self.token_expires_at is None:
             return True
-        from datetime import timedelta
-        expiry_threshold = datetime.utcnow() + timedelta(hours=hours)
+        expiry_threshold = to_naive_utc(utcnow()) + timedelta(hours=hours)
         return self.token_expires_at.replace(tzinfo=None) <= expiry_threshold
+
+    @property
+    def stream_key(self) -> Optional[str]:
+        """Get decrypted stream key.
+
+        Returns:
+            Optional[str]: Decrypted stream key or None
+        """
+        if not self._stream_key:
+            return None
+        return decrypt_token(self._stream_key)
+
+    @stream_key.setter
+    def stream_key(self, value: Optional[str]) -> None:
+        """Set and encrypt stream key.
+
+        Args:
+            value: Plain text stream key to encrypt and store
+        """
+        if value is None:
+            self._stream_key = None
+        else:
+            self._stream_key = encrypt_token(value)
+
+    def get_masked_stream_key(self) -> Optional[str]:
+        """Get masked stream key for display.
+
+        Returns:
+            Optional[str]: Masked stream key (e.g., "xxxx-xxxx-xxxx-1234")
+        """
+        key = self.stream_key
+        if not key:
+            return None
+        if len(key) <= 4:
+            return "****"
+        return f"****-****-****-{key[-4:]}"
+
+    def has_stream_key(self) -> bool:
+        """Check if account has a stream key configured.
+
+        Returns:
+            bool: True if stream key is set
+        """
+        return self._stream_key is not None and len(self._stream_key) > 0
 
     def get_quota_usage_percent(self, daily_limit: int = 10000) -> float:
         """Calculate quota usage percentage.
@@ -189,3 +251,4 @@ class YouTubeAccount(Base):
 
     def __repr__(self) -> str:
         return f"<YouTubeAccount(id={self.id}, channel={self.channel_title}, status={self.status})>"
+

@@ -13,7 +13,12 @@ import {
     AlertTriangle,
     ChevronDown,
     ChevronUp,
+    ChevronLeft,
+    ChevronRight,
     RefreshCw,
+    Copy,
+    Eye,
+    EyeOff,
 } from "lucide-react"
 import { DashboardLayout } from "@/components/dashboard"
 import { Button } from "@/components/ui/button"
@@ -51,6 +56,13 @@ import {
     CollapsibleContent,
     CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select"
 import { apiClient } from "@/lib/api/client"
 
 interface WebhookType {
@@ -68,15 +80,41 @@ interface WebhookType {
     created_at: string
 }
 
+interface WebhookCreateResponse {
+    id: string
+    name: string
+    url: string
+    events: string[]
+    secret: string
+    is_active: boolean
+    created_at: string
+}
+
 interface WebhookDelivery {
     id: string
     webhook_id: string
     event_type: string
+    event_id: string
     status: string
-    response_status?: number
+    attempts: number
+    max_attempts: number
+    next_retry_at?: string
+    response_status_code?: number
     response_time_ms?: number
+    last_error?: string
     created_at: string
+    delivered_at?: string
 }
+
+interface WebhookDeliveryListResponse {
+    deliveries: WebhookDelivery[]
+    total: number
+    page: number
+    page_size: number
+    has_more: boolean
+}
+
+type DeliveryStatusFilter = "all" | "pending" | "delivered" | "failed"
 
 interface TestWebhookResponse {
     success: boolean
@@ -89,18 +127,24 @@ const WEBHOOK_EVENTS = [
     { value: "video.uploaded", label: "Video Uploaded", category: "Videos" },
     { value: "video.published", label: "Video Published", category: "Videos" },
     { value: "video.deleted", label: "Video Deleted", category: "Videos" },
+    { value: "video.metadata_updated", label: "Video Metadata Updated", category: "Videos" },
     { value: "stream.started", label: "Stream Started", category: "Streams" },
     { value: "stream.ended", label: "Stream Ended", category: "Streams" },
-    { value: "stream.error", label: "Stream Error", category: "Streams" },
+    { value: "stream.health_changed", label: "Stream Health Changed", category: "Streams" },
     { value: "account.connected", label: "Account Connected", category: "Accounts" },
     { value: "account.disconnected", label: "Account Disconnected", category: "Accounts" },
-    { value: "subscription.created", label: "Subscription Created", category: "Billing" },
-    { value: "subscription.cancelled", label: "Subscription Cancelled", category: "Billing" },
+    { value: "account.token_expired", label: "Account Token Expired", category: "Accounts" },
+    { value: "comment.received", label: "Comment Received", category: "Comments" },
+    { value: "comment.replied", label: "Comment Replied", category: "Comments" },
+    { value: "analytics.updated", label: "Analytics Updated", category: "Analytics" },
+    { value: "revenue.updated", label: "Revenue Updated", category: "Analytics" },
+    { value: "job.completed", label: "Job Completed", category: "Jobs" },
+    { value: "job.failed", label: "Job Failed", category: "Jobs" },
     { value: "payment.completed", label: "Payment Completed", category: "Billing" },
     { value: "payment.failed", label: "Payment Failed", category: "Billing" },
 ]
 
-const EVENT_CATEGORIES = ["Videos", "Streams", "Accounts", "Billing"]
+const EVENT_CATEGORIES = ["Videos", "Streams", "Accounts", "Comments", "Analytics", "Jobs", "Billing"]
 
 export default function WebhooksPage() {
     const [webhooks, setWebhooks] = useState<WebhookType[]>([])
@@ -123,7 +167,17 @@ export default function WebhooksPage() {
     // Delivery logs
     const [expandedWebhook, setExpandedWebhook] = useState<string | null>(null)
     const [deliveries, setDeliveries] = useState<Record<string, WebhookDelivery[]>>({})
+    const [deliveryTotals, setDeliveryTotals] = useState<Record<string, number>>({})
+    const [deliveryPages, setDeliveryPages] = useState<Record<string, number>>({})
+    const [deliveryFilters, setDeliveryFilters] = useState<Record<string, DeliveryStatusFilter>>({})
     const [loadingDeliveries, setLoadingDeliveries] = useState<string | null>(null)
+    const DELIVERIES_PAGE_SIZE = 10
+
+    // New webhook secret dialog
+    const [newWebhookDialogOpen, setNewWebhookDialogOpen] = useState(false)
+    const [newWebhook, setNewWebhook] = useState<WebhookCreateResponse | null>(null)
+    const [showSecret, setShowSecret] = useState(false)
+    const [secretCopied, setSecretCopied] = useState(false)
 
     useEffect(() => {
         loadWebhooks()
@@ -143,14 +197,21 @@ export default function WebhooksPage() {
         }
     }
 
-    const loadDeliveries = async (webhookId: string) => {
+    const loadDeliveries = async (webhookId: string, page: number = 1, statusFilter?: DeliveryStatusFilter) => {
         try {
             setLoadingDeliveries(webhookId)
             const userId = localStorage.getItem("user_id") || "current"
-            const response = await apiClient.get<{ deliveries: WebhookDelivery[] }>(
-                `/integration/webhooks/${webhookId}/deliveries?user_id=${userId}`
-            )
+            const filter = statusFilter || deliveryFilters[webhookId] || "all"
+
+            let url = `/integration/webhooks/${webhookId}/deliveries?user_id=${userId}&page=${page}&page_size=${DELIVERIES_PAGE_SIZE}`
+            if (filter !== "all") {
+                url += `&status=${filter}`
+            }
+
+            const response = await apiClient.get<WebhookDeliveryListResponse>(url)
             setDeliveries((prev) => ({ ...prev, [webhookId]: response.deliveries || [] }))
+            setDeliveryTotals((prev) => ({ ...prev, [webhookId]: response.total }))
+            setDeliveryPages((prev) => ({ ...prev, [webhookId]: page }))
         } catch (err) {
             console.error("Failed to load deliveries:", err)
         } finally {
@@ -203,15 +264,22 @@ export default function WebhooksPage() {
                     url: url.trim(),
                     events: selectedEvents,
                 })
+                setDialogOpen(false)
+                loadWebhooks()
             } else {
-                await apiClient.post(`/integration/webhooks?user_id=${userId}`, {
+                const response = await apiClient.post<WebhookCreateResponse>(`/integration/webhooks?user_id=${userId}`, {
                     name: name.trim(),
                     url: url.trim(),
                     events: selectedEvents,
                 })
+                setDialogOpen(false)
+                // Show the secret dialog for new webhooks
+                setNewWebhook(response)
+                setShowSecret(false)
+                setSecretCopied(false)
+                setNewWebhookDialogOpen(true)
+                loadWebhooks()
             }
-            setDialogOpen(false)
-            loadWebhooks()
         } catch (err) {
             console.error("Failed to save webhook:", err)
             setError("Failed to save webhook. Please try again.")
@@ -300,6 +368,28 @@ export default function WebhooksPage() {
         }
     }
 
+    const handleDeliveryFilterChange = (webhookId: string, filter: DeliveryStatusFilter) => {
+        setDeliveryFilters((prev) => ({ ...prev, [webhookId]: filter }))
+        loadDeliveries(webhookId, 1, filter)
+    }
+
+    const handleDeliveryPageChange = (webhookId: string, newPage: number) => {
+        loadDeliveries(webhookId, newPage)
+    }
+
+    const getDeliveryStatusBadge = (status: string) => {
+        switch (status) {
+            case "delivered":
+                return <Badge variant="default" className="bg-green-500 text-xs">Delivered</Badge>
+            case "failed":
+                return <Badge variant="destructive" className="text-xs">Failed</Badge>
+            case "pending":
+                return <Badge variant="secondary" className="text-xs">Pending</Badge>
+            default:
+                return <Badge variant="outline" className="text-xs">{status}</Badge>
+        }
+    }
+
     const formatDate = (dateString: string) => {
         return new Date(dateString).toLocaleString("en-US", {
             month: "short",
@@ -307,6 +397,18 @@ export default function WebhooksPage() {
             hour: "2-digit",
             minute: "2-digit",
         })
+    }
+
+    const copySecretToClipboard = async () => {
+        if (newWebhook?.secret) {
+            try {
+                await navigator.clipboard.writeText(newWebhook.secret)
+                setSecretCopied(true)
+                setTimeout(() => setSecretCopied(false), 2000)
+            } catch (err) {
+                console.error("Failed to copy secret:", err)
+            }
+        }
     }
 
     if (loading) {
@@ -496,59 +598,124 @@ export default function WebhooksPage() {
                                             <CollapsibleContent>
                                                 <div className="border-t p-4 bg-muted/30">
                                                     <div className="flex items-center justify-between mb-3">
-                                                        <h4 className="font-medium text-sm">Recent Deliveries</h4>
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="sm"
-                                                            onClick={() => loadDeliveries(webhook.id)}
-                                                            disabled={loadingDeliveries === webhook.id}
-                                                        >
-                                                            {loadingDeliveries === webhook.id ? (
-                                                                <Loader2 className="h-4 w-4 animate-spin" />
-                                                            ) : (
-                                                                <RefreshCw className="h-4 w-4" />
-                                                            )}
-                                                        </Button>
+                                                        <h4 className="font-medium text-sm">Delivery History</h4>
+                                                        <div className="flex items-center gap-2">
+                                                            <Select
+                                                                value={deliveryFilters[webhook.id] || "all"}
+                                                                onValueChange={(value) => handleDeliveryFilterChange(webhook.id, value as DeliveryStatusFilter)}
+                                                            >
+                                                                <SelectTrigger className="w-[130px] h-8 text-xs">
+                                                                    <SelectValue placeholder="Filter status" />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    <SelectItem value="all">All Status</SelectItem>
+                                                                    <SelectItem value="pending">Pending</SelectItem>
+                                                                    <SelectItem value="delivered">Delivered</SelectItem>
+                                                                    <SelectItem value="failed">Failed</SelectItem>
+                                                                </SelectContent>
+                                                            </Select>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                onClick={() => loadDeliveries(webhook.id, deliveryPages[webhook.id] || 1)}
+                                                                disabled={loadingDeliveries === webhook.id}
+                                                            >
+                                                                {loadingDeliveries === webhook.id ? (
+                                                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                                                ) : (
+                                                                    <RefreshCw className="h-4 w-4" />
+                                                                )}
+                                                            </Button>
+                                                        </div>
                                                     </div>
                                                     {loadingDeliveries === webhook.id ? (
                                                         <div className="space-y-2">
                                                             {[...Array(3)].map((_, i) => (
-                                                                <Skeleton key={i} className="h-12 w-full" />
+                                                                <Skeleton key={i} className="h-16 w-full" />
                                                             ))}
                                                         </div>
                                                     ) : deliveries[webhook.id]?.length === 0 ? (
                                                         <p className="text-sm text-muted-foreground text-center py-4">
-                                                            No deliveries yet
+                                                            No deliveries found
                                                         </p>
                                                     ) : (
-                                                        <div className="space-y-2">
-                                                            {deliveries[webhook.id]?.slice(0, 5).map((delivery) => (
-                                                                <div
-                                                                    key={delivery.id}
-                                                                    className="flex items-center gap-3 p-3 bg-background rounded border"
-                                                                >
-                                                                    {delivery.status === "success" ? (
-                                                                        <Check className="h-4 w-4 text-green-500" />
-                                                                    ) : (
-                                                                        <X className="h-4 w-4 text-red-500" />
-                                                                    )}
-                                                                    <Badge variant="outline" className="text-xs">
-                                                                        {delivery.event_type}
-                                                                    </Badge>
+                                                        <>
+                                                            <div className="space-y-2">
+                                                                {deliveries[webhook.id]?.map((delivery) => (
+                                                                    <div
+                                                                        key={delivery.id}
+                                                                        className="p-3 bg-background rounded border"
+                                                                    >
+                                                                        <div className="flex items-center gap-3 mb-2">
+                                                                            {delivery.status === "delivered" ? (
+                                                                                <Check className="h-4 w-4 text-green-500 flex-shrink-0" />
+                                                                            ) : delivery.status === "failed" ? (
+                                                                                <X className="h-4 w-4 text-red-500 flex-shrink-0" />
+                                                                            ) : (
+                                                                                <Loader2 className="h-4 w-4 text-muted-foreground animate-spin flex-shrink-0" />
+                                                                            )}
+                                                                            <Badge variant="outline" className="text-xs">
+                                                                                {delivery.event_type}
+                                                                            </Badge>
+                                                                            {getDeliveryStatusBadge(delivery.status)}
+                                                                            <span className="text-xs text-muted-foreground ml-auto">
+                                                                                {formatDate(delivery.created_at)}
+                                                                            </span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-4 ml-7 text-xs text-muted-foreground">
+                                                                            <span>
+                                                                                Response: {delivery.response_status_code || "N/A"}
+                                                                            </span>
+                                                                            <span>
+                                                                                Time: {delivery.response_time_ms ? `${delivery.response_time_ms}ms` : "N/A"}
+                                                                            </span>
+                                                                            <span>
+                                                                                Attempts: {delivery.attempts}/{delivery.max_attempts}
+                                                                            </span>
+                                                                            {delivery.delivered_at && (
+                                                                                <span>
+                                                                                    Delivered: {formatDate(delivery.delivered_at)}
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                        {delivery.last_error && (
+                                                                            <div className="ml-7 mt-2 text-xs text-red-500 truncate">
+                                                                                Error: {delivery.last_error}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                            {/* Pagination */}
+                                                            {(deliveryTotals[webhook.id] || 0) > DELIVERIES_PAGE_SIZE && (
+                                                                <div className="flex items-center justify-between mt-4 pt-3 border-t">
                                                                     <span className="text-xs text-muted-foreground">
-                                                                        {delivery.response_status || "No response"}
+                                                                        Showing {((deliveryPages[webhook.id] || 1) - 1) * DELIVERIES_PAGE_SIZE + 1} - {Math.min((deliveryPages[webhook.id] || 1) * DELIVERIES_PAGE_SIZE, deliveryTotals[webhook.id] || 0)} of {deliveryTotals[webhook.id] || 0}
                                                                     </span>
-                                                                    {delivery.response_time_ms && (
-                                                                        <span className="text-xs text-muted-foreground">
-                                                                            {delivery.response_time_ms}ms
+                                                                    <div className="flex items-center gap-1">
+                                                                        <Button
+                                                                            variant="outline"
+                                                                            size="sm"
+                                                                            onClick={() => handleDeliveryPageChange(webhook.id, (deliveryPages[webhook.id] || 1) - 1)}
+                                                                            disabled={(deliveryPages[webhook.id] || 1) <= 1 || loadingDeliveries === webhook.id}
+                                                                        >
+                                                                            <ChevronLeft className="h-4 w-4" />
+                                                                        </Button>
+                                                                        <span className="text-xs px-2">
+                                                                            Page {deliveryPages[webhook.id] || 1} of {Math.ceil((deliveryTotals[webhook.id] || 0) / DELIVERIES_PAGE_SIZE)}
                                                                         </span>
-                                                                    )}
-                                                                    <span className="text-xs text-muted-foreground ml-auto">
-                                                                        {formatDate(delivery.created_at)}
-                                                                    </span>
+                                                                        <Button
+                                                                            variant="outline"
+                                                                            size="sm"
+                                                                            onClick={() => handleDeliveryPageChange(webhook.id, (deliveryPages[webhook.id] || 1) + 1)}
+                                                                            disabled={(deliveryPages[webhook.id] || 1) >= Math.ceil((deliveryTotals[webhook.id] || 0) / DELIVERIES_PAGE_SIZE) || loadingDeliveries === webhook.id}
+                                                                        >
+                                                                            <ChevronRight className="h-4 w-4" />
+                                                                        </Button>
+                                                                    </div>
                                                                 </div>
-                                                            ))}
-                                                        </div>
+                                                            )}
+                                                        </>
                                                     )}
                                                 </div>
                                             </CollapsibleContent>
@@ -698,6 +865,98 @@ export default function WebhooksPage() {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+
+            {/* New Webhook Secret Dialog */}
+            <Dialog open={newWebhookDialogOpen} onOpenChange={setNewWebhookDialogOpen}>
+                <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Check className="h-5 w-5 text-green-500" />
+                            Webhook Created Successfully
+                        </DialogTitle>
+                        <DialogDescription>
+                            Your webhook &quot;{newWebhook?.name}&quot; has been created. Please save the secret below - it will only be shown once.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                        <Alert variant="default" className="border-amber-500 bg-amber-50 dark:bg-amber-950/20">
+                            <AlertTriangle className="h-4 w-4 text-amber-500" />
+                            <AlertDescription className="text-amber-700 dark:text-amber-400">
+                                This secret will only be shown once. Make sure to copy and store it securely.
+                            </AlertDescription>
+                        </Alert>
+                        <div className="space-y-2">
+                            <Label>Webhook Secret</Label>
+                            <div className="flex items-center gap-2">
+                                <div className="flex-1 relative">
+                                    <Input
+                                        type={showSecret ? "text" : "password"}
+                                        value={newWebhook?.secret || ""}
+                                        readOnly
+                                        className="pr-20 font-mono text-sm"
+                                    />
+                                    <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-7 w-7"
+                                            onClick={() => setShowSecret(!showSecret)}
+                                        >
+                                            {showSecret ? (
+                                                <EyeOff className="h-4 w-4" />
+                                            ) : (
+                                                <Eye className="h-4 w-4" />
+                                            )}
+                                        </Button>
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-7 w-7"
+                                            onClick={copySecretToClipboard}
+                                        >
+                                            {secretCopied ? (
+                                                <Check className="h-4 w-4 text-green-500" />
+                                            ) : (
+                                                <Copy className="h-4 w-4" />
+                                            )}
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+                            {secretCopied && (
+                                <p className="text-sm text-green-600 dark:text-green-400">
+                                    Secret copied to clipboard!
+                                </p>
+                            )}
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Webhook URL</Label>
+                            <Input
+                                value={newWebhook?.url || ""}
+                                readOnly
+                                className="text-sm text-muted-foreground"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Subscribed Events</Label>
+                            <div className="flex flex-wrap gap-1">
+                                {newWebhook?.events.map((event) => (
+                                    <Badge key={event} variant="outline" className="text-xs">
+                                        {event}
+                                    </Badge>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button onClick={() => setNewWebhookDialogOpen(false)}>
+                            Done
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </DashboardLayout>
     )
 }

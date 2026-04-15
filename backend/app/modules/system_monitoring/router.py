@@ -4,12 +4,12 @@ Exposes Prometheus metrics endpoints and system health information.
 Requirements: 24.1, 24.2, 24.3, 24.4, 24.5
 """
 
-from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Response, Query
 from fastapi.responses import PlainTextResponse
 
+from app.core.datetime_utils import utcnow
 from app.core.metrics import get_metrics, get_content_type
 from app.core.alerting import alert_manager, AlertSeverity
 from app.modules.system_monitoring.schemas import (
@@ -100,7 +100,7 @@ async def liveness_probe() -> dict:
     
     Returns 200 if the service is alive.
     """
-    return {"status": "alive", "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "alive", "timestamp": utcnow().isoformat()}
 
 
 @router.get(

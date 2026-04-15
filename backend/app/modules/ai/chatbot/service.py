@@ -12,6 +12,8 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
+
 from app.modules.ai.chatbot.models import (
     ChatbotConfig,
     ChatbotInteractionLog,
@@ -399,7 +401,7 @@ class ChatbotService:
             user_display_name=request.user_display_name,
             input_message_id=request.message_id,
             input_content=request.message_content,
-            processing_started_at=datetime.utcnow(),
+            processing_started_at=to_naive_utc(utcnow()),
             matched_trigger_type=matched_trigger.trigger_type,
             matched_pattern=matched_pattern,
         )

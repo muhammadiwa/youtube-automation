@@ -8,10 +8,20 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { CheckCircle2, ArrowRight, Sparkles, Loader2, XCircle, RefreshCw } from "lucide-react"
 import billingApi from "@/lib/api/billing"
+import { useAuth } from "@/hooks/use-auth"
+import apiClient from "@/lib/api/client"
 
 function SuccessContent() {
     const searchParams = useSearchParams()
     const router = useRouter()
+    const { user } = useAuth()
+
+    // Ensure user ID is set in apiClient when user is available
+    useEffect(() => {
+        if (user?.id) {
+            apiClient.setUserId(user.id)
+        }
+    }, [user])
 
     // Our payment_id from redirect
     const paymentId = searchParams.get("payment_id")
@@ -24,9 +34,8 @@ function SuccessContent() {
     // Stripe returns with session_id
     const stripeSessionId = searchParams.get("session_id")
 
-    // Midtrans returns with order_id and transaction_status
+    // Midtrans returns with order_id
     const midtransOrderId = searchParams.get("order_id")
-    const midtransStatus = searchParams.get("transaction_status")
 
     // Xendit returns with invoice_id, id, or external_id
     const xenditInvoiceId = searchParams.get("invoice_id") || searchParams.get("id") || searchParams.get("external_id")
@@ -37,25 +46,21 @@ function SuccessContent() {
     const [verifying, setVerifying] = useState(false)
     const [verified, setVerified] = useState(false)
     const [error, setError] = useState<string | null>(null)
-    const [gatewayUsed, setGatewayUsed] = useState<string | null>(null)
 
     useEffect(() => {
         // Determine which gateway was used and verify accordingly
+        // Note: Promo code usage is tracked automatically in backend when payment is verified
         if (paypalToken && paypalPayerId) {
             // PayPal approved - verify and capture
-            setGatewayUsed("paypal")
             verifyPayPalPayment(paypalToken)
         } else if (stripeSessionId) {
             // Stripe checkout completed
-            setGatewayUsed("stripe")
             verifyStripePayment(stripeSessionId)
         } else if (midtransOrderId) {
             // Midtrans payment completed
-            setGatewayUsed("midtrans")
             verifyMidtransPayment(midtransOrderId)
         } else if (xenditInvoiceId) {
             // Xendit payment completed
-            setGatewayUsed("xendit")
             verifyXenditPayment(xenditInvoiceId)
         } else if (paymentId) {
             // Direct payment_id - verify normally

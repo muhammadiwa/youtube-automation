@@ -1,0 +1,45 @@
+[Unit]
+Description=Celery Worker Service
+After=network.target redis.service postgresql.service
+Requires=redis.service
+
+[Service]
+Type=forking
+User=www-data
+Group=www-data
+WorkingDirectory=/app
+
+# Environment
+Environment="PYTHONPATH=/app"
+EnvironmentFile=/app/.env
+
+# Celery Worker
+ExecStart=/app/venv/bin/celery multi start worker \
+    -A app.core.celery_app \
+    --pidfile=/var/run/celery/%n.pid \
+    --logfile=/var/log/celery/%n%%I.log \
+    --loglevel=INFO \
+    --pool=prefork \
+    --concurrency=4
+
+ExecStop=/app/venv/bin/celery multi stopwait worker \
+    --pidfile=/var/run/celery/%n.pid
+
+ExecReload=/app/venv/bin/celery multi restart worker \
+    -A app.core.celery_app \
+    --pidfile=/var/run/celery/%n.pid \
+    --logfile=/var/log/celery/%n%%I.log \
+    --loglevel=INFO \
+    --pool=prefork \
+    --concurrency=4
+
+# Restart policy
+Restart=always
+RestartSec=10
+
+# Runtime directory
+RuntimeDirectory=celery
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target

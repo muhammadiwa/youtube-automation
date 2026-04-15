@@ -33,16 +33,20 @@ export interface GatewayPublicInfo {
 
 export interface GatewayStatistics {
     provider: GatewayProvider
+    primary_currency: string
     total_transactions: number
     successful_transactions: number
     failed_transactions: number
     success_rate: number
     total_volume: number
     average_transaction: number
+    total_volume_usd: number
+    average_transaction_usd: number
     last_transaction_at?: string
     health_status: "healthy" | "degraded" | "down"
     transactions_24h?: number
     success_rate_24h?: number
+    volume_24h_usd?: number
 }
 
 export interface GatewayCredentials {
@@ -93,6 +97,9 @@ export interface Plan {
     price_yearly: number
     features: PlanFeature[]
     limits: PlanLimits
+    icon?: string  // Lucide icon name
+    color?: string // Tailwind color name
+    is_popular?: boolean
 }
 
 // ============ Subscription Types ============
@@ -111,18 +118,23 @@ export interface Subscription {
 
 // ============ Usage Types ============
 export interface UsageMetrics {
+    // Core plan limits
     accounts_used: number
     accounts_limit: number
-    videos_uploaded: number
+    videos_this_month: number
     videos_limit: number
-    streams_created: number
+    streams_this_month: number
     streams_limit: number
+    concurrent_streams: number
+    concurrent_streams_limit: number
+
+    // Storage & bandwidth
     storage_used_gb: number
     storage_limit_gb: number
     bandwidth_used_gb: number
     bandwidth_limit_gb: number
-    ai_generations_used: number
-    ai_generations_limit: number
+
+    // Period
     period_start: string
     period_end: string
 }
@@ -178,6 +190,25 @@ export interface PaymentMethod {
     is_default: boolean
 }
 
+// ============ Public Plan Types (for landing page) ============
+export interface PublicPlanFeature {
+    name: string
+    included: boolean
+}
+
+export interface PublicPlan {
+    name: string
+    slug: string
+    description: string
+    price_monthly: number
+    price_yearly: number
+    currency: string
+    display_features: PublicPlanFeature[]
+    is_popular: boolean
+    icon: string
+    color: string
+}
+
 // Helper to get current user ID from localStorage/session
 function getCurrentUserId(): string {
     if (typeof window !== "undefined") {
@@ -189,6 +220,17 @@ function getCurrentUserId(): string {
 }
 
 export const billingApi = {
+    // ============ Public Plans (No Auth Required) ============
+    async getPublicPlans(): Promise<PublicPlan[]> {
+        try {
+            const response = await apiClient.get<{ plans: PublicPlan[] }>("/billing/plans/public")
+            return response?.plans || []
+        } catch (error) {
+            console.error("Failed to fetch public plans:", error)
+            return []
+        }
+    },
+
     // ============ Plans ============
     async getPlans(): Promise<Plan[]> {
         const response = await apiClient.get<{ plans: Plan[] } | Plan[]>("/billing/plans")
@@ -210,6 +252,9 @@ export const billingApi = {
                     max_bandwidth_gb: 5,
                     ai_generations_per_month: 0,
                 },
+                icon: plan.icon,
+                color: plan.color,
+                is_popular: plan.is_popular,
             }))
         }
 
@@ -227,8 +272,7 @@ export const billingApi = {
     // ============ Subscription ============
     async getSubscription(): Promise<Subscription | null> {
         try {
-            const userId = getCurrentUserId()
-            return await apiClient.get<Subscription>(`/billing/subscriptions/${userId}`)
+            return await apiClient.get<Subscription>(`/billing/subscriptions/me`)
         } catch (error) {
             console.error("Failed to fetch subscription:", error)
             return null
@@ -241,8 +285,7 @@ export const billingApi = {
         limits: PlanLimits
     } | null> {
         try {
-            const userId = getCurrentUserId()
-            return await apiClient.get(`/billing/subscriptions/${userId}/status`)
+            return await apiClient.get(`/billing/subscriptions/me/status`)
         } catch (error) {
             console.error("Failed to fetch subscription status:", error)
             return null
@@ -250,52 +293,75 @@ export const billingApi = {
     },
 
     async cancelSubscription(cancelAtPeriodEnd: boolean = true): Promise<Subscription> {
-        const userId = getCurrentUserId()
-        return await apiClient.post(`/billing/subscriptions/${userId}/cancel?cancel_at_period_end=${cancelAtPeriodEnd}`)
+        return await apiClient.post(`/billing/subscriptions/me/cancel?cancel_at_period_end=${cancelAtPeriodEnd}`)
     },
 
     async resumeSubscription(): Promise<Subscription> {
-        const userId = getCurrentUserId()
-        return await apiClient.post(`/billing/subscriptions/${userId}/reactivate`)
+        return await apiClient.post(`/billing/subscriptions/me/reactivate`)
     },
 
     // ============ Usage ============
     async getUsage(): Promise<UsageMetrics> {
-        const userId = getCurrentUserId()
-        const response = await apiClient.get<any>(`/billing/usage/${userId}/dashboard`)
-        // Map backend response to frontend format
-        return {
-            accounts_used: response.api_calls?.current || 0,
-            accounts_limit: response.api_calls?.limit || -1,
-            videos_uploaded: response.encoding_minutes?.current || 0,
-            videos_limit: response.encoding_minutes?.limit || -1,
-            streams_created: 0,
-            streams_limit: -1,
-            storage_used_gb: response.storage_gb?.current || 0,
-            storage_limit_gb: response.storage_gb?.limit || -1,
-            bandwidth_used_gb: response.bandwidth_gb?.current || 0,
-            bandwidth_limit_gb: response.bandwidth_gb?.limit || -1,
-            ai_generations_used: 0,
-            ai_generations_limit: -1,
-            period_start: response.period_start || new Date().toISOString(),
-            period_end: response.period_end || new Date().toISOString(),
+        try {
+            console.log("[Billing API] Fetching usage from /billing/usage/me/dashboard")
+            const response = await apiClient.get<any>(`/billing/usage/me/dashboard`)
+            console.log("[Billing API] Usage response:", response)
+
+            // Map backend metrics to frontend format
+            const metricsMap = new Map<string, { used: number; limit: number }>(
+                (response.metrics || []).map((m: any) => [m.resource_type, { used: m.used, limit: m.limit }])
+            )
+            console.log("[Billing API] Metrics map:", Object.fromEntries(metricsMap))
+
+            return {
+                accounts_used: metricsMap.get("accounts")?.used || 0,
+                accounts_limit: metricsMap.get("accounts")?.limit || 1,
+                videos_this_month: metricsMap.get("videos_per_month")?.used || 0,
+                videos_limit: metricsMap.get("videos_per_month")?.limit || 5,
+                streams_this_month: metricsMap.get("streams_per_month")?.used || 0,
+                streams_limit: metricsMap.get("streams_per_month")?.limit || 1,
+                concurrent_streams: metricsMap.get("concurrent_streams")?.used || 0,
+                concurrent_streams_limit: metricsMap.get("concurrent_streams")?.limit || 1,
+                storage_used_gb: metricsMap.get("storage_gb")?.used || 0,
+                storage_limit_gb: metricsMap.get("storage_gb")?.limit || 1,
+                bandwidth_used_gb: metricsMap.get("bandwidth_gb")?.used || 0,
+                bandwidth_limit_gb: metricsMap.get("bandwidth_gb")?.limit || 5,
+                period_start: response.billing_period_start || new Date().toISOString(),
+                period_end: response.billing_period_end || new Date().toISOString(),
+            }
+        } catch (error) {
+            console.error("[Billing API] Failed to fetch usage:", error)
+            // Return default usage metrics so UI still shows something
+            const now = new Date()
+            const periodStart = new Date(now.getFullYear(), now.getMonth(), 1)
+            const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+            return {
+                accounts_used: 0,
+                accounts_limit: 1,
+                videos_this_month: 0,
+                videos_limit: 5,
+                streams_this_month: 0,
+                streams_limit: 1,
+                concurrent_streams: 0,
+                concurrent_streams_limit: 1,
+                storage_used_gb: 0,
+                storage_limit_gb: 1,
+                bandwidth_used_gb: 0,
+                bandwidth_limit_gb: 5,
+                period_start: periodStart.toISOString(),
+                period_end: periodEnd.toISOString(),
+            }
         }
     },
 
     async getUsageWarnings(): Promise<UsageWarning[]> {
         try {
-            const userId = getCurrentUserId()
-            const dashboard = await apiClient.get<any>(`/billing/usage/${userId}/dashboard`)
+            const dashboard = await apiClient.get<any>(`/billing/usage/me/dashboard`)
             return dashboard.warnings || []
         } catch (error) {
             console.error("Failed to fetch usage warnings:", error)
             return []
         }
-    },
-
-    async exportUsage(format: "csv" | "json", startDate: string, endDate: string): Promise<{ download_url: string }> {
-        const userId = getCurrentUserId()
-        return await apiClient.post(`/billing/usage/${userId}/export?start_date=${startDate}&end_date=${endDate}`)
     },
 
     // ============ Payment History (Transactions) ============
@@ -331,15 +397,13 @@ export const billingApi = {
     },
 
     async getInvoice(invoiceId: string): Promise<Invoice> {
-        const userId = getCurrentUserId()
-        return await apiClient.get(`/billing/invoices/${userId}/${invoiceId}`)
+        return await apiClient.get(`/billing/invoices/me/${invoiceId}`)
     },
 
     // ============ Payment Methods ============
     async getPaymentMethods(): Promise<PaymentMethod[]> {
         try {
-            const userId = getCurrentUserId()
-            const response = await apiClient.get<{ payment_methods: PaymentMethod[] } | PaymentMethod[]>(`/billing/payment-methods/${userId}`)
+            const response = await apiClient.get<{ payment_methods: PaymentMethod[] } | PaymentMethod[]>(`/billing/payment-methods/me`)
             if (response && typeof response === "object" && "payment_methods" in response) {
                 return response.payment_methods || []
             }
@@ -354,18 +418,15 @@ export const billingApi = {
     },
 
     async addPaymentMethod(data: { type: string; token: string }): Promise<PaymentMethod> {
-        const userId = getCurrentUserId()
-        return await apiClient.post(`/billing/payment-methods/${userId}`, data)
+        return await apiClient.post(`/billing/payment-methods/me`, data)
     },
 
     async setDefaultPaymentMethod(methodId: string): Promise<PaymentMethod> {
-        const userId = getCurrentUserId()
-        return await apiClient.post(`/billing/payment-methods/${userId}/${methodId}/set-default`)
+        return await apiClient.post(`/billing/payment-methods/me/${methodId}/set-default`)
     },
 
     async removePaymentMethod(methodId: string): Promise<void> {
-        const userId = getCurrentUserId()
-        return await apiClient.delete(`/billing/payment-methods/${userId}/${methodId}`)
+        return await apiClient.delete(`/billing/payment-methods/me/${methodId}`)
     },
 
     // ============ Payment Gateways (Public) ============
@@ -404,6 +465,36 @@ export const billingApi = {
             from_currency: fromCurrency,
             to_currency: toCurrency,
         })
+    },
+
+    // ============ Discount Code ============
+    async validateDiscountCode(code: string, plan?: string, amount?: number): Promise<{
+        is_valid: boolean
+        code?: string
+        discount_type?: "percentage" | "fixed"
+        discount_value?: number
+        discount_amount?: number
+        final_amount?: number
+        message: string
+    }> {
+        return await apiClient.post("/payments/discount-code/validate", {
+            code,
+            plan,
+            amount: amount || 0,
+        })
+    },
+
+    async applyDiscountCode(code: string, amount: number): Promise<{
+        success: boolean
+        code: string
+        discount_amount: number
+        new_usage_count: number
+        message: string
+    }> {
+        return await apiClient.post("/payments/discount-code/apply", {
+            code,
+            amount,
+        }, { includeUserId: true })
     },
 
     async createPayment(data: {
@@ -459,14 +550,12 @@ export const billingApi = {
         cancel_url: string
         trial_days?: number
     }): Promise<{ session_id: string; checkout_url: string }> {
-        const userId = getCurrentUserId()
         const email = localStorage.getItem("user_email") || ""
-        return await apiClient.post(`/billing/stripe/checkout-session/${userId}?email=${encodeURIComponent(email)}`, data)
+        return await apiClient.post(`/billing/stripe/checkout-session/me?email=${encodeURIComponent(email)}`, data)
     },
 
     async createBillingPortal(returnUrl: string): Promise<{ portal_url: string }> {
-        const userId = getCurrentUserId()
-        return await apiClient.post(`/billing/stripe/billing-portal/${userId}`, { return_url: returnUrl })
+        return await apiClient.post(`/billing/stripe/billing-portal/me`, { return_url: returnUrl })
     },
 
     // ============ Admin: Gateway Management ============
@@ -512,21 +601,21 @@ export const billingApi = {
 
     async getGatewayStatistics(): Promise<{
         gateways: GatewayStatistics[]
-        total_volume: number
+        total_volume_usd: number
         total_transactions: number
         overall_success_rate: number
     }> {
         try {
             const response = await apiClient.get<{
                 gateways: GatewayStatistics[]
-                total_volume: number
+                total_volume_usd: number
                 total_transactions: number
                 overall_success_rate: number
             }>("/admin/payment-gateways/statistics/all")
-            return response || { gateways: [], total_volume: 0, total_transactions: 0, overall_success_rate: 0 }
+            return response || { gateways: [], total_volume_usd: 0, total_transactions: 0, overall_success_rate: 0 }
         } catch (error) {
             console.error("Failed to fetch gateway statistics:", error)
-            return { gateways: [], total_volume: 0, total_transactions: 0, overall_success_rate: 0 }
+            return { gateways: [], total_volume_usd: 0, total_transactions: 0, overall_success_rate: 0 }
         }
     },
 
@@ -545,8 +634,7 @@ export const billingApi = {
         invoices: Invoice[]
         payment_methods: PaymentMethod[]
     }> {
-        const userId = getCurrentUserId()
-        return await apiClient.get(`/billing/dashboard/${userId}`)
+        return await apiClient.get(`/billing/dashboard/me`)
     },
 }
 

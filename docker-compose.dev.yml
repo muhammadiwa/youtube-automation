@@ -1,0 +1,68 @@
+version: '3.8'
+
+# Development Docker Compose
+# Usage: docker-compose -f docker-compose.dev.yml up
+
+services:
+  # ===========================================
+  # Database Services Only (for local development)
+  # ===========================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: yt-automation-db-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: youtube_automation
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    container_name: yt-automation-redis-dev
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data_dev:/data
+    ports:
+      - "6379:6379"
+
+  # ===========================================
+  # Optional: Redis Commander (GUI for Redis)
+  # ===========================================
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: yt-automation-redis-gui
+    restart: unless-stopped
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    profiles:
+      - tools
+
+  # ===========================================
+  # Optional: pgAdmin (GUI for PostgreSQL)
+  # ===========================================
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: yt-automation-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    profiles:
+      - tools
+
+volumes:
+  postgres_data_dev:
+  redis_data_dev:

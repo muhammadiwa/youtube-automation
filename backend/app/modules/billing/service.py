@@ -10,6 +10,8 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc, ensure_utc
+
 from app.modules.billing.models import (
     Subscription,
     UsageRecord,
@@ -188,6 +190,29 @@ class BillingService:
 
     # ==================== Subscription Management (28.1, 28.4) ====================
 
+    async def ensure_free_subscription(
+        self,
+        user_id: uuid.UUID,
+    ) -> SubscriptionResponse:
+        """Ensure user has a subscription, create FREE if not exists.
+        
+        This is called during registration and when accessing billing features.
+        """
+        existing = await self.subscription_repo.get_by_user_id(user_id)
+        if existing:
+            return self._subscription_to_response(existing)
+        
+        # Create FREE subscription
+        subscription = await self.subscription_repo.create_subscription(
+            user_id=user_id,
+            plan_tier=PlanTier.FREE.value,
+        )
+        
+        # Initialize usage aggregates for the billing period
+        await self._initialize_usage_aggregates(subscription)
+        
+        return self._subscription_to_response(subscription)
+
     async def create_subscription(
         self,
         user_id: uuid.UUID,
@@ -232,7 +257,7 @@ class BillingService:
         if not subscription:
             return None
 
-        days_until_expiry = (subscription.current_period_end - datetime.utcnow()).days
+        days_until_expiry = (ensure_utc(subscription.current_period_end) - utcnow()).days
         
         # Determine available upgrades
         tier_order = [PlanTier.FREE, PlanTier.BASIC, PlanTier.PRO, PlanTier.ENTERPRISE]
@@ -368,7 +393,7 @@ class BillingService:
         if not subscription:
             return None
         
-        period_end = datetime.utcnow() + timedelta(days=period_days)
+        period_end = to_naive_utc(utcnow()) + timedelta(days=period_days)
         updated = await self.subscription_repo.reactivate_subscription(
             subscription.id,
             plan_tier,
@@ -415,7 +440,7 @@ class BillingService:
                 preserve_until = datetime.fromisoformat(preserve_until_str)
             previous_tier = subscription.custom_limits.get("previous_tier")
         
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         days_remaining = 0
         data_at_risk = False
         
@@ -537,33 +562,258 @@ class BillingService:
         
         Requirements: 27.1 - Display breakdown of usage
         """
+        from sqlalchemy import select, func as sql_func
+        from app.modules.account.models import YouTubeAccount
+        from app.modules.video.models import Video
+        from app.modules.stream.models import LiveEvent, LiveEventStatus
+        from app.modules.stream.stream_job_models import StreamJob, StreamJobStatus
+        
         subscription = await self.subscription_repo.get_by_user_id(user_id)
         if not subscription:
-            raise ValueError("User has no subscription")
+            # Auto-create FREE subscription if not exists
+            await self.ensure_free_subscription(user_id)
+            subscription = await self.subscription_repo.get_by_user_id(user_id)
+        
+        if not subscription:
+            raise ValueError("Failed to create subscription for user")
 
         billing_start = subscription.current_period_start.date()
         billing_end = subscription.current_period_end.date()
-
-        aggregates = await self.usage_repo.get_user_aggregates(user_id, billing_start)
-
+        
+        # Get plan limits from database
+        plan = await self.plan_repo.get_by_slug(subscription.plan_tier)
+        
+        # Get real-time counts from database
+        # 1. Count connected accounts (status = active) - ALL accounts, not per period
+        accounts_result = await self.session.execute(
+            select(sql_func.count(YouTubeAccount.id))
+            .where(YouTubeAccount.user_id == user_id)
+            .where(YouTubeAccount.status == "active")
+        )
+        accounts_count = accounts_result.scalar() or 0
+        
+        # 2. Count videos uploaded to YouTube this billing period
+        # Only count videos with youtube_id (actually published to YouTube)
+        # Library videos without YouTube upload don't count toward this limit
+        videos_result = await self.session.execute(
+            select(sql_func.count(Video.id))
+            .where(Video.user_id == user_id)
+            .where(Video.created_at >= subscription.current_period_start)
+            .where(Video.youtube_id.isnot(None))
+        )
+        videos_count = videos_result.scalar() or 0
+        
+        # 3. Count streams created this billing period (LiveEvent + StreamJob)
+        # 3a. LiveEvent streams
+        live_events_result = await self.session.execute(
+            select(sql_func.count(LiveEvent.id))
+            .join(YouTubeAccount, LiveEvent.account_id == YouTubeAccount.id)
+            .where(YouTubeAccount.user_id == user_id)
+            .where(LiveEvent.created_at >= subscription.current_period_start)
+        )
+        live_events_count = live_events_result.scalar() or 0
+        
+        # 3b. StreamJob (Video-to-Live) streams
+        stream_jobs_result = await self.session.execute(
+            select(sql_func.count(StreamJob.id))
+            .where(StreamJob.user_id == user_id)
+            .where(StreamJob.created_at >= subscription.current_period_start)
+        )
+        stream_jobs_count = stream_jobs_result.scalar() or 0
+        
+        streams_count = live_events_count + stream_jobs_count
+        
+        # 4. Count concurrent streams (currently running) - real-time, no period filter
+        # 4a. LiveEvent with status LIVE
+        concurrent_live_result = await self.session.execute(
+            select(sql_func.count(LiveEvent.id))
+            .join(YouTubeAccount, LiveEvent.account_id == YouTubeAccount.id)
+            .where(YouTubeAccount.user_id == user_id)
+            .where(LiveEvent.status == LiveEventStatus.LIVE.value)
+        )
+        concurrent_live_count = concurrent_live_result.scalar() or 0
+        
+        # 4b. StreamJob with status RUNNING
+        concurrent_jobs_result = await self.session.execute(
+            select(sql_func.count(StreamJob.id))
+            .where(StreamJob.user_id == user_id)
+            .where(StreamJob.status == StreamJobStatus.RUNNING.value)
+        )
+        concurrent_jobs_count = concurrent_jobs_result.scalar() or 0
+        
+        concurrent_count = concurrent_live_count + concurrent_jobs_count
+        
+        # Get plan limits (use plan from database if available, otherwise use subscription limits)
+        if plan:
+            accounts_limit = plan.max_accounts
+            videos_limit = plan.max_videos_per_month
+            streams_limit = plan.max_streams_per_month
+            concurrent_limit = plan.concurrent_streams
+            storage_limit = plan.max_storage_gb
+            bandwidth_limit = plan.max_bandwidth_gb
+        else:
+            limits = subscription.get_limits()
+            accounts_limit = limits.get("connected_accounts", 1)
+            videos_limit = limits.get("max_videos_per_month", 5)
+            streams_limit = limits.get("max_streams_per_month", 0)
+            concurrent_limit = limits.get("concurrent_streams", 1)
+            storage_limit = limits.get("storage_gb", 1)
+            bandwidth_limit = limits.get("bandwidth_gb", 5)
+        
+        # Helper function to calculate percentage
+        def calc_percent(used: float, limit: float) -> float:
+            if limit == -1 or limit == 0:
+                return 0.0
+            return min((used / limit) * 100, 100.0)
+        
+        # Helper function to get warning threshold
+        def get_warning(percent: float) -> int | None:
+            if percent >= 90:
+                return 90
+            elif percent >= 75:
+                return 75
+            elif percent >= 50:
+                return 50
+            return None
+        
+        # Build metrics list with real-time data
         metrics = []
         total_warnings = 0
-        for agg in aggregates:
-            is_unlimited = agg.limit_value == -1
-            percent = 0.0 if is_unlimited else agg.get_usage_percent()
-            warning_threshold = agg.get_warning_threshold_reached()
-            
-            if warning_threshold:
-                total_warnings += 1
-
-            metrics.append(UsageMetric(
-                resource_type=agg.resource_type,
-                used=agg.total_used,
-                limit=agg.limit_value,
-                percent=percent,
-                is_unlimited=is_unlimited,
-                warning_threshold_reached=warning_threshold,
-            ))
+        
+        # Accounts metric
+        accounts_percent = calc_percent(accounts_count, accounts_limit)
+        accounts_warning = get_warning(accounts_percent)
+        if accounts_warning:
+            total_warnings += 1
+        metrics.append(UsageMetric(
+            resource_type="accounts",
+            used=float(accounts_count),
+            limit=float(accounts_limit),
+            percent=accounts_percent,
+            is_unlimited=accounts_limit == -1,
+            warning_threshold_reached=accounts_warning,
+        ))
+        
+        # Videos per month metric
+        videos_percent = calc_percent(videos_count, videos_limit)
+        videos_warning = get_warning(videos_percent)
+        if videos_warning:
+            total_warnings += 1
+        metrics.append(UsageMetric(
+            resource_type="videos_per_month",
+            used=float(videos_count),
+            limit=float(videos_limit),
+            percent=videos_percent,
+            is_unlimited=videos_limit == -1,
+            warning_threshold_reached=videos_warning,
+        ))
+        
+        # Streams per month metric
+        streams_percent = calc_percent(streams_count, streams_limit)
+        streams_warning = get_warning(streams_percent)
+        if streams_warning:
+            total_warnings += 1
+        metrics.append(UsageMetric(
+            resource_type="streams_per_month",
+            used=float(streams_count),
+            limit=float(streams_limit),
+            percent=streams_percent,
+            is_unlimited=streams_limit == -1,
+            warning_threshold_reached=streams_warning,
+        ))
+        
+        # Concurrent streams metric
+        concurrent_percent = calc_percent(concurrent_count, concurrent_limit)
+        concurrent_warning = get_warning(concurrent_percent)
+        if concurrent_warning:
+            total_warnings += 1
+        metrics.append(UsageMetric(
+            resource_type="concurrent_streams",
+            used=float(concurrent_count),
+            limit=float(concurrent_limit),
+            percent=concurrent_percent,
+            is_unlimited=concurrent_limit == -1,
+            warning_threshold_reached=concurrent_warning,
+        ))
+        
+        # Calculate storage from video file sizes (in GB) - exclude archived videos
+        storage_result = await self.session.execute(
+            select(sql_func.coalesce(sql_func.sum(Video.file_size), 0))
+            .where(Video.user_id == user_id)
+            .where(Video.file_size.isnot(None))
+            .where(Video.status != "archived")
+        )
+        total_bytes = storage_result.scalar() or 0
+        storage_used = total_bytes / (1024 * 1024 * 1024)  # Convert bytes to GB
+        
+        # Calculate bandwidth from stream jobs in current billing period
+        # Bandwidth = bitrate (kbps) * duration (seconds) / 8 / 1024 / 1024 = GB
+        # We use target_bitrate * total_duration_seconds for completed/stopped streams
+        bandwidth_result = await self.session.execute(
+            select(
+                sql_func.coalesce(
+                    sql_func.sum(
+                        StreamJob.target_bitrate * StreamJob.total_duration_seconds / 8 / 1024 / 1024
+                    ), 
+                    0
+                )
+            )
+            .where(StreamJob.user_id == user_id)
+            .where(StreamJob.created_at >= subscription.current_period_start)
+            .where(StreamJob.total_duration_seconds > 0)
+        )
+        bandwidth_from_jobs = bandwidth_result.scalar() or 0
+        
+        # Also calculate bandwidth from currently running streams
+        # For running streams, calculate from actual_start_at to now
+        running_streams_result = await self.session.execute(
+            select(StreamJob)
+            .where(StreamJob.user_id == user_id)
+            .where(StreamJob.status == StreamJobStatus.RUNNING.value)
+            .where(StreamJob.actual_start_at.isnot(None))
+        )
+        running_streams = running_streams_result.scalars().all()
+        
+        running_bandwidth = 0.0
+        for stream in running_streams:
+            if stream.actual_start_at:
+                # Calculate duration from start to now
+                from app.core.datetime_utils import utcnow, ensure_utc
+                now = utcnow()
+                start = ensure_utc(stream.actual_start_at)
+                duration_seconds = (now - start).total_seconds()
+                # bitrate (kbps) * duration (s) / 8 / 1024 / 1024 = GB
+                running_bandwidth += (stream.target_bitrate * duration_seconds) / 8 / 1024 / 1024
+        
+        bandwidth_used = float(bandwidth_from_jobs) + running_bandwidth
+        
+        # Storage metric
+        storage_percent = calc_percent(storage_used, storage_limit)
+        storage_warning = get_warning(storage_percent)
+        if storage_warning:
+            total_warnings += 1
+        metrics.append(UsageMetric(
+            resource_type="storage_gb",
+            used=round(storage_used, 2),
+            limit=float(storage_limit),
+            percent=storage_percent,
+            is_unlimited=storage_limit == -1,
+            warning_threshold_reached=storage_warning,
+        ))
+        
+        # Bandwidth metric
+        bandwidth_percent = calc_percent(bandwidth_used, bandwidth_limit)
+        bandwidth_warning = get_warning(bandwidth_percent)
+        if bandwidth_warning:
+            total_warnings += 1
+        metrics.append(UsageMetric(
+            resource_type="bandwidth_gb",
+            used=round(bandwidth_used, 2),
+            limit=float(bandwidth_limit),
+            percent=bandwidth_percent,
+            is_unlimited=bandwidth_limit == -1,
+            warning_threshold_reached=bandwidth_warning,
+        ))
 
         return UsageDashboardResponse(
             user_id=user_id,
@@ -836,9 +1086,12 @@ class BillingService:
         end_date: date,
         resource_types: Optional[list[str]] = None,
     ) -> dict:
-        """Export usage data to CSV file.
+        """Export usage data to CSV file using real-time data.
         
         Requirements: 27.5 - Detailed CSV export with timestamps and resource types
+        
+        This exports actual usage data from source tables (videos, stream_jobs, etc.)
+        instead of the usage_records table which may be empty.
         
         Args:
             user_id: User ID
@@ -851,15 +1104,17 @@ class BillingService:
         """
         import csv
         import io
+        import json
+        from datetime import datetime, timedelta
+        from sqlalchemy import select, and_
         from app.core.storage import storage_service
+        from app.modules.video.models import Video
+        from app.modules.stream.stream_job_models import StreamJob
+        from app.modules.account.models import YouTubeAccount
         
-        # Get all usage records for the date range
-        records = await self.usage_repo.get_usage_records_for_export(
-            user_id=user_id,
-            start_date=start_date,
-            end_date=end_date,
-            resource_types=resource_types,
-        )
+        # Convert dates to datetime for comparison
+        start_datetime = datetime.combine(start_date, datetime.min.time())
+        end_datetime = datetime.combine(end_date, datetime.max.time())
         
         # Generate CSV content
         csv_buffer = io.StringIO()
@@ -867,42 +1122,143 @@ class BillingService:
         
         # Write header row
         writer.writerow([
-            "record_id",
-            "user_id",
-            "subscription_id",
             "resource_type",
+            "resource_id",
+            "resource_name",
             "amount",
-            "billing_period_start",
-            "billing_period_end",
-            "recorded_at",
+            "unit",
+            "created_at",
             "metadata",
         ])
         
-        # Write data rows
-        for record in records:
-            metadata_str = ""
-            if record.usage_metadata:
-                import json
-                metadata_str = json.dumps(record.usage_metadata)
+        record_count = 0
+        
+        # 1. Export Videos (Storage)
+        if not resource_types or "storage_gb" in resource_types:
+            videos_result = await self.session.execute(
+                select(Video)
+                .where(Video.user_id == user_id)
+                .where(Video.created_at >= start_datetime)
+                .where(Video.created_at <= end_datetime)
+                .where(Video.file_size.isnot(None))
+                .order_by(Video.created_at.asc())
+            )
+            videos = videos_result.scalars().all()
             
-            writer.writerow([
-                str(record.id),
-                str(record.user_id),
-                str(record.subscription_id),
-                record.resource_type,
-                record.amount,
-                record.billing_period_start.isoformat(),
-                record.billing_period_end.isoformat(),
-                record.recorded_at.isoformat(),
-                metadata_str,
-            ])
+            for video in videos:
+                size_gb = (video.file_size or 0) / (1024 * 1024 * 1024)
+                # Extract filename from file_path if available
+                video_filename = ""
+                if video.file_path:
+                    video_filename = video.file_path.split("/")[-1].split("\\")[-1]
+                metadata = {
+                    "file_path": video.file_path,
+                    "duration": video.duration,
+                    "resolution": video.resolution,
+                }
+                writer.writerow([
+                    "storage_gb",
+                    str(video.id),
+                    video.title or video_filename or str(video.id)[:8],
+                    round(size_gb, 4),
+                    "GB",
+                    video.created_at.isoformat() if video.created_at else "",
+                    json.dumps(metadata),
+                ])
+                record_count += 1
+        
+        # 2. Export Stream Jobs (Bandwidth)
+        if not resource_types or "bandwidth_gb" in resource_types:
+            streams_result = await self.session.execute(
+                select(StreamJob)
+                .where(StreamJob.user_id == user_id)
+                .where(StreamJob.created_at >= start_datetime)
+                .where(StreamJob.created_at <= end_datetime)
+                .order_by(StreamJob.created_at.asc())
+            )
+            streams = streams_result.scalars().all()
+            
+            for stream in streams:
+                # Calculate bandwidth: bitrate (kbps) * duration (s) / 8 / 1024 / 1024 = GB
+                duration = stream.total_duration_seconds or 0
+                if duration == 0 and stream.actual_start_at and stream.actual_end_at:
+                    duration = (stream.actual_end_at - stream.actual_start_at).total_seconds()
+                
+                bandwidth_gb = (stream.target_bitrate * duration) / 8 / 1024 / 1024
+                
+                metadata = {
+                    "status": stream.status,
+                    "resolution": stream.resolution,
+                    "bitrate_kbps": stream.target_bitrate,
+                    "duration_seconds": duration,
+                    "scheduled_start": stream.scheduled_start_at.isoformat() if stream.scheduled_start_at else None,
+                    "actual_start": stream.actual_start_at.isoformat() if stream.actual_start_at else None,
+                    "actual_end": stream.actual_end_at.isoformat() if stream.actual_end_at else None,
+                }
+                writer.writerow([
+                    "bandwidth_gb",
+                    str(stream.id),
+                    stream.title or f"Stream {str(stream.id)[:8]}",
+                    round(bandwidth_gb, 4),
+                    "GB",
+                    stream.created_at.isoformat() if stream.created_at else "",
+                    json.dumps(metadata),
+                ])
+                record_count += 1
+        
+        # 3. Export YouTube Accounts (Accounts count)
+        if not resource_types or "accounts" in resource_types:
+            accounts_result = await self.session.execute(
+                select(YouTubeAccount)
+                .where(YouTubeAccount.user_id == user_id)
+                .where(YouTubeAccount.status == "active")
+                .order_by(YouTubeAccount.created_at.asc())
+            )
+            accounts = accounts_result.scalars().all()
+            
+            for account in accounts:
+                metadata = {
+                    "channel_id": account.channel_id,
+                    "status": account.status,
+                }
+                writer.writerow([
+                    "accounts",
+                    str(account.id),
+                    account.channel_title or account.channel_id,
+                    1,
+                    "account",
+                    account.created_at.isoformat() if account.created_at else "",
+                    json.dumps(metadata),
+                ])
+                record_count += 1
+        
+        # 4. Add summary row
+        writer.writerow([])  # Empty row
+        writer.writerow(["=== SUMMARY ==="])
+        
+        # Get current usage summary
+        try:
+            dashboard = await self.get_usage_dashboard(user_id)
+            for metric in dashboard.metrics:
+                limit_str = "Unlimited" if metric.is_unlimited else str(metric.limit)
+                writer.writerow([
+                    f"TOTAL: {metric.resource_type}",
+                    "",
+                    "",
+                    metric.used,
+                    "GB" if "gb" in metric.resource_type else "count",
+                    f"Limit: {limit_str}",
+                    f"Usage: {metric.percent:.1f}%",
+                ])
+        except Exception:
+            pass  # Skip summary if error
         
         # Get CSV content as bytes
         csv_content = csv_buffer.getvalue().encode("utf-8")
         csv_buffer.close()
         
         # Generate filename
-        generated_at = datetime.utcnow()
+        generated_at = utcnow()
         filename = f"usage_export_{user_id.hex[:8]}_{start_date.isoformat()}_{end_date.isoformat()}_{generated_at.strftime('%Y%m%d%H%M%S')}.csv"
         
         # Upload to storage
@@ -922,7 +1278,7 @@ class BillingService:
         return {
             "download_url": download_url,
             "filename": filename,
-            "record_count": len(records),
+            "record_count": record_count,
             "generated_at": generated_at,
         }
 
@@ -980,7 +1336,7 @@ class BillingService:
             raise ValueError("User has no subscription")
 
         # Generate invoice number
-        invoice_number = f"INV-{user_id.hex[:8].upper()}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        invoice_number = f"INV-{user_id.hex[:8].upper()}-{utcnow().strftime('%Y%m%d%H%M%S')}"
 
         # Calculate line items based on plan
         line_items = [
@@ -1594,7 +1950,7 @@ class StripePaymentService:
                 status=stripe_inv.status,
                 amount_paid=stripe_inv.amount_paid,
                 amount_due=stripe_inv.amount_due,
-                paid_at=datetime.utcnow() if stripe_inv.status == "paid" else None,
+                paid_at=to_naive_utc(utcnow()) if stripe_inv.status == "paid" else None,
                 invoice_pdf_url=stripe_inv.invoice_pdf,
                 hosted_invoice_url=stripe_inv.hosted_invoice_url,
                 payment_intent_id=stripe_inv.payment_intent_id,

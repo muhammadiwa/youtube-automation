@@ -171,12 +171,17 @@ class RetryPaymentRequest(BaseModel):
 class GatewayStatisticsResponse(BaseModel):
     """Response for gateway statistics."""
     provider: str
+    primary_currency: str = "USD"
     total_transactions: int
     successful_transactions: int
     failed_transactions: int
     success_rate: float
+    # Volume in original currency
     total_volume: float
     average_transaction: float
+    # Volume converted to USD for comparison
+    total_volume_usd: float = 0.0
+    average_transaction_usd: float = 0.0
     health_status: str
     last_transaction_at: Optional[datetime]
     transactions_24h: int
@@ -189,7 +194,8 @@ class GatewayStatisticsResponse(BaseModel):
 class AllGatewayStatisticsResponse(BaseModel):
     """Response for all gateway statistics."""
     gateways: list[GatewayStatisticsResponse]
-    total_volume: float
+    # Total volume in USD (converted from all currencies)
+    total_volume_usd: float
     total_transactions: int
     overall_success_rate: float
 
@@ -207,4 +213,24 @@ class EnableDisableResponse(BaseModel):
     """Response for enable/disable operations."""
     provider: str
     is_enabled: bool
+    message: str
+
+
+# ==================== Discount Code Schemas (Public) ====================
+
+class ApplyDiscountCodeRequest(BaseModel):
+    """Request to validate and apply a discount code."""
+    code: str = Field(..., min_length=1, max_length=50, description="Discount code to apply")
+    plan: Optional[str] = Field(None, description="Plan to check applicability")
+    amount: float = Field(default=0, ge=0, description="Original amount before discount (0 for usage tracking only)")
+
+
+class DiscountCodePublicResponse(BaseModel):
+    """Public response for discount code validation."""
+    is_valid: bool
+    code: Optional[str] = None
+    discount_type: Optional[str] = None  # "percentage" or "fixed"
+    discount_value: Optional[float] = None
+    discount_amount: Optional[float] = None  # Calculated discount amount
+    final_amount: Optional[float] = None  # Amount after discount
     message: str

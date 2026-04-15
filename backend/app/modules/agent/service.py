@@ -11,6 +11,8 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
+
 from app.modules.agent.models import AgentStatus, JobStatus
 from app.modules.agent.repository import AgentRepository, AgentJobRepository
 from app.modules.agent.schemas import (
@@ -75,7 +77,7 @@ class AgentService:
             existing.max_capacity = request.max_capacity
             existing.metadata = request.metadata
             existing.status = AgentStatus.HEALTHY.value
-            existing.last_heartbeat = datetime.utcnow()
+            existing.last_heartbeat = to_naive_utc(utcnow())
             await self.session.flush()
             
             return AgentRegistrationResponse(
@@ -128,13 +130,13 @@ class AgentService:
             return AgentHeartbeatResponse(
                 status=SchemaAgentStatus.OFFLINE,
                 acknowledged=False,
-                server_time=datetime.utcnow(),
+                server_time=to_naive_utc(utcnow()),
             )
         
         return AgentHeartbeatResponse(
             status=SchemaAgentStatus(agent.status),
             acknowledged=True,
-            server_time=datetime.utcnow(),
+            server_time=to_naive_utc(utcnow()),
         )
 
     # ==================== Health Detection (21.2) ====================
@@ -155,7 +157,7 @@ class AgentService:
         for agent in stale_agents:
             # Calculate seconds since last heartbeat
             if agent.last_heartbeat:
-                seconds_since = (datetime.utcnow() - agent.last_heartbeat.replace(tzinfo=None)).total_seconds()
+                seconds_since = (utcnow() - agent.last_heartbeat.replace(tzinfo=None)).total_seconds()
             else:
                 seconds_since = float('inf')
             
@@ -180,7 +182,7 @@ class AgentService:
         unhealthy_count = len(all_agents) - healthy_count
         
         return HealthCheckSummary(
-            checked_at=datetime.utcnow(),
+            checked_at=to_naive_utc(utcnow()),
             total_agents=len(all_agents),
             healthy_agents=healthy_count,
             unhealthy_agents=unhealthy_count,
@@ -207,7 +209,7 @@ class AgentService:
         
         # Handle timezone-aware datetimes
         heartbeat_time = last_heartbeat.replace(tzinfo=None) if last_heartbeat.tzinfo else last_heartbeat
-        elapsed = (datetime.utcnow() - heartbeat_time).total_seconds()
+        elapsed = (utcnow() - heartbeat_time).total_seconds()
         
         return elapsed < threshold_seconds
 

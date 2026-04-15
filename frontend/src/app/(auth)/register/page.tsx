@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useAuth } from "@/hooks/use-auth"
 import { calculatePasswordStrength, getStrengthLabel } from "@/lib/utils/password"
+import { LegalLink } from "@/components/legal-modal"
 
 export default function RegisterPage() {
     const router = useRouter()
@@ -379,13 +380,9 @@ export default function RegisterPage() {
                             />
                             <Label htmlFor="terms" className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 leading-tight cursor-pointer">
                                 I agree to the{" "}
-                                <Link href="/terms" className="text-red-600 dark:text-red-400 hover:underline">
-                                    Terms of Service
-                                </Link>{" "}
+                                <LegalLink type="terms" className="text-red-600 dark:text-red-400 hover:underline" />{" "}
                                 and{" "}
-                                <Link href="/privacy" className="text-red-600 dark:text-red-400 hover:underline">
-                                    Privacy Policy
-                                </Link>
+                                <LegalLink type="privacy" className="text-red-600 dark:text-red-400 hover:underline" />
                             </Label>
                         </div>
 

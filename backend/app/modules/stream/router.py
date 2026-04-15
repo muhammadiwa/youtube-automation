@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.database import get_db
 from app.modules.stream.models import LiveEventStatus
 from app.modules.stream.schemas import (
     CreateLiveEventRequest,
@@ -41,14 +42,97 @@ from app.modules.stream.service import (
     StreamServiceError,
 )
 from app.modules.stream.youtube_api import YouTubeAPIError
+from app.modules.auth.jwt import get_current_user
 
 
-router = APIRouter(prefix="/stream", tags=["stream"])
+router = APIRouter(prefix="/streams", tags=["streams"])
 
 
 def get_stream_service(session: AsyncSession = Depends(get_db)) -> StreamService:
     """Dependency for getting stream service."""
     return StreamService(session)
+
+
+@router.get(
+    "/events",
+    response_model=LiveEventListResponse,
+    summary="List all events",
+    description="Get all live events for the current user across all accounts.",
+)
+async def list_all_events(
+    account_id: Optional[uuid.UUID] = Query(None, alias="account_id", description="Filter by account"),
+    status_filter: Optional[str] = Query(None, alias="status", description="Filter by status"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(10, ge=1, le=100, alias="page_size", description="Items per page"),
+    current_user=Depends(get_current_user),
+    service: StreamService = Depends(get_stream_service),
+) -> LiveEventListResponse:
+    """List all live events for the current user.
+
+    Args:
+        account_id: Optional account filter
+        status_filter: Optional status filter
+        page: Page number
+        page_size: Items per page
+        current_user: Current authenticated user
+        service: Stream service instance
+
+    Returns:
+        LiveEventListResponse: List of live events with pagination
+    """
+    status_enum = None
+    if status_filter:
+        try:
+            status_enum = LiveEventStatus(status_filter)
+        except ValueError:
+            pass  # Ignore invalid status
+
+    events, total = await service.get_user_events(
+        user_id=current_user.id,
+        account_id=account_id,
+        status=status_enum,
+        page=page,
+        page_size=page_size,
+    )
+
+    return LiveEventListResponse(
+        events=[
+            LiveEventResponse(
+                id=e.id,
+                account_id=e.account_id,
+                youtube_broadcast_id=e.youtube_broadcast_id,
+                youtube_stream_id=e.youtube_stream_id,
+                rtmp_url=e.rtmp_url,
+                title=e.title,
+                description=e.description,
+                thumbnail_url=e.thumbnail_url,
+                category_id=e.category_id,
+                tags=e.tags,
+                latency_mode=e.latency_mode,
+                enable_dvr=e.enable_dvr,
+                enable_auto_start=e.enable_auto_start,
+                enable_auto_stop=e.enable_auto_stop,
+                privacy_status=e.privacy_status,
+                made_for_kids=e.made_for_kids,
+                scheduled_start_at=e.scheduled_start_at,
+                scheduled_end_at=e.scheduled_end_at,
+                actual_start_at=e.actual_start_at,
+                actual_end_at=e.actual_end_at,
+                is_recurring=e.is_recurring,
+                parent_event_id=e.parent_event_id,
+                status=e.status,
+                last_error=e.last_error,
+                peak_viewers=e.peak_viewers,
+                total_chat_messages=e.total_chat_messages,
+                created_at=e.created_at,
+                updated_at=e.updated_at,
+            )
+            for e in events
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.post(
@@ -61,7 +145,9 @@ def get_stream_service(session: AsyncSession = Depends(get_db)) -> StreamService
 async def create_live_event(
     request: CreateLiveEventRequest,
     create_on_youtube: bool = Query(True, description="Create broadcast on YouTube"),
+    current_user=Depends(get_current_user),
     service: StreamService = Depends(get_stream_service),
+    db: AsyncSession = Depends(get_db),
 ) -> LiveEventWithRtmpResponse:
     """Create a new live event.
 
@@ -71,14 +157,28 @@ async def create_live_event(
     Args:
         request: Live event creation request
         create_on_youtube: Whether to create on YouTube
+        current_user: Current authenticated user
         service: Stream service instance
+        db: Database session
 
     Returns:
         LiveEventWithRtmpResponse: Created live event with RTMP info
 
     Raises:
-        HTTPException: If account not found or schedule conflict
+        HTTPException: If account not found, schedule conflict, or limit exceeded
     """
+    from app.modules.billing.feature_gate import FeatureGateService, LimitExceededError
+    
+    # Check streams per month limit
+    feature_gate = FeatureGateService(db)
+    try:
+        await feature_gate.check_streams_per_month_limit(current_user.id, raise_on_exceed=True)
+    except LimitExceededError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=e.message,
+        )
+    
     try:
         event = await service.create_live_event(request, create_on_youtube)
         return LiveEventWithRtmpResponse(
@@ -506,6 +606,136 @@ async def delete_live_event(
         await service.delete_live_event(event_id, delete_on_youtube)
     except LiveEventNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.post(
+    "/events/{event_id}/start",
+    response_model=LiveEventResponse,
+    summary="Start a live event",
+    description="Start streaming for a live event.",
+)
+async def start_live_event(
+    event_id: uuid.UUID,
+    service: StreamService = Depends(get_stream_service),
+) -> LiveEventResponse:
+    """Start a live event.
+
+    Transitions the event to LIVE status and starts the stream.
+
+    Args:
+        event_id: Event UUID
+        service: Stream service instance
+
+    Returns:
+        LiveEventResponse: Updated live event
+    """
+    try:
+        session = await service.start_stream(event_id)
+        event = await service.get_live_event(event_id)
+        if not event:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Event {event_id} not found",
+            )
+        return LiveEventResponse(
+            id=event.id,
+            account_id=event.account_id,
+            youtube_broadcast_id=event.youtube_broadcast_id,
+            youtube_stream_id=event.youtube_stream_id,
+            rtmp_url=event.rtmp_url,
+            title=event.title,
+            description=event.description,
+            thumbnail_url=event.thumbnail_url,
+            category_id=event.category_id,
+            tags=event.tags,
+            latency_mode=event.latency_mode,
+            enable_dvr=event.enable_dvr,
+            enable_auto_start=event.enable_auto_start,
+            enable_auto_stop=event.enable_auto_stop,
+            privacy_status=event.privacy_status,
+            made_for_kids=event.made_for_kids,
+            scheduled_start_at=event.scheduled_start_at,
+            scheduled_end_at=event.scheduled_end_at,
+            actual_start_at=event.actual_start_at,
+            actual_end_at=event.actual_end_at,
+            is_recurring=event.is_recurring,
+            parent_event_id=event.parent_event_id,
+            status=event.status,
+            last_error=event.last_error,
+            peak_viewers=event.peak_viewers,
+            total_chat_messages=event.total_chat_messages,
+            created_at=event.created_at,
+            updated_at=event.updated_at,
+        )
+    except LiveEventNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except StreamServiceError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post(
+    "/events/{event_id}/stop",
+    response_model=LiveEventResponse,
+    summary="Stop a live event",
+    description="Stop streaming for a live event.",
+)
+async def stop_live_event(
+    event_id: uuid.UUID,
+    service: StreamService = Depends(get_stream_service),
+) -> LiveEventResponse:
+    """Stop a live event.
+
+    Transitions the event to ENDED status and stops the stream.
+
+    Args:
+        event_id: Event UUID
+        service: Stream service instance
+
+    Returns:
+        LiveEventResponse: Updated live event
+    """
+    try:
+        await service.stop_stream(event_id)
+        event = await service.get_live_event(event_id)
+        if not event:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Event {event_id} not found",
+            )
+        return LiveEventResponse(
+            id=event.id,
+            account_id=event.account_id,
+            youtube_broadcast_id=event.youtube_broadcast_id,
+            youtube_stream_id=event.youtube_stream_id,
+            rtmp_url=event.rtmp_url,
+            title=event.title,
+            description=event.description,
+            thumbnail_url=event.thumbnail_url,
+            category_id=event.category_id,
+            tags=event.tags,
+            latency_mode=event.latency_mode,
+            enable_dvr=event.enable_dvr,
+            enable_auto_start=event.enable_auto_start,
+            enable_auto_stop=event.enable_auto_stop,
+            privacy_status=event.privacy_status,
+            made_for_kids=event.made_for_kids,
+            scheduled_start_at=event.scheduled_start_at,
+            scheduled_end_at=event.scheduled_end_at,
+            actual_start_at=event.actual_start_at,
+            actual_end_at=event.actual_end_at,
+            is_recurring=event.is_recurring,
+            parent_event_id=event.parent_event_id,
+            status=event.status,
+            last_error=event.last_error,
+            peak_viewers=event.peak_viewers,
+            total_chat_messages=event.total_chat_messages,
+            created_at=event.created_at,
+            updated_at=event.updated_at,
+        )
+    except LiveEventNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except StreamServiceError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.post(

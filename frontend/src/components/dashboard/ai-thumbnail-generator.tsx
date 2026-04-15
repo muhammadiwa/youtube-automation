@@ -18,6 +18,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Switch } from "@/components/ui/switch"
 import { Slider } from "@/components/ui/slider"
 import { aiApi, type ThumbnailResult } from "@/lib/api/ai"
+import { useToast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 
 interface AIThumbnailGeneratorProps {
@@ -27,6 +28,7 @@ interface AIThumbnailGeneratorProps {
 }
 
 export function AIThumbnailGenerator({ videoTitle, videoContent, onApply }: AIThumbnailGeneratorProps) {
+    const { addToast } = useToast()
     const [open, setOpen] = useState(false)
     const [loading, setLoading] = useState(false)
     const [thumbnails, setThumbnails] = useState<ThumbnailResult[]>([])
@@ -45,7 +47,7 @@ export function AIThumbnailGenerator({ videoTitle, videoContent, onApply }: AITh
 
     const generateThumbnails = async () => {
         if (!videoTitle.trim()) {
-            alert("Please enter a video title first")
+            addToast({ type: "warning", title: "Missing Title", description: "Please enter a video title first" })
             return
         }
 
@@ -62,7 +64,7 @@ export function AIThumbnailGenerator({ videoTitle, videoContent, onApply }: AITh
             setSelectedIndex(null)
         } catch (error) {
             console.error("Failed to generate thumbnails:", error)
-            alert("Failed to generate thumbnails")
+            addToast({ type: "error", title: "Error", description: "Failed to generate thumbnails" })
         } finally {
             setLoading(false)
         }

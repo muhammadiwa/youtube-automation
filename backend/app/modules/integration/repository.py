@@ -10,6 +10,8 @@ from typing import Optional
 from sqlalchemy import select, update, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
+
 from app.modules.integration.models import (
     APIKey,
     APIKeyUsage,
@@ -146,7 +148,7 @@ class APIKeyRepository:
             return None
         
         api_key.is_active = False
-        api_key.revoked_at = datetime.utcnow()
+        api_key.revoked_at = to_naive_utc(utcnow())
         api_key.revoked_reason = reason
         
         await self.session.commit()
@@ -158,7 +160,7 @@ class APIKeyRepository:
         api_key = await self.get_by_id(key_id)
         if api_key:
             api_key.total_requests += 1
-            api_key.last_used_at = datetime.utcnow()
+            api_key.last_used_at = to_naive_utc(utcnow())
             await self.session.commit()
 
     async def delete_api_key(self, key_id: uuid.UUID) -> bool:
@@ -232,7 +234,7 @@ class APIKeyUsageRepository:
         
         Requirements: 29.2 - Track usage for rate limiting
         """
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         
         # Calculate window starts
         minute_start = now.replace(second=0, microsecond=0)
@@ -291,7 +293,7 @@ class APIKeyUsageRepository:
 
     async def cleanup_old_usage(self, days_to_keep: int = 7) -> int:
         """Clean up old usage records."""
-        cutoff = datetime.utcnow() - timedelta(days=days_to_keep)
+        cutoff = to_naive_utc(utcnow()) - timedelta(days=days_to_keep)
         result = await self.session.execute(
             select(APIKeyUsage).where(APIKeyUsage.window_start < cutoff)
         )
@@ -432,7 +434,7 @@ class WebhookRepository:
             else:
                 webhook.failed_deliveries += 1
                 webhook.last_delivery_status = WebhookDeliveryStatus.FAILED.value
-            webhook.last_delivery_at = datetime.utcnow()
+            webhook.last_delivery_at = to_naive_utc(utcnow())
             await self.session.commit()
 
     async def delete_webhook(self, webhook_id: uuid.UUID) -> bool:
@@ -501,7 +503,7 @@ class WebhookDeliveryRepository:
         delivery.response_status_code = status_code
         delivery.response_body = response_body
         delivery.response_time_ms = response_time_ms
-        delivery.delivered_at = datetime.utcnow()
+        delivery.delivered_at = to_naive_utc(utcnow())
         delivery.next_retry_at = None
         
         await self.session.commit()
@@ -531,7 +533,7 @@ class WebhookDeliveryRepository:
         if delivery.should_retry():
             delivery.status = WebhookDeliveryStatus.RETRYING.value
             retry_delay = delivery.calculate_next_retry_delay()
-            delivery.next_retry_at = datetime.utcnow() + timedelta(seconds=retry_delay)
+            delivery.next_retry_at = to_naive_utc(utcnow()) + timedelta(seconds=retry_delay)
         else:
             delivery.status = WebhookDeliveryStatus.FAILED.value
             delivery.next_retry_at = None
@@ -545,7 +547,7 @@ class WebhookDeliveryRepository:
         
         Requirements: 29.4 - Retry with exponential backoff
         """
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         result = await self.session.execute(
             select(WebhookDelivery).where(
                 and_(

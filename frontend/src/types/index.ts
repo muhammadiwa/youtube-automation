@@ -17,30 +17,55 @@ export interface YouTubeAccount {
     thumbnailUrl: string
     subscriberCount: number
     videoCount: number
+    viewCount: number
     isMonetized: boolean
     hasLiveStreamingEnabled: boolean
     strikeCount: number
     tokenExpiresAt: string
     lastSyncAt: string
     status: "active" | "expired" | "error"
+    // Stream key info
+    hasStreamKey: boolean
+    streamKeyMasked: string | null
+    rtmpUrl: string | null
 }
 
 export interface Video {
     id: string
-    youtubeId: string
+    youtubeId?: string
     accountId: string
+    userId?: string
     title: string
-    description: string
-    tags: string[]
-    categoryId: string
-    thumbnailUrl: string
+    description?: string
+    tags?: string[]
+    categoryId?: string
+    thumbnailUrl?: string
     visibility: "public" | "unlisted" | "private"
     scheduledPublishAt?: string
     publishedAt?: string
     viewCount: number
     likeCount: number
     commentCount: number
-    status: "draft" | "uploading" | "processing" | "published" | "scheduled"
+    status: "draft" | "uploading" | "processing" | "published" | "scheduled" | "failed" | "in_library" | "uploaded" | "processing_upload"
+    uploadProgress?: number  // 0-100 progress for both YouTube upload and library upload processing
+    filePath?: string  // Local file path for Video-to-Live streaming
+    fileSize?: number
+    duration?: number  // Duration in seconds
+    format?: string  // Video format (mp4, mov, etc)
+    resolution?: string  // Video resolution (1080p, 720p, etc)
+    // Library-specific fields
+    folderId?: string | null
+    isFavorite?: boolean
+    customTags?: string[]
+    notes?: string
+    isUsedForStreaming?: boolean
+    streamingCount?: number
+    totalStreamingDuration?: number  // Total streaming duration in seconds
+    streamUrl?: string  // URL for video preview (CDN or stream endpoint)
+    // Error tracking
+    lastUploadError?: string | null  // Error message if upload/processing failed
+    createdAt?: string
+    updatedAt?: string
 }
 
 export interface LiveEvent {

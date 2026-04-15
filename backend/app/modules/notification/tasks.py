@@ -11,6 +11,7 @@ from typing import Optional
 from celery import shared_task
 
 from app.core.config import settings
+from app.core.datetime_utils import utcnow
 
 
 @shared_task(
@@ -37,7 +38,7 @@ def process_notification_delivery(
     return {
         "notification_id": notification_id,
         "status": "delivered",
-        "delivered_at": datetime.utcnow().isoformat(),
+        "delivered_at": utcnow().isoformat(),
     }
 
 
@@ -66,7 +67,7 @@ def process_notification_batch(
         "batch_id": batch_id,
         "user_id": user_id,
         "status": "processed",
-        "processed_at": datetime.utcnow().isoformat(),
+        "processed_at": utcnow().isoformat(),
     }
 
 
@@ -95,7 +96,7 @@ def process_escalation(
         "notification_id": notification_id,
         "escalation_level": escalation_level,
         "status": "escalated",
-        "escalated_at": datetime.utcnow().isoformat(),
+        "escalated_at": utcnow().isoformat(),
     }
 
 
@@ -109,7 +110,7 @@ def check_pending_escalations() -> dict:
         Summary of escalations processed
     """
     return {
-        "checked_at": datetime.utcnow().isoformat(),
+        "checked_at": utcnow().isoformat(),
         "escalations_triggered": 0,
     }
 
@@ -124,7 +125,7 @@ def process_pending_batches() -> dict:
         Summary of batches processed
     """
     return {
-        "processed_at": datetime.utcnow().isoformat(),
+        "processed_at": utcnow().isoformat(),
         "batches_processed": 0,
     }
 

@@ -13,14 +13,10 @@ import {
     Menu,
     Youtube,
     HelpCircle,
-    Shield,
-    MessageSquare,
-    DollarSign,
-    Target,
-    AlertTriangle,
-    ListTodo,
     Monitor,
     Wallet,
+    Shield,
+    LifeBuoy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -30,17 +26,13 @@ import { useState } from "react";
 const navigation = [
     { name: "Dashboard", href: "/dashboard", icon: Home },
     { name: "Accounts", href: "/dashboard/accounts", icon: Users },
-    { name: "Videos", href: "/dashboard/videos", icon: Video },
+    { name: "Videos", href: "/dashboard/videos/library", icon: Video },
     { name: "Streams", href: "/dashboard/streams", icon: Radio },
-    { name: "Comments", href: "/dashboard/comments", icon: MessageSquare },
-    { name: "Moderation", href: "/dashboard/moderation/settings", icon: Shield },
     { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
-    { name: "Revenue", href: "/dashboard/revenue", icon: DollarSign },
-    { name: "Competitors", href: "/dashboard/competitors", icon: Target },
-    { name: "Strikes", href: "/dashboard/strikes", icon: AlertTriangle },
+    { name: "Moderation", href: "/dashboard/moderation/settings", icon: Shield },
     { name: "Monitoring", href: "/dashboard/monitoring", icon: Monitor },
-    { name: "Jobs", href: "/dashboard/jobs", icon: ListTodo },
     { name: "Billing", href: "/dashboard/billing", icon: Wallet },
+    { name: "Support", href: "/dashboard/support", icon: LifeBuoy },
     { name: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 
@@ -89,25 +81,13 @@ export function Sidebar({ className }: SidebarProps) {
         if (href === "/dashboard") {
             return pathname === "/dashboard";
         }
-        // Handle moderation routes - check if pathname starts with /dashboard/moderation
+        // Handle videos routes - check if pathname starts with /dashboard/videos
+        if (href.startsWith("/dashboard/videos")) {
+            return pathname.startsWith("/dashboard/videos");
+        }
+        // Handle moderation routes
         if (href.startsWith("/dashboard/moderation")) {
             return pathname.startsWith("/dashboard/moderation");
-        }
-        // Handle comments routes - check if pathname starts with /dashboard/comments
-        if (href.startsWith("/dashboard/comments")) {
-            return pathname.startsWith("/dashboard/comments");
-        }
-        // Handle revenue routes - check if pathname starts with /dashboard/revenue
-        if (href.startsWith("/dashboard/revenue")) {
-            return pathname.startsWith("/dashboard/revenue");
-        }
-        // Handle strikes routes - check if pathname starts with /dashboard/strikes
-        if (href.startsWith("/dashboard/strikes")) {
-            return pathname.startsWith("/dashboard/strikes");
-        }
-        // Handle jobs routes - check if pathname starts with /dashboard/jobs
-        if (href.startsWith("/dashboard/jobs")) {
-            return pathname.startsWith("/dashboard/jobs");
         }
         // Handle monitoring routes
         if (href.startsWith("/dashboard/monitoring")) {
@@ -120,6 +100,10 @@ export function Sidebar({ className }: SidebarProps) {
         // Handle billing routes
         if (href.startsWith("/dashboard/billing")) {
             return pathname.startsWith("/dashboard/billing");
+        }
+        // Handle support routes
+        if (href.startsWith("/dashboard/support")) {
+            return pathname.startsWith("/dashboard/support");
         }
         return pathname.startsWith(href);
     };
@@ -165,13 +149,15 @@ export function Sidebar({ className }: SidebarProps) {
                     <p className="text-xs text-muted-foreground leading-relaxed">
                         Check our docs for guides and tutorials.
                     </p>
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        className="mt-3 w-full text-xs h-8 rounded-lg border-red-500/20 hover:bg-red-500/10 hover:text-red-500 transition-colors"
-                    >
-                        View Documentation
-                    </Button>
+                    <Link href="/dashboard/docs">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            className="mt-3 w-full text-xs h-8 rounded-lg border-red-500/20 hover:bg-red-500/10 hover:text-red-500 transition-colors"
+                        >
+                            View Documentation
+                        </Button>
+                    </Link>
                 </div>
             </div>
         </div>
@@ -243,13 +229,15 @@ export function MobileSidebar() {
                             <p className="text-xs text-muted-foreground leading-relaxed">
                                 Check our docs for guides.
                             </p>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                className="mt-3 w-full text-xs h-8 rounded-lg border-red-500/20 hover:bg-red-500/10 hover:text-red-500 transition-colors"
-                            >
-                                View Docs
-                            </Button>
+                            <Link href="/dashboard/docs" onClick={() => setOpen(false)}>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="mt-3 w-full text-xs h-8 rounded-lg border-red-500/20 hover:bg-red-500/10 hover:text-red-500 transition-colors"
+                                >
+                                    View Docs
+                                </Button>
+                            </Link>
                         </div>
                     </div>
                 </div>

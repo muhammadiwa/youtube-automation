@@ -4,6 +4,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import { useRouter } from "next/navigation"
 import apiClient from "@/lib/api/client"
 import authApi from "@/lib/api/auth"
+import { clearAdminStatusCache } from "@/hooks/use-admin"
 import type { AuthState, LoginCredentials, RegisterData, AuthTokens } from "@/types/auth"
 
 const TOKEN_KEY = "auth_access_token"
@@ -126,6 +127,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             await authApi.logout()
         } finally {
             clearTokens()
+            clearAdminStatusCache() // Clear admin cache on logout
             apiClient.setUserId(null)
             setState({
                 user: null,

@@ -6,29 +6,80 @@ export interface LiveEvent {
     account_id: string
     title: string
     description?: string
-    scheduled_start: string
-    scheduled_end?: string
-    status: "scheduled" | "live" | "ended" | "cancelled"
-    broadcast_id?: string
-    stream_id?: string
+    scheduled_start: string  // mapped from scheduled_start_at
+    scheduled_end?: string   // mapped from scheduled_end_at
+    status: "scheduled" | "live" | "ended" | "cancelled" | "created"
+    broadcast_id?: string    // mapped from youtube_broadcast_id
+    stream_id?: string       // mapped from youtube_stream_id
     rtmp_url?: string
-    stream_key?: string
+    stream_key?: string      // mapped from rtmp_key
     privacy_status: "public" | "unlisted" | "private"
     enable_dvr: boolean
     enable_auto_start: boolean
     enable_auto_stop: boolean
     thumbnail_url?: string
-    viewer_count?: number
+    viewer_count?: number    // mapped from peak_viewers
     created_at: string
     updated_at: string
+}
+
+// Backend response format (raw from API)
+interface BackendLiveEvent {
+    id: string
+    account_id: string
+    title: string
+    description?: string
+    scheduled_start_at?: string
+    scheduled_end_at?: string
+    actual_start_at?: string
+    actual_end_at?: string
+    status: string
+    youtube_broadcast_id?: string
+    youtube_stream_id?: string
+    rtmp_url?: string
+    rtmp_key?: string
+    privacy_status: string
+    enable_dvr: boolean
+    enable_auto_start: boolean
+    enable_auto_stop: boolean
+    thumbnail_url?: string
+    peak_viewers?: number
+    total_chat_messages?: number
+    created_at: string
+    updated_at: string
+}
+
+// Transform backend response to frontend format
+function transformLiveEvent(event: BackendLiveEvent): LiveEvent {
+    return {
+        id: event.id,
+        account_id: event.account_id,
+        title: event.title,
+        description: event.description,
+        scheduled_start: event.scheduled_start_at || event.actual_start_at || "",
+        scheduled_end: event.scheduled_end_at || event.actual_end_at,
+        status: event.status as LiveEvent["status"],
+        broadcast_id: event.youtube_broadcast_id,
+        stream_id: event.youtube_stream_id,
+        rtmp_url: event.rtmp_url,
+        stream_key: event.rtmp_key,
+        privacy_status: event.privacy_status as LiveEvent["privacy_status"],
+        enable_dvr: event.enable_dvr,
+        enable_auto_start: event.enable_auto_start,
+        enable_auto_stop: event.enable_auto_stop,
+        thumbnail_url: event.thumbnail_url,
+        viewer_count: event.peak_viewers,
+        created_at: event.created_at,
+        updated_at: event.updated_at,
+    }
 }
 
 export interface CreateLiveEventRequest {
     account_id: string
     title: string
     description?: string
-    scheduled_start: string
-    scheduled_end?: string
+    scheduled_start_at: string  // Use backend field name
+    scheduled_end_at?: string   // Use backend field name
     privacy_status?: "public" | "unlisted" | "private"
     enable_dvr?: boolean
     enable_auto_start?: boolean
@@ -39,44 +90,15 @@ export interface CreateLiveEventRequest {
 export interface UpdateLiveEventRequest {
     title?: string
     description?: string
-    scheduled_start?: string
-    scheduled_end?: string
+    scheduled_start_at?: string  // Use backend field name
+    scheduled_end_at?: string    // Use backend field name
     privacy_status?: "public" | "unlisted" | "private"
     enable_dvr?: boolean
     enable_auto_start?: boolean
     enable_auto_stop?: boolean
 }
 
-// ============ Stream Health Types ============
-export interface StreamHealth {
-    event_id: string
-    status: "healthy" | "warning" | "critical" | "offline"
-    bitrate: number
-    dropped_frames: number
-    fps: number
-    resolution: string
-    connection_quality: number
-    last_updated: string
-}
 
-export interface StreamHealthHistory {
-    timestamp: string
-    bitrate: number
-    dropped_frames: number
-    fps: number
-    connection_quality: number
-    viewer_count: number
-}
-
-export interface StreamAlert {
-    id: string
-    event_id: string
-    type: "health_warning" | "health_critical" | "reconnection" | "failover" | "disconnection"
-    message: string
-    severity: "info" | "warning" | "error"
-    acknowledged: boolean
-    created_at: string
-}
 
 // ============ Playlist Types ============
 export interface PlaylistItem {
@@ -104,7 +126,6 @@ export interface SimulcastTarget {
     rtmp_url: string
     stream_key: string
     status: "active" | "inactive" | "error"
-    health?: StreamHealth
 }
 
 export interface CreateSimulcastTargetRequest {
@@ -120,6 +141,14 @@ export interface LiveEventsResponse {
     page_size: number
 }
 
+// Backend response format for list
+interface BackendLiveEventsResponse {
+    events: BackendLiveEvent[]
+    total: number
+    page: number
+    page_size: number
+}
+
 export const streamsApi = {
     // ============ Live Events ============
     async getEvents(params?: {
@@ -129,7 +158,18 @@ export const streamsApi = {
         page_size?: number
     }): Promise<LiveEventsResponse> {
         try {
-            return await apiClient.get("/streams/events", params)
+            const response = await apiClient.get<BackendLiveEventsResponse>("/streams/events", params)
+
+            // Transform backend events to frontend format
+            if ('events' in response && Array.isArray(response.events)) {
+                return {
+                    items: response.events.map(transformLiveEvent),
+                    total: response.total || 0,
+                    page: response.page || 1,
+                    page_size: response.page_size || 10,
+                }
+            }
+            return { items: [], total: 0, page: 1, page_size: 10 }
         } catch (error) {
             console.error("Failed to fetch events:", error)
             return { items: [], total: 0, page: 1, page_size: 10 }
@@ -137,15 +177,18 @@ export const streamsApi = {
     },
 
     async getEvent(eventId: string): Promise<LiveEvent> {
-        return await apiClient.get(`/streams/events/${eventId}`)
+        const response = await apiClient.get<BackendLiveEvent>(`/streams/events/${eventId}`)
+        return transformLiveEvent(response)
     },
 
     async createEvent(data: CreateLiveEventRequest): Promise<LiveEvent> {
-        return await apiClient.post("/streams/events", data)
+        const response = await apiClient.post<BackendLiveEvent>("/streams/events", data)
+        return transformLiveEvent(response)
     },
 
     async updateEvent(eventId: string, data: UpdateLiveEventRequest): Promise<LiveEvent> {
-        return await apiClient.patch(`/streams/events/${eventId}`, data)
+        const response = await apiClient.put<BackendLiveEvent>(`/streams/events/${eventId}`, data)
+        return transformLiveEvent(response)
     },
 
     async deleteEvent(eventId: string): Promise<void> {
@@ -153,58 +196,13 @@ export const streamsApi = {
     },
 
     async startEvent(eventId: string): Promise<LiveEvent> {
-        return await apiClient.post(`/streams/events/${eventId}/start`)
+        const response = await apiClient.post<BackendLiveEvent>(`/streams/events/${eventId}/start`)
+        return transformLiveEvent(response)
     },
 
     async stopEvent(eventId: string): Promise<LiveEvent> {
-        return await apiClient.post(`/streams/events/${eventId}/stop`)
-    },
-
-    // ============ Stream Health ============
-    async getHealth(eventId: string): Promise<StreamHealth> {
-        try {
-            return await apiClient.get(`/streams/events/${eventId}/health`)
-        } catch (error) {
-            return {
-                event_id: eventId,
-                status: "offline",
-                bitrate: 0,
-                dropped_frames: 0,
-                fps: 0,
-                resolution: "0x0",
-                connection_quality: 0,
-                last_updated: new Date().toISOString(),
-            }
-        }
-    },
-
-    async getHealthHistory(eventId: string, duration?: string): Promise<StreamHealthHistory[]> {
-        try {
-            return await apiClient.get(`/streams/events/${eventId}/health/history`, { duration })
-        } catch (error) {
-            // Return mock data for demo purposes
-            const now = Date.now()
-            return Array.from({ length: 30 }, (_, i) => ({
-                timestamp: new Date(now - (29 - i) * 60000).toISOString(),
-                bitrate: 4500 + Math.random() * 1000 - 500,
-                dropped_frames: Math.floor(Math.random() * 5),
-                fps: 29 + Math.random() * 2,
-                connection_quality: 85 + Math.random() * 15,
-                viewer_count: Math.floor(100 + Math.random() * 50),
-            }))
-        }
-    },
-
-    async getAlerts(eventId: string): Promise<StreamAlert[]> {
-        try {
-            return await apiClient.get(`/streams/events/${eventId}/alerts`)
-        } catch (error) {
-            return []
-        }
-    },
-
-    async acknowledgeAlert(eventId: string, alertId: string): Promise<void> {
-        return await apiClient.post(`/streams/events/${eventId}/alerts/${alertId}/acknowledge`)
+        const response = await apiClient.post<BackendLiveEvent>(`/streams/events/${eventId}/stop`)
+        return transformLiveEvent(response)
     },
 
     // ============ Playlist ============

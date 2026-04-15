@@ -24,6 +24,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from app.core.config import settings
+from app.core.datetime_utils import utcnow, to_naive_utc
 
 
 @dataclass
@@ -67,7 +68,7 @@ class KMSKeyManager:
         self._keys[1] = KeyVersion(
             version=1,
             key=primary_key,
-            created_at=datetime.utcnow(),
+            created_at=to_naive_utc(utcnow()),
             is_active=True
         )
     
@@ -142,7 +143,7 @@ class KMSKeyManager:
         key_version = KeyVersion(
             version=new_version,
             key=new_key,
-            created_at=datetime.utcnow(),
+            created_at=to_naive_utc(utcnow()),
             is_active=True
         )
         
@@ -175,7 +176,7 @@ class KMSKeyManager:
             bool: True if rotation is recommended
         """
         current_key = self.get_current_key()
-        age = datetime.utcnow() - current_key.created_at
+        age = to_naive_utc(utcnow()) - current_key.created_at
         return age > timedelta(days=self._rotation_interval_days)
     
     def get_fernet(self) -> Fernet:
@@ -278,7 +279,7 @@ def kms_encrypt(plaintext: str) -> EncryptedData:
     return EncryptedData(
         ciphertext=ciphertext,
         key_version=km._current_version,
-        encrypted_at=datetime.utcnow()
+        encrypted_at=to_naive_utc(utcnow())
     )
 
 
@@ -407,7 +408,8 @@ def get_key_rotation_status() -> dict[str, Any]:
         "current_version": km._current_version,
         "total_keys": len(km._keys),
         "active_keys": len(km.get_all_active_keys()),
-        "current_key_age_days": (datetime.utcnow() - current_key.created_at).days,
+        "current_key_age_days": (to_naive_utc(utcnow()) - current_key.created_at).days,
         "rotation_recommended": km.should_rotate(),
         "rotation_interval_days": km._rotation_interval_days
     }
+

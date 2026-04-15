@@ -12,6 +12,7 @@ from sqlalchemy import select, update, delete, func as sql_func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.video.models import (
     Video,
     VideoStatus,
@@ -28,6 +29,20 @@ class VideoRepository:
         """Initialize repository with database session."""
         self.session = session
 
+    def _apply_active_filter(self, query, include_deleted: bool = False):
+        """Apply filter to exclude soft-deleted videos.
+        
+        Args:
+            query: SQLAlchemy query
+            include_deleted: If True, include soft-deleted videos
+            
+        Returns:
+            Modified query with deleted_at filter
+        """
+        if not include_deleted:
+            query = query.where(Video.deleted_at.is_(None))
+        return query
+
     async def create(
         self,
         account_id: uuid.UUID,
@@ -39,6 +54,8 @@ class VideoRepository:
         file_path: Optional[str] = None,
         file_size: Optional[int] = None,
         scheduled_publish_at: Optional[datetime] = None,
+        thumbnail_path: Optional[str] = None,
+        duration: Optional[int] = None,
     ) -> Video:
         """Create a new video.
 
@@ -52,6 +69,8 @@ class VideoRepository:
             file_path: Path to video file
             file_size: Size of video file in bytes
             scheduled_publish_at: Scheduled publish datetime
+            thumbnail_path: Path to thumbnail file
+            duration: Video duration in seconds
 
         Returns:
             Video: Created video instance
@@ -71,6 +90,8 @@ class VideoRepository:
             file_size=file_size,
             scheduled_publish_at=scheduled_publish_at,
             status=status,
+            local_thumbnail_path=thumbnail_path,
+            duration=duration,
         )
 
         self.session.add(video)
@@ -82,35 +103,38 @@ class VideoRepository:
         return video
 
     async def get_by_id(
-        self, video_id: uuid.UUID, include_versions: bool = False
+        self, video_id: uuid.UUID, include_versions: bool = False, include_deleted: bool = False
     ) -> Optional[Video]:
         """Get video by ID.
 
         Args:
             video_id: Video UUID
             include_versions: Whether to load metadata versions
+            include_deleted: Whether to include soft-deleted videos
 
         Returns:
             Optional[Video]: Video if found, None otherwise
         """
         query = select(Video).where(Video.id == video_id)
+        query = self._apply_active_filter(query, include_deleted)
         if include_versions:
             query = query.options(selectinload(Video.metadata_versions))
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
-    async def get_by_youtube_id(self, youtube_id: str) -> Optional[Video]:
+    async def get_by_youtube_id(self, youtube_id: str, include_deleted: bool = False) -> Optional[Video]:
         """Get video by YouTube video ID.
 
         Args:
             youtube_id: YouTube video ID
+            include_deleted: Whether to include soft-deleted videos
 
         Returns:
             Optional[Video]: Video if found, None otherwise
         """
-        result = await self.session.execute(
-            select(Video).where(Video.youtube_id == youtube_id)
-        )
+        query = select(Video).where(Video.youtube_id == youtube_id)
+        query = self._apply_active_filter(query, include_deleted)
+        result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
     async def get_by_account_id(
@@ -119,6 +143,7 @@ class VideoRepository:
         status: Optional[VideoStatus] = None,
         limit: int = 100,
         offset: int = 0,
+        include_deleted: bool = False,
     ) -> list[Video]:
         """Get all videos for an account.
 
@@ -127,6 +152,7 @@ class VideoRepository:
             status: Optional status filter
             limit: Maximum number of results
             offset: Number of results to skip
+            include_deleted: Whether to include soft-deleted videos
 
         Returns:
             list[Video]: List of videos
@@ -138,6 +164,7 @@ class VideoRepository:
             .limit(limit)
             .offset(offset)
         )
+        query = self._apply_active_filter(query, include_deleted)
         if status:
             query = query.where(Video.status == status.value)
         result = await self.session.execute(query)
@@ -149,12 +176,14 @@ class VideoRepository:
         Returns:
             list[Video]: Videos ready to be published
         """
-        now = datetime.utcnow()
-        result = await self.session.execute(
+        now = utcnow()
+        query = (
             select(Video)
             .where(Video.status == VideoStatus.SCHEDULED.value)
-            .where(Video.scheduled_publish_at <= now)
+            .where(Video.scheduled_publish_at <= to_naive_utc(now))
         )
+        query = self._apply_active_filter(query, include_deleted=False)
+        result = await self.session.execute(query)
         return list(result.scalars().all())
 
     async def update(self, video: Video, **kwargs) -> Video:
@@ -380,7 +409,7 @@ class VideoRepository:
         """
         video.status = VideoStatus.PUBLISHED.value
         video.visibility = VideoVisibility.PUBLIC.value
-        video.published_at = datetime.utcnow()
+        video.published_at = utcnow()
         await self.session.flush()
         return video
 
@@ -435,22 +464,115 @@ class VideoRepository:
         await self.session.flush()
 
     async def count_by_account(
-        self, account_id: uuid.UUID, status: Optional[VideoStatus] = None
+        self, account_id: uuid.UUID, status: Optional[VideoStatus] = None, include_deleted: bool = False
     ) -> int:
         """Count videos for an account.
 
         Args:
             account_id: YouTube account UUID
             status: Optional status filter
+            include_deleted: Whether to include soft-deleted videos
 
         Returns:
             int: Number of videos
         """
         query = select(sql_func.count(Video.id)).where(Video.account_id == account_id)
+        query = self._apply_active_filter(query, include_deleted)
         if status:
             query = query.where(Video.status == status.value)
         result = await self.session.execute(query)
         return result.scalar_one() or 0
+
+    async def get_all_paginated(
+        self,
+        user_id: uuid.UUID,
+        account_id: Optional[uuid.UUID] = None,
+        status: Optional[VideoStatus] = None,
+        visibility: Optional[VideoVisibility] = None,
+        search: Optional[str] = None,
+        sort_by: str = "created_at",
+        sort_order: str = "desc",
+        page: int = 1,
+        page_size: int = 20,
+        include_deleted: bool = False,
+    ) -> tuple[list[Video], int]:
+        """Get all videos for a user with pagination and filters.
+
+        Args:
+            user_id: User UUID (to filter by user's accounts)
+            account_id: Optional account filter
+            status: Optional status filter
+            visibility: Optional visibility filter
+            search: Optional search query for title/description
+            sort_by: Field to sort by (created_at, view_count, status)
+            sort_order: Sort order (asc, desc)
+            page: Page number (1-indexed)
+            page_size: Number of items per page
+            include_deleted: Whether to include soft-deleted videos
+
+        Returns:
+            tuple: (list of videos, total count)
+        """
+        from app.modules.account.models import YouTubeAccount
+
+        # Base query - join with accounts to filter by user
+        base_query = (
+            select(Video)
+            .join(YouTubeAccount, Video.account_id == YouTubeAccount.id)
+            .where(YouTubeAccount.user_id == user_id)
+        )
+        count_query = (
+            select(sql_func.count(Video.id))
+            .join(YouTubeAccount, Video.account_id == YouTubeAccount.id)
+            .where(YouTubeAccount.user_id == user_id)
+        )
+        
+        # Apply soft delete filter
+        base_query = self._apply_active_filter(base_query, include_deleted)
+        count_query = self._apply_active_filter(count_query, include_deleted)
+
+        # Apply filters
+        if account_id:
+            base_query = base_query.where(Video.account_id == account_id)
+            count_query = count_query.where(Video.account_id == account_id)
+
+        if status:
+            base_query = base_query.where(Video.status == status.value)
+            count_query = count_query.where(Video.status == status.value)
+
+        if visibility:
+            base_query = base_query.where(Video.visibility == visibility.value)
+            count_query = count_query.where(Video.visibility == visibility.value)
+
+        if search:
+            search_filter = f"%{search}%"
+            base_query = base_query.where(
+                (Video.title.ilike(search_filter)) | (Video.description.ilike(search_filter))
+            )
+            count_query = count_query.where(
+                (Video.title.ilike(search_filter)) | (Video.description.ilike(search_filter))
+            )
+
+        # Get total count
+        count_result = await self.session.execute(count_query)
+        total = count_result.scalar_one() or 0
+
+        # Apply sorting
+        sort_column = getattr(Video, sort_by, Video.created_at)
+        if sort_order == "desc":
+            base_query = base_query.order_by(sort_column.desc())
+        else:
+            base_query = base_query.order_by(sort_column.asc())
+
+        # Apply pagination
+        offset = (page - 1) * page_size
+        base_query = base_query.offset(offset).limit(page_size)
+
+        # Execute query
+        result = await self.session.execute(base_query)
+        videos = list(result.scalars().all())
+
+        return videos, total
 
 
 class VideoTemplateRepository:
@@ -464,20 +586,24 @@ class VideoTemplateRepository:
         self,
         user_id: uuid.UUID,
         name: str,
+        title_template: Optional[str] = None,
         description_template: Optional[str] = None,
         tags: Optional[list[str]] = None,
         category_id: Optional[str] = None,
         visibility: str = VideoVisibility.PRIVATE.value,
+        is_default: bool = False,
     ) -> VideoTemplate:
         """Create a new video template.
 
         Args:
             user_id: Owner user UUID
             name: Template name
+            title_template: Title template
             description_template: Description template
             tags: Default tags
             category_id: Default category ID
             visibility: Default visibility
+            is_default: Whether this is the default template
 
         Returns:
             VideoTemplate: Created template instance
@@ -485,14 +611,30 @@ class VideoTemplateRepository:
         template = VideoTemplate(
             user_id=user_id,
             name=name,
+            title_template=title_template,
             description_template=description_template,
             tags=tags,
             category_id=category_id,
             visibility=visibility,
+            is_default=is_default,
         )
         self.session.add(template)
         await self.session.flush()
         return template
+
+    async def unset_defaults(self, user_id: uuid.UUID) -> None:
+        """Unset default flag for all templates of a user.
+
+        Args:
+            user_id: User UUID
+        """
+        from sqlalchemy import update
+        await self.session.execute(
+            update(VideoTemplate)
+            .where(VideoTemplate.user_id == user_id)
+            .values(is_default=False)
+        )
+        await self.session.flush()
 
     async def get_by_id(self, template_id: uuid.UUID) -> Optional[VideoTemplate]:
         """Get template by ID.

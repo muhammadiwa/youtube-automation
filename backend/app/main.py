@@ -19,19 +19,27 @@ from app.core.middleware import (
 )
 from app.modules.auth.router import router as auth_router
 from app.modules.account import account_router
+from app.modules.video.router import router as video_router
+from app.modules.video.library_router import router as library_router
 from app.modules.stream import router as stream_router
+from app.modules.stream.stream_job_router import router as stream_job_router
 from app.modules.ai.router import router as ai_router
-from app.modules.competitor.router import router as competitor_router
+from app.modules.analytics.router import router as analytics_router
+from app.modules.moderation.router import router as moderation_router
 from app.modules.monitoring import monitoring_router
 from app.modules.agent import agent_router
 from app.modules.job.router import router as job_router
 from app.modules.notification import notification_router
 from app.modules.system_monitoring import system_monitoring_router
 from app.modules.security.router import router as security_router
-from app.modules.backup import backup_router
 from app.modules.billing import router as billing_router
 from app.modules.payment_gateway.router import admin_router as payment_gateway_admin_router, payment_router as payment_gateway_payment_router
 from app.modules.integration.router import router as integration_router
+from app.modules.admin import admin_router
+from app.modules.admin.public_router import router as public_announcements_router
+from app.modules.blog import blog_router
+from app.modules.blog.contact_router import router as contact_router
+from app.modules.support import support_router
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -49,7 +57,7 @@ dan memanfaatkan AI untuk optimasi konten.
 * **Video Management** - Upload, metadata, scheduling, bulk operations
 * **Live Streaming** - Event creation, scheduling, health monitoring
 * **AI Services** - Title/description generation, thumbnail creation
-* **Analytics** - Dashboard metrics, revenue tracking, competitor analysis
+* **Analytics** - Dashboard metrics, competitor analysis
 * **Job Queue** - Background task processing dengan retry logic
 * **Notifications** - Multi-channel alerts (email, SMS, Slack, Telegram)
 
@@ -91,11 +99,7 @@ Authorization: Bearer <access_token>
         },
         {
             "name": "analytics",
-            "description": "Analytics and reporting - metrics, revenue, competitor analysis",
-        },
-        {
-            "name": "competitors",
-            "description": "Competitor tracking and analysis - metrics, content, AI recommendations",
+            "description": "Analytics and reporting - metrics tracking",
         },
         {
             "name": "monitoring",
@@ -133,6 +137,10 @@ Authorization: Bearer <access_token>
             "name": "integration",
             "description": "API key management, webhooks, and developer integration",
         },
+        {
+            "name": "admin",
+            "description": "Admin panel - user management, system monitoring, billing administration",
+        },
     ],
     contact={
         "name": "API Support",
@@ -161,6 +169,14 @@ setup_tracing(
 
 # Set up default alert thresholds (Requirements: 24.4)
 setup_default_thresholds()
+
+# Set up admin error alerting (Requirements: 7.5)
+from app.modules.admin.system_service import setup_admin_error_alerting
+setup_admin_error_alerting()
+
+# Set up quota alerting (Requirements: 11.2)
+from app.modules.admin.quota_service import setup_quota_alerting
+setup_quota_alerting()
 
 # Set application info for metrics
 set_app_info(
@@ -264,17 +280,27 @@ async def health_check() -> dict[str, str]:
 # Include routers
 app.include_router(auth_router, prefix=settings.API_V1_PREFIX)
 app.include_router(account_router, prefix=settings.API_V1_PREFIX)
+# IMPORTANT: library_router MUST be registered BEFORE video_router
+# because /videos/library is more specific than /videos/{video_id}
+app.include_router(library_router, prefix=settings.API_V1_PREFIX)
+app.include_router(video_router, prefix=settings.API_V1_PREFIX)
 app.include_router(stream_router, prefix=settings.API_V1_PREFIX)
+app.include_router(stream_job_router, prefix=settings.API_V1_PREFIX)
 app.include_router(ai_router, prefix=settings.API_V1_PREFIX)
-app.include_router(competitor_router, prefix=settings.API_V1_PREFIX)
+app.include_router(analytics_router, prefix=settings.API_V1_PREFIX)
+app.include_router(moderation_router, prefix=settings.API_V1_PREFIX)
 app.include_router(monitoring_router, prefix=settings.API_V1_PREFIX)
 app.include_router(agent_router, prefix=settings.API_V1_PREFIX)
 app.include_router(job_router, prefix=settings.API_V1_PREFIX)
 app.include_router(notification_router, prefix=settings.API_V1_PREFIX)
 app.include_router(system_monitoring_router, prefix=settings.API_V1_PREFIX)
 app.include_router(security_router, prefix=settings.API_V1_PREFIX)
-app.include_router(backup_router, prefix=settings.API_V1_PREFIX)
 app.include_router(billing_router, prefix=settings.API_V1_PREFIX)
 app.include_router(payment_gateway_admin_router, prefix=settings.API_V1_PREFIX)
 app.include_router(payment_gateway_payment_router, prefix=settings.API_V1_PREFIX)
 app.include_router(integration_router, prefix=settings.API_V1_PREFIX)
+app.include_router(admin_router, prefix=settings.API_V1_PREFIX)
+app.include_router(public_announcements_router, prefix=settings.API_V1_PREFIX)
+app.include_router(blog_router, prefix=settings.API_V1_PREFIX)
+app.include_router(contact_router, prefix=settings.API_V1_PREFIX)
+app.include_router(support_router, prefix=settings.API_V1_PREFIX)

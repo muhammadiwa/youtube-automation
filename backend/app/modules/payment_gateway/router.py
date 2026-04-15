@@ -377,7 +377,11 @@ async def get_gateway_statistics(
     """Get statistics for a specific gateway.
     
     Requirements: 30.6 - Transaction statistics, success rates, health status
+    
+    Volumes are shown in original currency and also converted to USD.
     """
+    from app.modules.admin.billing_service import convert_to_usd
+    
     service = GatewayManagerService(session)
     stats = await service.get_gateway_statistics(provider.value)
     
@@ -387,14 +391,25 @@ async def get_gateway_statistics(
             detail=f"Statistics for gateway {provider.value} not found",
         )
     
+    # Get gateway config to determine primary currency
+    config = await service.get_gateway(provider.value)
+    primary_currency = config.supported_currencies[0] if config and config.supported_currencies else "USD"
+    
+    # Convert volumes to USD
+    volume_usd = await convert_to_usd(stats.total_volume, primary_currency)
+    avg_usd = await convert_to_usd(stats.average_transaction, primary_currency)
+    
     return GatewayStatisticsResponse(
         provider=stats.provider,
+        primary_currency=primary_currency,
         total_transactions=stats.total_transactions,
         successful_transactions=stats.successful_transactions,
         failed_transactions=stats.failed_transactions,
         success_rate=stats.success_rate,
         total_volume=stats.total_volume,
         average_transaction=stats.average_transaction,
+        total_volume_usd=volume_usd,
+        average_transaction_usd=avg_usd,
         health_status=stats.health_status,
         last_transaction_at=stats.last_transaction_at,
         transactions_24h=stats.transactions_24h,
@@ -409,28 +424,50 @@ async def get_all_gateway_statistics(
     """Get statistics for all gateways.
     
     Requirements: 30.6 - Gateway dashboard with statistics
+    
+    All volumes are converted to USD for accurate comparison across gateways
+    with different currencies (e.g., IDR for Midtrans, USD for PayPal).
     """
+    from app.modules.admin.billing_service import convert_to_usd
+    
     service = GatewayManagerService(session)
     all_stats = await service.get_all_gateway_statistics()
     
-    gateway_stats = [
-        GatewayStatisticsResponse(
+    # Get gateway configs to determine primary currency
+    all_configs = await service.get_all_gateways()
+    config_map = {c.provider: c for c in all_configs}
+    
+    gateway_stats = []
+    total_volume_usd = 0.0
+    
+    for s in all_stats:
+        # Get primary currency for this gateway
+        config = config_map.get(s.provider)
+        primary_currency = config.supported_currencies[0] if config and config.supported_currencies else "USD"
+        
+        # Convert volumes to USD
+        volume_usd = await convert_to_usd(s.total_volume, primary_currency)
+        avg_usd = await convert_to_usd(s.average_transaction, primary_currency)
+        
+        gateway_stats.append(GatewayStatisticsResponse(
             provider=s.provider,
+            primary_currency=primary_currency,
             total_transactions=s.total_transactions,
             successful_transactions=s.successful_transactions,
             failed_transactions=s.failed_transactions,
             success_rate=s.success_rate,
             total_volume=s.total_volume,
             average_transaction=s.average_transaction,
+            total_volume_usd=volume_usd,
+            average_transaction_usd=avg_usd,
             health_status=s.health_status,
             last_transaction_at=s.last_transaction_at,
             transactions_24h=s.transactions_24h,
             success_rate_24h=s.success_rate_24h,
-        )
-        for s in all_stats
-    ]
+        ))
+        
+        total_volume_usd += volume_usd
     
-    total_volume = sum(s.total_volume for s in all_stats)
     total_transactions = sum(s.total_transactions for s in all_stats)
     total_successful = sum(s.successful_transactions for s in all_stats)
     overall_success_rate = (
@@ -440,7 +477,7 @@ async def get_all_gateway_statistics(
     
     return AllGatewayStatisticsResponse(
         gateways=gateway_stats,
-        total_volume=total_volume,
+        total_volume_usd=total_volume_usd,
         total_transactions=total_transactions,
         overall_success_rate=overall_success_rate,
     )
@@ -952,6 +989,131 @@ async def retry_payment(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
+
+
+# ==================== Discount Code Endpoints (Public) ====================
+
+from app.modules.payment_gateway.schemas import (
+    ApplyDiscountCodeRequest,
+    DiscountCodePublicResponse,
+)
+
+
+@payment_router.post("/discount-code/validate", response_model=DiscountCodePublicResponse)
+async def validate_discount_code(
+    data: ApplyDiscountCodeRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Validate and calculate discount for a promo code.
+    
+    This is a public endpoint for users to validate discount codes during checkout.
+    
+    Args:
+        data: Discount code, plan, and original amount
+        
+    Returns:
+        Validation result with calculated discount amount
+    """
+    from sqlalchemy import select
+    from app.modules.admin.models import DiscountCode
+    
+    # Find the discount code
+    result = await session.execute(
+        select(DiscountCode).where(DiscountCode.code == data.code.upper())
+    )
+    discount_code = result.scalar_one_or_none()
+    
+    if not discount_code:
+        return DiscountCodePublicResponse(
+            is_valid=False,
+            message="Invalid discount code"
+        )
+    
+    # Check if code is valid (active, within date range, usage limit)
+    if not discount_code.is_valid():
+        if not discount_code.is_active:
+            return DiscountCodePublicResponse(
+                is_valid=False,
+                message="This discount code is no longer active"
+            )
+        if discount_code.usage_limit and discount_code.usage_count >= discount_code.usage_limit:
+            return DiscountCodePublicResponse(
+                is_valid=False,
+                message="This discount code has reached its usage limit"
+            )
+        return DiscountCodePublicResponse(
+            is_valid=False,
+            message="This discount code has expired"
+        )
+    
+    # Check plan applicability
+    if data.plan and discount_code.applicable_plans:
+        if data.plan.lower() not in [p.lower() for p in discount_code.applicable_plans]:
+            return DiscountCodePublicResponse(
+                is_valid=False,
+                message=f"This discount code is not applicable to the {data.plan} plan"
+            )
+    
+    # Calculate discount
+    discount_amount = discount_code.calculate_discount(data.amount)
+    final_amount = max(0, data.amount - discount_amount)
+    
+    return DiscountCodePublicResponse(
+        is_valid=True,
+        code=discount_code.code,
+        discount_type=discount_code.discount_type,
+        discount_value=discount_code.discount_value,
+        discount_amount=round(discount_amount, 2),
+        final_amount=round(final_amount, 2),
+        message=f"Discount code applied! You save ${discount_amount:.2f}"
+    )
+
+
+@payment_router.post("/discount-code/apply")
+async def apply_discount_code(
+    data: ApplyDiscountCodeRequest,
+    user_id: uuid.UUID = Header(..., alias="X-User-ID"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Apply a discount code and increment usage count.
+    
+    This should be called after successful payment to track usage.
+    
+    Args:
+        data: Discount code and amount info
+        user_id: User applying the code
+        
+    Returns:
+        Updated discount info
+    """
+    from sqlalchemy import select
+    from app.modules.admin.models import DiscountCode
+    
+    # Find the discount code
+    result = await session.execute(
+        select(DiscountCode).where(DiscountCode.code == data.code.upper())
+    )
+    discount_code = result.scalar_one_or_none()
+    
+    if not discount_code or not discount_code.is_valid():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired discount code"
+        )
+    
+    # Increment usage count
+    discount_code.usage_count += 1
+    await session.commit()
+    
+    discount_amount = discount_code.calculate_discount(data.amount)
+    
+    return {
+        "success": True,
+        "code": discount_code.code,
+        "discount_amount": round(discount_amount, 2),
+        "new_usage_count": discount_code.usage_count,
+        "message": "Discount code applied successfully"
+    }
 
 
 @payment_router.post("/webhook/{provider}")

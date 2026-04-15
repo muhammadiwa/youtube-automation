@@ -1,6 +1,6 @@
 """Authentication router for user registration, login, and token management."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -89,12 +89,14 @@ async def register(
 )
 async def login(
     data: LoginRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> LoginResponse:
     """Login user and return tokens.
     
     Args:
         data: Login credentials
+        request: FastAPI request for IP extraction
         db: Database session
         
     Returns:
@@ -103,13 +105,18 @@ async def login(
     Raises:
         HTTPException: If credentials are invalid
     """
+    from app.core.geolocation import get_client_ip
+    from app.modules.auth.service import AuthenticationError
+    
     service = AuthService(db)
+    client_ip = get_client_ip(request)
     
     try:
         result = await service.login(
             email=data.email,
             password=data.password,
             remember_me=data.remember_me,
+            client_ip=client_ip,
         )
         
         return LoginResponse(
@@ -119,6 +126,11 @@ async def login(
             token_type=result["token_type"],
             requires_2fa=result.get("requires_2fa", False),
             temp_token=result.get("temp_token"),
+        )
+    except AuthenticationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
         )
     except ValueError as e:
         raise HTTPException(
@@ -149,11 +161,18 @@ async def refresh_token(
     Raises:
         HTTPException: If refresh token is invalid
     """
+    from app.modules.auth.service import AuthenticationError
+    
     service = AuthService(db)
     
     try:
         result = await service.refresh_token(data.refresh_token)
         return TokenResponse(**result)
+    except AuthenticationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -226,9 +245,18 @@ async def enable_2fa(
     Returns:
         TwoFactorSetupResponse: TOTP secret, QR code, and backup codes
     """
+    from app.modules.auth.service import AuthenticationError
+    
     service = AuthService(db)
-    result = await service.enable_2fa(current_user.id)
-    return TwoFactorSetupResponse(**result)
+    
+    try:
+        result = await service.enable_2fa(current_user.id)
+        return TwoFactorSetupResponse(**result)
+    except AuthenticationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
 
 
 @router.post(
@@ -254,11 +282,18 @@ async def verify_2fa_setup(
     Raises:
         HTTPException: If code is invalid
     """
+    from app.modules.auth.service import AuthenticationError
+    
     service = AuthService(db)
     
     try:
         result = await service.verify_2fa_setup(current_user.id, data.code)
         return result
+    except AuthenticationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -280,12 +315,14 @@ async def verify_2fa_setup(
 )
 async def verify_2fa_login(
     data: TwoFactorVerifyRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
     """Verify 2FA code during login.
     
     Args:
         data: TOTP code and temp token
+        request: FastAPI request for IP extraction
         db: Database session
         
     Returns:
@@ -294,14 +331,23 @@ async def verify_2fa_login(
     Raises:
         HTTPException: If code or temp token is invalid
     """
+    from app.core.geolocation import get_client_ip
+    from app.modules.auth.service import AuthenticationError
+    
     service = AuthService(db)
+    client_ip = get_client_ip(request)
     
     try:
         if not data.temp_token:
             raise ValueError("Temporary token is required")
         
-        result = await service.verify_2fa_login(data.temp_token, data.code)
+        result = await service.verify_2fa_login(data.temp_token, data.code, client_ip)
         return TokenResponse(**result)
+    except AuthenticationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -330,10 +376,17 @@ async def disable_2fa(
     Raises:
         HTTPException: If code is invalid
     """
+    from app.modules.auth.service import AuthenticationError
+    
     service = AuthService(db)
     
     try:
         await service.disable_2fa(current_user.id, data.code)
+    except AuthenticationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

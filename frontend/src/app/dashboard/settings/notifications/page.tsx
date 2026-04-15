@@ -23,38 +23,36 @@ import { apiClient } from "@/lib/api/client"
 
 type NotificationType =
     // Stream events
-    | "stream_started"
-    | "stream_ended"
-    | "stream_error"
-    | "stream_disconnected"
-    | "stream_reconnected"
+    | "stream.started"
+    | "stream.ended"
+    | "stream.health_degraded"
+    | "stream.disconnected"
+    | "stream.reconnected"
     // Video events
-    | "upload_complete"
-    | "upload_failed"
+    | "video.uploaded"
+    | "video.processing_failed"
     // Account events
-    | "quota_warning"
-    | "token_expiring"
-    | "token_expired"
+    | "account.quota_warning"
+    | "account.token_expiring"
+    | "account.token_expired"
+    // Strike events
+    | "strike.detected"
+    | "strike.resolved"
     // Channel events
-    | "strike_detected"
-    | "strike_resolved"
-    | "revenue_alert"
-    | "competitor_update"
-    | "comment_received"
-    | "subscriber_milestone"
+    | "channel.subscriber_milestone"
     // System events
-    | "system_alert"
-    | "security_alert"
-    | "backup_completed"
-    | "backup_failed"
-    // Payment/Billing events
-    | "payment_success"
-    | "payment_failed"
-    | "subscription_activated"
-    | "subscription_cancelled"
-    | "subscription_expiring"
-    | "subscription_expired"
-    | "subscription_renewed"
+    | "system.alert"
+    | "security.alert"
+    | "backup.completed"
+    | "backup.failed"
+    // Billing events
+    | "payment.success"
+    | "payment.failed"
+    | "subscription.activated"
+    | "subscription.cancelled"
+    | "subscription.expiring"
+    | "subscription.expired"
+    | "subscription.renewed"
 
 interface NotificationPreference {
     id: string
@@ -62,6 +60,7 @@ interface NotificationPreference {
     event_type: NotificationType
     email_enabled: boolean
     telegram_enabled: boolean
+    telegram_chat_id?: string
 }
 
 interface ChannelState {
@@ -74,47 +73,37 @@ interface ChannelState {
 
 const EVENT_TYPES: { type: NotificationType; label: string; description: string; category: string }[] = [
     // Stream events
-    { type: "stream_started", label: "Stream Started", description: "When a live stream begins", category: "Streaming" },
-    { type: "stream_ended", label: "Stream Ended", description: "When a live stream ends", category: "Streaming" },
-    { type: "stream_error", label: "Stream Error", description: "When a stream encounters an error", category: "Streaming" },
-    { type: "stream_disconnected", label: "Stream Disconnected", description: "When a stream loses connection", category: "Streaming" },
-    { type: "stream_reconnected", label: "Stream Reconnected", description: "When a stream reconnects successfully", category: "Streaming" },
+    { type: "stream.started", label: "Stream Started", description: "When a live stream begins", category: "Streaming" },
+    { type: "stream.ended", label: "Stream Ended", description: "When a live stream ends", category: "Streaming" },
+    { type: "stream.health_degraded", label: "Stream Error", description: "When a stream encounters an error", category: "Streaming" },
+    { type: "stream.disconnected", label: "Stream Disconnected", description: "When a stream loses connection", category: "Streaming" },
+    { type: "stream.reconnected", label: "Stream Reconnected", description: "When a stream reconnects successfully", category: "Streaming" },
     // Video events
-    { type: "upload_complete", label: "Upload Complete", description: "When a video upload finishes", category: "Videos" },
-    { type: "upload_failed", label: "Upload Failed", description: "When a video upload fails", category: "Videos" },
+    { type: "video.uploaded", label: "Video Uploaded", description: "When a video upload finishes", category: "Videos" },
+    { type: "video.processing_failed", label: "Processing Failed", description: "When video processing fails", category: "Videos" },
     // Account events
-    { type: "quota_warning", label: "Quota Warning", description: "When API quota is running low", category: "Account" },
-    { type: "token_expiring", label: "Token Expiring", description: "When OAuth token is about to expire", category: "Account" },
-    { type: "token_expired", label: "Token Expired", description: "When OAuth token has expired", category: "Account" },
+    { type: "account.quota_warning", label: "Quota Warning", description: "When API quota is running low", category: "Account" },
+    { type: "account.token_expiring", label: "Token Expiring", description: "When OAuth token is about to expire", category: "Account" },
+    { type: "account.token_expired", label: "Token Expired", description: "When OAuth token has expired", category: "Account" },
+    // Strike events
+    { type: "strike.detected", label: "Strike Detected", description: "When a strike is detected on your channel", category: "Channel" },
+    { type: "strike.resolved", label: "Strike Resolved", description: "When a strike is resolved", category: "Channel" },
     // Channel events
-    { type: "strike_detected", label: "Strike Detected", description: "When a strike is detected on your channel", category: "Channel" },
-    { type: "strike_resolved", label: "Strike Resolved", description: "When a strike is resolved", category: "Channel" },
-    { type: "revenue_alert", label: "Revenue Alert", description: "Significant changes in revenue", category: "Channel" },
-    { type: "competitor_update", label: "Competitor Update", description: "When competitors publish new content", category: "Channel" },
-    { type: "comment_received", label: "Comment Received", description: "When new comments need attention", category: "Channel" },
-    { type: "subscriber_milestone", label: "Subscriber Milestone", description: "When you reach subscriber milestones", category: "Channel" },
+    { type: "channel.subscriber_milestone", label: "Subscriber Milestone", description: "When you reach subscriber milestones", category: "Channel" },
     // System events
-    { type: "system_alert", label: "System Alert", description: "Important system notifications", category: "System" },
-    { type: "security_alert", label: "Security Alert", description: "Security-related notifications", category: "System" },
-    { type: "backup_completed", label: "Backup Completed", description: "When a backup completes successfully", category: "System" },
-    { type: "backup_failed", label: "Backup Failed", description: "When a backup fails", category: "System" },
+    { type: "system.alert", label: "System Alert", description: "Important system notifications", category: "System" },
+    { type: "security.alert", label: "Security Alert", description: "Security-related notifications", category: "System" },
+    { type: "backup.completed", label: "Backup Completed", description: "When a backup completes successfully", category: "System" },
+    { type: "backup.failed", label: "Backup Failed", description: "When a backup fails", category: "System" },
     // Billing events
-    { type: "payment_success", label: "Payment Success", description: "When a payment is completed successfully", category: "Billing" },
-    { type: "payment_failed", label: "Payment Failed", description: "When a payment fails", category: "Billing" },
-    { type: "subscription_activated", label: "Subscription Activated", description: "When your subscription is activated", category: "Billing" },
-    { type: "subscription_cancelled", label: "Subscription Cancelled", description: "When your subscription is cancelled", category: "Billing" },
-    { type: "subscription_expiring", label: "Subscription Expiring", description: "When your subscription is about to expire", category: "Billing" },
-    { type: "subscription_expired", label: "Subscription Expired", description: "When your subscription has expired", category: "Billing" },
-    { type: "subscription_renewed", label: "Subscription Renewed", description: "When your subscription is renewed", category: "Billing" },
+    { type: "payment.success", label: "Payment Success", description: "When a payment is completed successfully", category: "Billing" },
+    { type: "payment.failed", label: "Payment Failed", description: "When a payment fails", category: "Billing" },
+    { type: "subscription.activated", label: "Subscription Activated", description: "When your subscription is activated", category: "Billing" },
+    { type: "subscription.cancelled", label: "Subscription Cancelled", description: "When your subscription is cancelled", category: "Billing" },
+    { type: "subscription.expiring", label: "Subscription Expiring", description: "When your subscription is about to expire", category: "Billing" },
+    { type: "subscription.expired", label: "Subscription Expired", description: "When your subscription has expired", category: "Billing" },
+    { type: "subscription.renewed", label: "Subscription Renewed", description: "When your subscription is renewed", category: "Billing" },
 ]
-
-const DEFAULT_PREFERENCES: NotificationPreference[] = EVENT_TYPES.map((event, index) => ({
-    id: `pref-${index}`,
-    user_id: "",
-    event_type: event.type,
-    email_enabled: true,
-    telegram_enabled: false,
-}))
 
 // Group events by category for display
 const CATEGORIES = ["Streaming", "Videos", "Account", "Channel", "System", "Billing"] as const
@@ -124,14 +113,13 @@ export default function NotificationSettingsPage() {
         { type: "email", label: "Email", description: "Receive notifications via email", enabled: true },
         { type: "telegram", label: "Telegram", description: "Receive notifications via Telegram", enabled: false },
     ])
-    const [preferences, setPreferences] = useState<NotificationPreference[]>(DEFAULT_PREFERENCES)
+    const [preferences, setPreferences] = useState<NotificationPreference[]>([])
     const [loading, setLoading] = useState(true)
     const [configDialogOpen, setConfigDialogOpen] = useState(false)
     const [selectedChannel, setSelectedChannel] = useState<ChannelState | null>(null)
     const [saving, setSaving] = useState(false)
     const [testing, setTesting] = useState<string | null>(null)
     const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
-    const [telegramBotToken, setTelegramBotToken] = useState("")
     const [telegramChatId, setTelegramChatId] = useState("")
 
     useEffect(() => {
@@ -141,24 +129,42 @@ export default function NotificationSettingsPage() {
     const loadData = async () => {
         try {
             setLoading(true)
-            // Get user_id from localStorage or use "current"
-            const userId = localStorage.getItem("user_id") || "current"
 
-            // Load preferences from backend - endpoint: GET /notifications/preferences/{user_id}
+            // Load preferences from backend - endpoint: GET /notifications/preferences/me
             try {
-                const prefsData = await apiClient.get<NotificationPreference[]>(`/notifications/preferences/${userId}`)
+                const prefsData = await apiClient.get<NotificationPreference[]>(`/notifications/preferences/me`)
                 if (prefsData && prefsData.length > 0) {
                     setPreferences(prefsData)
+
                     // Derive channel states from preferences
+                    // Email is enabled if at least one preference has email_enabled = true
                     const hasEmailEnabled = prefsData.some(p => p.email_enabled)
                     const hasTelegramEnabled = prefsData.some(p => p.telegram_enabled)
+
+                    // Get telegram_chat_id from any preference that has it
+                    const prefWithTelegram = prefsData.find(p => p.telegram_chat_id)
+                    if (prefWithTelegram?.telegram_chat_id) {
+                        setTelegramChatId(prefWithTelegram.telegram_chat_id)
+                    }
+
                     setChannels([
                         { type: "email", label: "Email", description: "Receive notifications via email", enabled: hasEmailEnabled },
-                        { type: "telegram", label: "Telegram", description: "Receive notifications via Telegram", enabled: hasTelegramEnabled },
+                        { type: "telegram", label: "Telegram", description: "Receive notifications via Telegram", enabled: hasTelegramEnabled, config: prefWithTelegram?.telegram_chat_id ? { chat_id: prefWithTelegram.telegram_chat_id } : undefined },
+                    ])
+                } else {
+                    // No preferences yet - set default channel states
+                    // Email enabled by default, telegram disabled
+                    setChannels([
+                        { type: "email", label: "Email", description: "Receive notifications via email", enabled: true },
+                        { type: "telegram", label: "Telegram", description: "Receive notifications via Telegram", enabled: false },
                     ])
                 }
             } catch {
-                // Use default preferences if API fails
+                // Use default channel states if API fails
+                setChannels([
+                    { type: "email", label: "Email", description: "Receive notifications via email", enabled: true },
+                    { type: "telegram", label: "Telegram", description: "Receive notifications via Telegram", enabled: false },
+                ])
             }
         } catch (error) {
             console.error("Failed to load notification settings:", error)
@@ -177,12 +183,26 @@ export default function NotificationSettingsPage() {
         if (!selectedChannel) return
         try {
             setSaving(true)
-            // Store telegram config in localStorage for now (backend can be extended to support this)
+
             if (selectedChannel.type === "telegram") {
-                localStorage.setItem("telegram_bot_token", telegramBotToken)
-                localStorage.setItem("telegram_chat_id", telegramChatId)
+                // Update all preferences with telegram_chat_id
+                for (const pref of preferences) {
+                    if (pref.id) {
+                        await apiClient.put(`/notifications/preferences/${pref.id}`, {
+                            telegram_chat_id: telegramChatId,
+                        })
+                    }
+                }
+
+                // Update local state
+                setPreferences(prev => prev.map(p => ({ ...p, telegram_chat_id: telegramChatId })))
             }
-            setChannels(prev => prev.map(c => c.type === selectedChannel.type ? { ...c, enabled: true, config: selectedChannel.type === "telegram" ? { bot_token: telegramBotToken, chat_id: telegramChatId } : undefined } : c))
+
+            setChannels(prev => prev.map(c =>
+                c.type === selectedChannel.type
+                    ? { ...c, enabled: true, config: selectedChannel.type === "telegram" ? { chat_id: telegramChatId } : undefined }
+                    : c
+            ))
             setConfigDialogOpen(false)
         } catch (error) {
             console.error("Failed to save channel config:", error)
@@ -195,17 +215,17 @@ export default function NotificationSettingsPage() {
         try {
             setTesting(channelType)
             setTestResult(null)
-            // Send test notification using the notification send endpoint
-            const userId = localStorage.getItem("user_id") || "current"
-            await apiClient.post("/notifications/send", {
-                user_id: userId,
-                channel: channelType,
-                title: "Test Notification",
-                message: `This is a test notification for ${channelType}`,
-                priority: "low"
+
+            // Use the test channel endpoint
+            const result = await apiClient.post<{ success: boolean; message: string }>(`/notifications/channels/${channelType}/test`, {
+                chat_id: channelType === "telegram" ? telegramChatId : undefined
             })
-            setTestResult({ success: true, message: "Test notification sent!" })
-        } catch {
+
+            setTestResult({
+                success: result?.success ?? false,
+                message: result?.message || (result?.success ? "Test notification sent!" : "Failed to send test notification")
+            })
+        } catch (error) {
             setTestResult({ success: false, message: "Failed to send test notification" })
         } finally {
             setTesting(null)
@@ -216,20 +236,31 @@ export default function NotificationSettingsPage() {
         try {
             if (enabled && channelType === "telegram") {
                 const channel = channels.find(c => c.type === channelType)
-                if (channel && !channel.config?.bot_token) {
-                    // Load saved config from localStorage
-                    const savedToken = localStorage.getItem("telegram_bot_token")
-                    const savedChatId = localStorage.getItem("telegram_chat_id")
-                    if (savedToken && savedChatId) {
-                        setTelegramBotToken(savedToken)
-                        setTelegramChatId(savedChatId)
-                    } else {
+                // Check if telegram is configured (has chat_id)
+                if (!channel?.config?.chat_id && !telegramChatId) {
+                    // Open config dialog to set up telegram
+                    if (channel) {
                         openConfigDialog(channel)
-                        return
                     }
+                    return
                 }
             }
-            // Update local state - channel preferences are managed through individual event preferences
+
+            // Update all preferences for this channel in database
+            const field = channelType === "email" ? "email_enabled" : "telegram_enabled"
+
+            for (const pref of preferences) {
+                if (pref.id) {
+                    await apiClient.put(`/notifications/preferences/${pref.id}`, {
+                        [field]: enabled
+                    })
+                }
+            }
+
+            // Update local preferences state
+            setPreferences(prev => prev.map(p => ({ ...p, [field]: enabled })))
+
+            // Update channel state
             setChannels(prev => prev.map(c => c.type === channelType ? { ...c, enabled } : c))
         } catch (error) {
             console.error("Failed to toggle channel:", error)
@@ -240,22 +271,24 @@ export default function NotificationSettingsPage() {
         try {
             // Find the preference to get its ID
             const pref = preferences.find(p => p.event_type === eventType)
-            if (pref && pref.id && !pref.id.startsWith("pref-")) {
-                // Use PUT /notifications/preferences/{preference_id} for existing preferences
+            if (pref && pref.id) {
+                // Use PUT /notifications/preferences/{preference_id} to update
                 await apiClient.put(`/notifications/preferences/${pref.id}`, {
-                    event_type: eventType,
                     [field]: value
                 })
+                setPreferences(prev => prev.map(p => p.event_type === eventType ? { ...p, [field]: value } : p))
             } else {
-                // Create new preference if it doesn't exist
-                const userId = localStorage.getItem("user_id") || "current"
-                await apiClient.post(`/notifications/preferences?user_id=${userId}`, {
+                // Preference doesn't exist yet, create it
+                const newPref = await apiClient.post<NotificationPreference>(`/notifications/preferences/me`, {
                     event_type: eventType,
-                    email_enabled: field === "email_enabled" ? value : false,
+                    email_enabled: field === "email_enabled" ? value : true,
                     telegram_enabled: field === "telegram_enabled" ? value : false,
+                    telegram_chat_id: telegramChatId || undefined,
                 })
+                if (newPref?.id) {
+                    setPreferences(prev => [...prev, newPref])
+                }
             }
-            setPreferences(prev => prev.map(p => p.event_type === eventType ? { ...p, [field]: value } : p))
         } catch (error) {
             console.error("Failed to update preference:", error)
         }
@@ -392,18 +425,13 @@ export default function NotificationSettingsPage() {
                 <DialogContent className="max-w-md">
                     <DialogHeader>
                         <DialogTitle>Configure Telegram</DialogTitle>
-                        <DialogDescription>Enter your Telegram bot credentials to receive notifications</DialogDescription>
+                        <DialogDescription>Enter your Telegram Chat ID to receive notifications</DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-4">
                         <div className="space-y-2">
-                            <Label htmlFor="botToken">Bot Token</Label>
-                            <Input id="botToken" value={telegramBotToken} onChange={(e) => setTelegramBotToken(e.target.value)} placeholder="123456:ABC-DEF..." />
-                            <p className="text-xs text-muted-foreground">Get this from @BotFather on Telegram</p>
-                        </div>
-                        <div className="space-y-2">
                             <Label htmlFor="chatId">Chat ID</Label>
                             <Input id="chatId" value={telegramChatId} onChange={(e) => setTelegramChatId(e.target.value)} placeholder="123456789" />
-                            <p className="text-xs text-muted-foreground">Your Telegram user ID or group chat ID</p>
+                            <p className="text-xs text-muted-foreground">Your Telegram user ID or group chat ID. To get your Chat ID, message @userinfobot on Telegram.</p>
                         </div>
                         {testResult && (
                             <Alert variant={testResult.success ? "default" : "destructive"}>
@@ -413,12 +441,12 @@ export default function NotificationSettingsPage() {
                         )}
                     </div>
                     <DialogFooter className="flex-col sm:flex-row gap-2">
-                        <Button variant="outline" onClick={() => handleTestChannel("telegram")} disabled={testing !== null || !telegramBotToken || !telegramChatId}>
+                        <Button variant="outline" onClick={() => handleTestChannel("telegram")} disabled={testing !== null || !telegramChatId}>
                             {testing === "telegram" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <TestTube className="mr-2 h-4 w-4" />}Test
                         </Button>
                         <div className="flex gap-2">
                             <Button variant="outline" onClick={() => setConfigDialogOpen(false)}>Cancel</Button>
-                            <Button onClick={handleSaveConfig} disabled={saving || !telegramBotToken || !telegramChatId}>
+                            <Button onClick={handleSaveConfig} disabled={saving || !telegramChatId}>
                                 {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save
                             </Button>
                         </div>

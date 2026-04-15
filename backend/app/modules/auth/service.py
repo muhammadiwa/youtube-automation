@@ -81,6 +81,26 @@ class AuthService:
             name=name,
             validate_password=True,
         )
+        
+        # Auto-create FREE subscription for new user
+        try:
+            from app.modules.billing.service import BillingService
+            billing_service = BillingService(self.session)
+            await billing_service.ensure_free_subscription(user.id)
+        except Exception as e:
+            # Log error but don't fail registration
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to create free subscription for user {user.id}: {e}")
+
+        # Auto-create default notification preferences for new user
+        try:
+            from app.modules.notification.service import NotificationService
+            notification_service = NotificationService(self.session)
+            await notification_service.create_default_preferences(user.id, user.email)
+        except Exception as e:
+            # Log error but don't fail registration
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to create notification preferences for user {user.id}: {e}")
 
         return user
 
@@ -90,6 +110,7 @@ class AuthService:
         password: str,
         remember_me: bool = False,
         totp_code: str | None = None,
+        client_ip: str | None = None,
     ) -> dict:
         """Authenticate user and return tokens.
 
@@ -98,6 +119,7 @@ class AuthService:
             password: Plain text password
             remember_me: Whether to extend token expiration
             totp_code: TOTP code if 2FA is enabled
+            client_ip: Client IP address for geolocation
 
         Returns:
             dict: Access and refresh tokens, or 2FA requirement
@@ -138,6 +160,10 @@ class AuthService:
 
         # Update last login
         await self.user_repo.update_last_login(user)
+        
+        # Update country from IP geolocation
+        if client_ip:
+            await self._update_user_country(user, client_ip)
 
         # Generate tokens (extend expiration if remember_me)
         expires_minutes = 43200 if remember_me else 60  # 30 days vs 1 hour
@@ -150,6 +176,23 @@ class AuthService:
             "token_type": tokens.token_type,
             "requires_2fa": False,
         }
+
+    async def _update_user_country(self, user: User, client_ip: str) -> None:
+        """Update user country from IP geolocation.
+        
+        Args:
+            user: User instance
+            client_ip: Client IP address
+        """
+        try:
+            from app.core.geolocation import get_country_from_ip
+            country = await get_country_from_ip(client_ip)
+            if country:
+                await self.user_repo.update_country(user, country)
+        except Exception as e:
+            # Don't fail login if geolocation fails
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to update user country: {e}")
 
     async def refresh_token(self, refresh_token: str) -> dict:
         """Refresh access token using refresh token.
@@ -326,12 +369,18 @@ class AuthService:
         
         return {"backup_codes": backup_codes}
     
-    async def verify_2fa_login(self, temp_token: str, code: str) -> dict:
+    async def verify_2fa_login(
+        self,
+        temp_token: str,
+        code: str,
+        client_ip: str | None = None,
+    ) -> dict:
         """Verify 2FA code during login.
 
         Args:
             temp_token: Temporary token from login
             code: TOTP code to verify
+            client_ip: Client IP address for geolocation
 
         Returns:
             dict: Access and refresh tokens
@@ -355,6 +404,10 @@ class AuthService:
 
         # Update last login
         await self.user_repo.update_last_login(user)
+        
+        # Update country from IP geolocation
+        if client_ip:
+            await self._update_user_country(user, client_ip)
 
         # Generate tokens
         tokens = create_auth_tokens(user.id)

@@ -8,11 +8,11 @@ import shutil
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import BinaryIO, Optional, Union
 
 from app.core.config import settings
+from app.core.datetime_utils import utcnow, to_naive_utc
 
 
 @dataclass
@@ -352,11 +352,18 @@ class S3Storage(StorageBackend):
             return False
 
     def get_url(self, key: str, expires_in: int = 3600) -> str:
-        """Get URL for a file (presigned URL)."""
-        # Use CDN if enabled
-        if self.config.cdn_enabled and self.config.cdn_domain:
-            return f"https://{self.config.cdn_domain}/{key}"
+        """Get URL for a file (presigned URL or CDN).
         
+        If CDN is enabled and bucket is public, use CDN URL for better performance.
+        Otherwise, use presigned URL for authenticated access.
+        """
+        # Use CDN if enabled (for public buckets)
+        if self.config.cdn_enabled and self.config.cdn_domain:
+            # Remove https:// prefix if present in cdn_domain
+            cdn_domain = self.config.cdn_domain.replace("https://", "").replace("http://", "")
+            return f"https://{cdn_domain}/{key}"
+        
+        # Use presigned URL for private buckets
         try:
             client = self._get_client()
             url = client.generate_presigned_url(
@@ -455,7 +462,7 @@ class Storage:
             Generated key
         """
         if include_date:
-            date_prefix = datetime.utcnow().strftime("%Y/%m/%d")
+            date_prefix = to_naive_utc(utcnow()).strftime("%Y/%m/%d")
             return f"{prefix}/{date_prefix}/{filename}"
         return f"{prefix}/{filename}"
 
@@ -550,3 +557,87 @@ class StorageService:
 
 # Global storage service instance
 storage_service = StorageService()
+
+
+def get_file_url_for_ffmpeg(storage_key: str, expires_in: int = 86400) -> str:
+    """Get a URL that FFmpeg can use to read the file.
+    
+    For local storage: returns absolute file path
+    For cloud storage (R2/S3): returns presigned URL (FFmpeg supports HTTP input)
+    
+    Args:
+        storage_key: Storage key/path (e.g., 'videos/user_id/video.mp4')
+        expires_in: URL expiration in seconds (default 24 hours for long streams)
+        
+    Returns:
+        str: File path or HTTP URL that FFmpeg can read
+    """
+    storage = get_storage()
+    
+    if settings.STORAGE_BACKEND == "local":
+        # For local storage, return absolute file path
+        full_path = os.path.join(settings.LOCAL_STORAGE_PATH, storage_key)
+        return str(Path(full_path).resolve())
+    else:
+        # For cloud storage (R2/S3/MinIO), return presigned URL
+        # FFmpeg can read from HTTP URLs directly
+        return storage.get_url(storage_key, expires_in=expires_in)
+
+
+def is_cloud_storage() -> bool:
+    """Check if using cloud storage (R2/S3/MinIO).
+    
+    Returns:
+        bool: True if using cloud storage, False if local
+    """
+    return settings.STORAGE_BACKEND.lower() in ("s3", "minio", "aws", "r2")
+
+
+def get_local_path_for_key(storage_key: str) -> str:
+    """Get local filesystem path for a storage key.
+    
+    Only works for local storage backend.
+    
+    Args:
+        storage_key: Storage key/path
+        
+    Returns:
+        str: Absolute local file path
+    """
+    full_path = os.path.join(settings.LOCAL_STORAGE_PATH, storage_key)
+    return str(Path(full_path).resolve())
+
+
+def get_public_url(storage_key: str, expires_in: int = 3600) -> str:
+    """Get a public URL for a storage key.
+    
+    For local storage: returns a relative path (frontend should use API endpoint)
+    For cloud storage (R2/S3): returns presigned URL
+    
+    This is useful for generating URLs for thumbnails and other assets
+    that need to be displayed in the frontend.
+    
+    Args:
+        storage_key: Storage key/path (e.g., 'thumbnails/user_id/thumb.jpg')
+        expires_in: URL expiration in seconds (default 1 hour)
+        
+    Returns:
+        str: URL that can be used to access the file
+    """
+    if not storage_key:
+        return ""
+    
+    # If it's already a full URL (e.g., YouTube thumbnail), return as-is
+    if storage_key.startswith(('http://', 'https://')):
+        return storage_key
+    
+    storage = get_storage()
+    
+    if settings.STORAGE_BACKEND == "local":
+        # For local storage, return the storage key as-is
+        # Frontend will need to use an API endpoint to access it
+        return storage_key
+    else:
+        # For cloud storage (R2/S3/MinIO), return presigned URL
+        return storage.get_url(storage_key, expires_in=expires_in)
+

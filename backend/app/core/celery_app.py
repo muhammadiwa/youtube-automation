@@ -21,6 +21,33 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     task_acks_late=True,
     task_reject_on_worker_lost=True,
+    # Fix Celery 6.0 deprecation warning
+    broker_connection_retry_on_startup=True,
+    # Periodic tasks schedule
+    beat_schedule={
+        "sync-video-stats-hourly": {
+            "task": "app.modules.video.tasks.sync_all_video_stats",
+            "schedule": 3600.0,  # Every hour
+        },
+        "check-scheduled-publishes": {
+            "task": "app.modules.video.tasks.check_scheduled_publishes",
+            "schedule": 60.0,  # Every minute
+        },
+        # Stream Job Tasks (Video-to-Live Streaming)
+        "check-scheduled-streams": {
+            "task": "app.modules.stream.stream_job_tasks.check_scheduled_streams",
+            "schedule": 10.0,  # Every 10 seconds
+        },
+        "collect-stream-health-metrics": {
+            "task": "app.modules.stream.stream_job_tasks.collect_health_metrics",
+            "schedule": 10.0,  # Every 10 seconds
+        },
+        # Analytics Sync Tasks
+        "sync-analytics-daily": {
+            "task": "app.modules.analytics.tasks.sync_all_accounts_analytics",
+            "schedule": 7200.0,  # Every 2 hours (YouTube data updates every few hours)
+        },
+    },
 )
 
 celery_app.autodiscover_tasks([
@@ -30,4 +57,6 @@ celery_app.autodiscover_tasks([
     "app.modules.stream",
     "app.modules.transcoding",
     "app.modules.backup",
+    "app.modules.analytics",
+    "app.modules.integration",
 ])

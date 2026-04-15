@@ -43,11 +43,43 @@ class YouTubeAccountResponse(BaseModel):
     daily_quota_used: int = 0
     status: str
     last_sync_at: Optional[datetime] = None
+    # Stream key info (masked for security)
+    has_stream_key: bool = False
+    stream_key_masked: Optional[str] = None
+    rtmp_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
     class Config:
         from_attributes = True
+
+    @classmethod
+    def model_validate(cls, obj, **kwargs):
+        """Custom validation to add computed fields."""
+        # Get base validation
+        data = {
+            "id": obj.id,
+            "user_id": obj.user_id,
+            "channel_id": obj.channel_id,
+            "channel_title": obj.channel_title,
+            "thumbnail_url": obj.thumbnail_url,
+            "subscriber_count": obj.subscriber_count,
+            "video_count": obj.video_count,
+            "view_count": obj.view_count,
+            "is_monetized": obj.is_monetized,
+            "has_live_streaming_enabled": obj.has_live_streaming_enabled,
+            "strike_count": obj.strike_count,
+            "token_expires_at": obj.token_expires_at,
+            "daily_quota_used": obj.daily_quota_used,
+            "status": obj.status,
+            "last_sync_at": obj.last_sync_at,
+            "has_stream_key": obj.has_stream_key() if hasattr(obj, 'has_stream_key') else False,
+            "stream_key_masked": obj.get_masked_stream_key() if hasattr(obj, 'get_masked_stream_key') else None,
+            "rtmp_url": obj.rtmp_url if hasattr(obj, 'rtmp_url') else None,
+            "created_at": obj.created_at,
+            "updated_at": obj.updated_at,
+        }
+        return cls(**data)
 
 
 class AccountHealthResponse(BaseModel):

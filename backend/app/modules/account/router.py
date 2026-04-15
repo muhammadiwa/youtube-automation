@@ -26,20 +26,10 @@ from app.modules.account.service import (
     AccountNotFoundError,
     YouTubeAccountService,
 )
+from app.modules.auth.jwt import get_current_user
+from app.modules.auth.models import User
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
-
-
-# Dependency for getting current user ID
-# In production, this would extract from JWT token
-async def get_current_user_id() -> uuid.UUID:
-    """Get current authenticated user ID.
-    
-    This is a placeholder. In production, extract from JWT token.
-    """
-    # TODO: Implement proper JWT extraction
-    # For now, return a placeholder UUID for testing
-    return uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 @router.post(
@@ -58,12 +48,12 @@ async def get_current_user_id() -> uuid.UUID:
     """,
 )
 async def initiate_oauth(
-    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OAuthInitiateResponse:
     """Initiate OAuth2 flow for YouTube account connection."""
     service = YouTubeAccountService(session)
-    return await service.initiate_oauth(user_id)
+    return await service.initiate_oauth(current_user.id)
 
 
 @router.get(
@@ -89,24 +79,43 @@ async def oauth_callback(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> RedirectResponse:
     """Handle OAuth2 callback from YouTube."""
+    from urllib.parse import quote
+    from app.core.config import settings
+    
+    # Get frontend URL from CORS origins (first one is typically frontend)
+    frontend_url = settings.cors_origins_list[0] if settings.cors_origins_list else "http://localhost:3000"
+    
     service = YouTubeAccountService(session)
     
     try:
         account = await service.handle_oauth_callback(code, state)
-        # Redirect to frontend success page
+        # Redirect to frontend success page with account ID
         return RedirectResponse(
-            url=f"/accounts/connect/success?channel={account.channel_title}",
+            url=f"{frontend_url}/dashboard/accounts/{account.id}?connected=true&channel={quote(account.channel_title)}",
             status_code=status.HTTP_302_FOUND,
         )
     except OAuthError as e:
         # Redirect to frontend error page
         return RedirectResponse(
-            url=f"/accounts/connect/error?message={str(e)}",
+            url=f"{frontend_url}/dashboard/accounts?error={quote(str(e))}",
             status_code=status.HTTP_302_FOUND,
         )
     except AccountExistsError as e:
         return RedirectResponse(
-            url=f"/accounts/connect/error?message={str(e)}",
+            url=f"{frontend_url}/dashboard/accounts?error={quote(str(e))}",
+            status_code=status.HTTP_302_FOUND,
+        )
+    except Exception as e:
+        # Check if it's a LimitExceededError
+        from app.modules.billing.feature_gate import LimitExceededError
+        if isinstance(e, LimitExceededError):
+            return RedirectResponse(
+                url=f"{frontend_url}/dashboard/accounts?error={quote(e.message)}",
+                status_code=status.HTTP_302_FOUND,
+            )
+        # Handle any unexpected errors
+        return RedirectResponse(
+            url=f"{frontend_url}/dashboard/accounts?error={quote('Failed to connect account. Please try again.')}",
             status_code=status.HTTP_302_FOUND,
         )
 
@@ -123,12 +132,12 @@ async def oauth_callback(
     """,
 )
 async def list_accounts(
-    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AccountListResponse:
     """List all connected YouTube accounts for the current user."""
     service = YouTubeAccountService(session)
-    accounts = await service.get_user_accounts(user_id)
+    accounts = await service.get_user_accounts(current_user.id)
     
     return AccountListResponse(
         accounts=[
@@ -152,6 +161,7 @@ async def list_accounts(
 )
 async def get_account(
     account_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> YouTubeAccountResponse:
     """Get details for a specific YouTube account."""
@@ -162,6 +172,13 @@ async def get_account(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Account {account_id} not found",
+        )
+    
+    # Verify account belongs to current user
+    if account.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this account",
         )
     
     return YouTubeAccountResponse.model_validate(account)
@@ -184,10 +201,24 @@ async def get_account(
 )
 async def get_account_health(
     account_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AccountHealthResponse:
     """Get health status for a YouTube account."""
     service = YouTubeAccountService(session)
+    
+    # Verify account belongs to current user
+    account = await service.get_account(account_id)
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Account {account_id} not found",
+        )
+    if account.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this account",
+        )
     
     try:
         return await service.get_account_health(account_id)
@@ -211,10 +242,24 @@ async def get_account_health(
 )
 async def get_quota_usage(
     account_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> QuotaUsageResponse:
     """Get quota usage for a YouTube account."""
     service = YouTubeAccountService(session)
+    
+    # Verify account belongs to current user
+    account = await service.get_account(account_id)
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Account {account_id} not found",
+        )
+    if account.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this account",
+        )
     
     try:
         return await service.get_quota_usage(account_id)
@@ -234,16 +279,31 @@ async def get_quota_usage(
     Syncs channel data from YouTube API.
     
     Updates subscriber count, video count, and other metadata.
+    Also attempts to sync stream key if live streaming is enabled.
     
     **Requirements: 2.4**
     """,
 )
 async def sync_channel_data(
     account_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> YouTubeAccountResponse:
     """Sync channel data from YouTube API."""
     service = YouTubeAccountService(session)
+    
+    # Verify account belongs to current user
+    account = await service.get_account(account_id)
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Account {account_id} not found",
+        )
+    if account.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this account",
+        )
     
     try:
         account = await service.sync_channel_data(account_id)
@@ -256,6 +316,105 @@ async def sync_channel_data(
     except OAuthError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+        )
+
+
+@router.post(
+    "/{account_id}/sync-stream-key",
+    status_code=status.HTTP_200_OK,
+    summary="Sync stream key from YouTube",
+    description="""
+    Syncs the stream key from YouTube Live Streaming API.
+    
+    Fetches the default live stream configuration including:
+    - Stream key (encrypted and stored)
+    - RTMP URL
+    - Stream ID
+    
+    Requires live streaming to be enabled on the channel.
+    
+    **Requirements: 2.4**
+    """,
+)
+async def sync_stream_key(
+    account_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """Sync stream key from YouTube Live Streaming API."""
+    service = YouTubeAccountService(session)
+    
+    # Verify account belongs to current user
+    account = await service.get_account(account_id)
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Account {account_id} not found",
+        )
+    if account.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this account",
+        )
+    
+    try:
+        account = await service.sync_stream_key(account_id)
+        return {
+            "success": True,
+            "message": "Stream key synced successfully",
+            "has_stream_key": account.has_stream_key(),
+            "stream_key_masked": account.get_masked_stream_key(),
+            "rtmp_url": account.rtmp_url,
+        }
+    except AccountNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+    except OAuthError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@router.get(
+    "/{account_id}/stream-key-status",
+    status_code=status.HTTP_200_OK,
+    summary="Get stream key status",
+    description="""
+    Get the stream key status for an account.
+    
+    Returns whether a stream key is configured and its masked value.
+    """,
+)
+async def get_stream_key_status(
+    account_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """Get stream key status for an account."""
+    service = YouTubeAccountService(session)
+    
+    # Verify account belongs to current user
+    account = await service.get_account(account_id)
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Account {account_id} not found",
+        )
+    if account.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this account",
+        )
+    
+    try:
+        return await service.get_stream_key_status(account_id)
+    except AccountNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e),
         )
 
@@ -350,10 +509,24 @@ async def reset_quota(
 )
 async def refresh_token(
     account_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> YouTubeAccountResponse:
     """Refresh OAuth token for a YouTube account."""
     service = YouTubeAccountService(session)
+    
+    # Verify account belongs to current user
+    account = await service.get_account(account_id)
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Account {account_id} not found",
+        )
+    if account.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this account",
+        )
     
     try:
         account = await service.refresh_account_token(account_id)
@@ -384,10 +557,24 @@ async def refresh_token(
 )
 async def disconnect_account(
     account_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
     """Disconnect a YouTube account."""
     service = YouTubeAccountService(session)
+    
+    # Verify account belongs to current user
+    account = await service.get_account(account_id)
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Account {account_id} not found",
+        )
+    if account.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this account",
+        )
     
     try:
         await service.disconnect_account(account_id)

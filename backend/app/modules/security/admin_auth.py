@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Optional
 
+from app.core.datetime_utils import utcnow
 from app.modules.auth.audit import AuditLogger, AuditAction
 
 
@@ -105,7 +106,7 @@ class AdminSessionManager:
         
         # Generate secure token
         token = secrets.token_urlsafe(32)
-        now = datetime.utcnow()
+        now = utcnow()
         expires_at = now + timedelta(minutes=cls.SESSION_DURATION_MINUTES)
         
         session = AdminSession(
@@ -160,7 +161,7 @@ class AdminSessionManager:
             return False, "Invalid session token"
         
         # Check expiration
-        if datetime.utcnow() > session.expires_at:
+        if utcnow() > session.expires_at:
             del cls._sessions[token]
             return False, "Session expired"
         
@@ -179,7 +180,7 @@ class AdminSessionManager:
         # Mark as used if consuming
         if consume:
             session.used = True
-            session.used_at = datetime.utcnow()
+            session.used_at = utcnow()
             
             # Audit log
             AuditLogger.log(
@@ -253,7 +254,7 @@ class AdminSessionManager:
         Returns:
             list: Active admin sessions
         """
-        now = datetime.utcnow()
+        now = utcnow()
         return [
             session for session in cls._sessions.values()
             if session.user_id == user_id
@@ -268,7 +269,7 @@ class AdminSessionManager:
         Args:
             user_id: User ID to clean up sessions for
         """
-        now = datetime.utcnow()
+        now = utcnow()
         
         # Remove expired sessions
         expired = [
@@ -297,7 +298,7 @@ class AdminSessionManager:
         Returns:
             int: Number of sessions removed
         """
-        now = datetime.utcnow()
+        now = utcnow()
         expired = [
             token for token, session in cls._sessions.items()
             if session.expires_at < now

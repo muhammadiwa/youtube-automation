@@ -19,4 +19,6 @@ call venv\Scripts\activate.bat
 echo Starting Celery worker...
 echo.
 
-celery -A app.core.celery_app worker --loglevel=info --pool=solo
+REM Use threads pool for concurrent task execution
+REM solo pool blocks all tasks when one is running
+celery -A app.core.celery_app worker --loglevel=info --pool=threads --concurrency=4

@@ -73,6 +73,7 @@ dmypy.json
 
 # Celery
 celerybeat-schedule
+celerybeat-schedule.*
 celerybeat.pid
 
 # Database
@@ -86,3 +87,9 @@ logs/
 # Local configuration
 .env.local
 .env.*.local
+
+# Storage (uploaded files)
+storage/
+
+# Backups
+backups/

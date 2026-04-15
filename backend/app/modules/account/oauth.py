@@ -6,13 +6,14 @@ Requirements: 2.1, 2.2
 
 import secrets
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional
 from urllib.parse import urlencode
 
 import httpx
 
 from app.core.config import settings
+from app.core.datetime_utils import utcnow, to_naive_utc
 
 
 # OAuth2 endpoints
@@ -27,6 +28,7 @@ YOUTUBE_SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube.force-ssl",
     "https://www.googleapis.com/auth/youtubepartner",
+    "https://www.googleapis.com/auth/yt-analytics.readonly",  # YouTube Analytics API
 ]
 
 
@@ -50,7 +52,7 @@ class OAuthStateStore:
             str: Generated state parameter
         """
         state = secrets.token_urlsafe(32)
-        expires_at = datetime.utcnow() + timedelta(minutes=expires_minutes)
+        expires_at = to_naive_utc(utcnow()) + timedelta(minutes=expires_minutes)
         
         cls._states[state] = {
             "user_id": user_id,
@@ -77,7 +79,7 @@ class OAuthStateStore:
             
         state_data = cls._states.pop(state)
         
-        if datetime.utcnow() > state_data["expires_at"]:
+        if to_naive_utc(utcnow()) > state_data["expires_at"]:
             return None
             
         return state_data["user_id"]
@@ -85,7 +87,7 @@ class OAuthStateStore:
     @classmethod
     def _cleanup_expired(cls) -> None:
         """Remove expired states."""
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         expired = [
             s for s, data in cls._states.items()
             if now > data["expires_at"]
@@ -245,10 +247,89 @@ class YouTubeOAuthClient:
             return {
                 "channel_id": channel["id"],
                 "channel_title": snippet.get("title", "Unknown"),
-                "thumbnail_url": snippet.get("thumbnails", {}).get("default", {}).get("url"),
+                "thumbnail_url": (
+                    snippet.get("thumbnails", {}).get("high", {}).get("url") or
+                    snippet.get("thumbnails", {}).get("medium", {}).get("url") or
+                    snippet.get("thumbnails", {}).get("default", {}).get("url")
+                ),
                 "subscriber_count": int(statistics.get("subscriberCount", 0)),
                 "video_count": int(statistics.get("videoCount", 0)),
                 "view_count": int(statistics.get("viewCount", 0)),
                 "is_monetized": status.get("isLinked", False),
                 "has_live_streaming_enabled": status.get("longUploadsStatus") == "allowed",
             }
+
+    async def get_live_stream_info(self, access_token: str) -> dict:
+        """Fetch live stream information including stream key from YouTube API.
+        
+        This fetches the default/bound live stream for the channel.
+        The stream key is in cdn.ingestionInfo.streamName.
+        
+        Args:
+            access_token: Valid access token
+            
+        Returns:
+            dict: Live stream information including stream_key and rtmp_url
+            
+        Raises:
+            OAuthError: If API call fails or no streams found
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{YOUTUBE_API_BASE}/liveStreams",
+                params={
+                    "part": "snippet,cdn,status",
+                    "mine": "true",
+                },
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                },
+            )
+            
+            if response.status_code == 403:
+                error_data = response.json()
+                error_msg = error_data.get('error', {}).get('message', 'Unknown error')
+                # Check if it's a live streaming not enabled error
+                if 'liveStreamingNotEnabled' in str(error_data):
+                    raise OAuthError(
+                        "Live streaming is not enabled for this channel. "
+                        "Please enable live streaming in YouTube Studio first."
+                    )
+                raise OAuthError(f"Access denied: {error_msg}")
+            
+            if response.status_code != 200:
+                error_data = response.json()
+                raise OAuthError(
+                    f"Failed to fetch live streams: {error_data.get('error', {}).get('message', 'Unknown error')}"
+                )
+            
+            data = response.json()
+            
+            if not data.get("items"):
+                # No streams found - user needs to create one in YouTube Studio
+                return {
+                    "stream_key": None,
+                    "rtmp_url": None,
+                    "stream_id": None,
+                    "stream_title": None,
+                    "has_streams": False,
+                    "message": "No live streams found. Please create a stream in YouTube Studio first.",
+                }
+            
+            # Get the first (default) stream
+            stream = data["items"][0]
+            cdn = stream.get("cdn", {})
+            ingestion_info = cdn.get("ingestionInfo", {})
+            snippet = stream.get("snippet", {})
+            
+            return {
+                "stream_key": ingestion_info.get("streamName"),
+                "rtmp_url": ingestion_info.get("ingestionAddress"),
+                "backup_rtmp_url": ingestion_info.get("backupIngestionAddress"),
+                "stream_id": stream.get("id"),
+                "stream_title": snippet.get("title"),
+                "has_streams": True,
+                "resolution": cdn.get("resolution"),
+                "frame_rate": cdn.get("frameRate"),
+            }
+

@@ -10,6 +10,7 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow
 from app.modules.job.models import JobStatus
 from app.modules.job.repository import JobRepository, DLQAlertRepository
 from app.modules.job.schemas import (
@@ -344,7 +345,7 @@ class JobQueueService:
         
         return QueueStatsResponse(
             stats=stats,
-            generated_at=datetime.utcnow(),
+            generated_at=utcnow(),
         )
 
     async def list_jobs(

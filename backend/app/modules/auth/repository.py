@@ -6,6 +6,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.auth.models import User
 
 
@@ -116,7 +117,7 @@ class UserRepository:
         Returns:
             User: Updated user instance
         """
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = to_naive_utc(utcnow())
         await self.session.flush()
         return user
 
@@ -173,4 +174,19 @@ class UserRepository:
         user.totp_secret = None
         user.backup_codes = None
         await self.session.flush()
+        return user
+
+    async def update_country(self, user: User, country: str | None) -> User:
+        """Update user's country based on IP geolocation.
+
+        Args:
+            user: User instance
+            country: ISO 3166-1 alpha-2 country code (e.g., "US", "ID")
+
+        Returns:
+            User: Updated user instance
+        """
+        if country and len(country) == 2:
+            user.country = country.upper()
+            await self.session.flush()
         return user

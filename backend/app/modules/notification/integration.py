@@ -218,10 +218,12 @@ class NotificationIntegrationService:
         video_title: str,
         channel_name: str,
         video_id: str,
+        youtube_video_id: Optional[str] = None,
         youtube_url: Optional[str] = None,
     ) -> None:
         """Notify when a video is published."""
         try:
+            yt_url = youtube_url or (f"https://youtube.com/watch?v={youtube_video_id}" if youtube_video_id else None)
             await self.notification_service.send_notification(
                 NotificationSendRequest(
                     user_id=user_id,
@@ -233,7 +235,8 @@ class NotificationIntegrationService:
                         "video_id": video_id,
                         "video_title": video_title,
                         "channel_name": channel_name,
-                        "youtube_url": youtube_url,
+                        "youtube_video_id": youtube_video_id,
+                        "youtube_url": yt_url,
                         "action_url": f"/dashboard/videos/{video_id}",
                     },
                 )
@@ -460,36 +463,36 @@ class NotificationIntegrationService:
     
     # ==================== System Notifications ====================
     
-    async def notify_system_error(
+    async def notify_system_alert(
         self,
         user_id: uuid.UUID,
-        error_type: str,
-        error_message: str,
+        alert_type: str,
+        message: str,
         component: Optional[str] = None,
     ) -> None:
-        """Notify about system errors."""
+        """Notify about system alerts."""
         try:
-            message = f"System error: {error_message}"
+            alert_message = f"System alert: {message}"
             if component:
-                message = f"System error in {component}: {error_message}"
+                alert_message = f"System alert in {component}: {message}"
             
             await self.notification_service.send_notification(
                 NotificationSendRequest(
                     user_id=user_id,
-                    event_type="system.error",
-                    title="System Error",
-                    message=message,
-                    priority=NotificationPriority.CRITICAL,
+                    event_type="system.alert",
+                    title="System Alert",
+                    message=alert_message,
+                    priority=NotificationPriority.HIGH,
                     payload={
-                        "error_type": error_type,
-                        "error_message": error_message,
+                        "alert_type": alert_type,
+                        "message": message,
                         "component": component,
                     },
                 )
             )
-            logger.info(f"System error notification sent to user {user_id}")
+            logger.info(f"System alert notification sent to user {user_id}")
         except Exception as e:
-            logger.error(f"Failed to send system error notification: {e}")
+            logger.error(f"Failed to send system alert notification: {e}")
     
     async def notify_security_alert(
         self,
@@ -522,72 +525,6 @@ class NotificationIntegrationService:
             logger.info(f"Security alert notification sent to user {user_id}")
         except Exception as e:
             logger.error(f"Failed to send security alert notification: {e}")
-    
-    # ==================== Comment Notifications ====================
-    
-    async def notify_comment_received(
-        self,
-        user_id: uuid.UUID,
-        video_title: str,
-        comment_author: str,
-        comment_preview: str,
-        video_id: str,
-        requires_moderation: bool = False,
-    ) -> None:
-        """Notify when a new comment is received."""
-        try:
-            title = "Comment Needs Review" if requires_moderation else "New Comment"
-            message = f"New comment on '{video_title}' from {comment_author}: {comment_preview[:100]}..."
-            
-            await self.notification_service.send_notification(
-                NotificationSendRequest(
-                    user_id=user_id,
-                    event_type="comment.received" if not requires_moderation else "comment.moderation_required",
-                    title=title,
-                    message=message,
-                    priority=NotificationPriority.HIGH if requires_moderation else NotificationPriority.LOW,
-                    payload={
-                        "video_id": video_id,
-                        "video_title": video_title,
-                        "comment_author": comment_author,
-                        "requires_moderation": requires_moderation,
-                        "action_url": f"/dashboard/videos/{video_id}/comments",
-                    },
-                )
-            )
-            logger.info(f"Comment notification sent to user {user_id}")
-        except Exception as e:
-            logger.error(f"Failed to send comment notification: {e}")
-    
-    # ==================== Competitor Notifications ====================
-    
-    async def notify_competitor_update(
-        self,
-        user_id: uuid.UUID,
-        competitor_name: str,
-        update_type: str,
-        details: str,
-    ) -> None:
-        """Notify about competitor activity."""
-        try:
-            await self.notification_service.send_notification(
-                NotificationSendRequest(
-                    user_id=user_id,
-                    event_type="competitor.update",
-                    title="Competitor Update",
-                    message=f"{competitor_name}: {update_type} - {details}",
-                    priority=NotificationPriority.LOW,
-                    payload={
-                        "competitor_name": competitor_name,
-                        "update_type": update_type,
-                        "details": details,
-                        "action_url": "/dashboard/competitors",
-                    },
-                )
-            )
-            logger.info(f"Competitor update notification sent to user {user_id}")
-        except Exception as e:
-            logger.error(f"Failed to send competitor update notification: {e}")
     
     # ==================== Milestone Notifications ====================
     
@@ -674,3 +611,207 @@ class NotificationIntegrationService:
             logger.info(f"Backup failed notification sent to user {user_id}")
         except Exception as e:
             logger.error(f"Failed to send backup failed notification: {e}")
+
+    # ==================== Billing Notifications ====================
+    
+    async def notify_payment_success(
+        self,
+        user_id: uuid.UUID,
+        amount: str,
+        plan_name: str,
+        invoice_id: Optional[str] = None,
+    ) -> None:
+        """Notify when a payment is successful."""
+        try:
+            await self.notification_service.send_notification(
+                NotificationSendRequest(
+                    user_id=user_id,
+                    event_type="payment.success",
+                    title="Payment Successful",
+                    message=f"Your payment of {amount} for {plan_name} has been processed successfully.",
+                    priority=NotificationPriority.NORMAL,
+                    payload={
+                        "amount": amount,
+                        "plan_name": plan_name,
+                        "invoice_id": invoice_id,
+                        "action_url": "/dashboard/billing",
+                    },
+                )
+            )
+            logger.info(f"Payment success notification sent to user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to send payment success notification: {e}")
+    
+    async def notify_payment_failed(
+        self,
+        user_id: uuid.UUID,
+        amount: str,
+        plan_name: str,
+        error_message: Optional[str] = None,
+    ) -> None:
+        """Notify when a payment fails."""
+        try:
+            message = f"Your payment of {amount} for {plan_name} has failed."
+            if error_message:
+                message += f" Reason: {error_message}"
+            
+            await self.notification_service.send_notification(
+                NotificationSendRequest(
+                    user_id=user_id,
+                    event_type="payment.failed",
+                    title="Payment Failed",
+                    message=message,
+                    priority=NotificationPriority.HIGH,
+                    payload={
+                        "amount": amount,
+                        "plan_name": plan_name,
+                        "error_message": error_message,
+                        "action_url": "/dashboard/billing",
+                    },
+                )
+            )
+            logger.info(f"Payment failed notification sent to user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to send payment failed notification: {e}")
+    
+    async def notify_subscription_activated(
+        self,
+        user_id: uuid.UUID,
+        plan_name: str,
+        expires_at: Optional[datetime] = None,
+    ) -> None:
+        """Notify when a subscription is activated."""
+        try:
+            message = f"Your {plan_name} subscription has been activated."
+            if expires_at:
+                message += f" Valid until {expires_at.strftime('%B %d, %Y')}."
+            
+            await self.notification_service.send_notification(
+                NotificationSendRequest(
+                    user_id=user_id,
+                    event_type="subscription.activated",
+                    title="Subscription Activated",
+                    message=message,
+                    priority=NotificationPriority.NORMAL,
+                    payload={
+                        "plan_name": plan_name,
+                        "expires_at": expires_at.isoformat() if expires_at else None,
+                        "action_url": "/dashboard/billing",
+                    },
+                )
+            )
+            logger.info(f"Subscription activated notification sent to user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to send subscription activated notification: {e}")
+    
+    async def notify_subscription_cancelled(
+        self,
+        user_id: uuid.UUID,
+        plan_name: str,
+        effective_date: Optional[datetime] = None,
+    ) -> None:
+        """Notify when a subscription is cancelled."""
+        try:
+            message = f"Your {plan_name} subscription has been cancelled."
+            if effective_date:
+                message += f" You will have access until {effective_date.strftime('%B %d, %Y')}."
+            
+            await self.notification_service.send_notification(
+                NotificationSendRequest(
+                    user_id=user_id,
+                    event_type="subscription.cancelled",
+                    title="Subscription Cancelled",
+                    message=message,
+                    priority=NotificationPriority.NORMAL,
+                    payload={
+                        "plan_name": plan_name,
+                        "effective_date": effective_date.isoformat() if effective_date else None,
+                        "action_url": "/dashboard/billing",
+                    },
+                )
+            )
+            logger.info(f"Subscription cancelled notification sent to user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to send subscription cancelled notification: {e}")
+    
+    async def notify_subscription_expiring(
+        self,
+        user_id: uuid.UUID,
+        plan_name: str,
+        expires_at: datetime,
+        days_remaining: int,
+    ) -> None:
+        """Notify when a subscription is about to expire."""
+        try:
+            await self.notification_service.send_notification(
+                NotificationSendRequest(
+                    user_id=user_id,
+                    event_type="subscription.expiring",
+                    title="Subscription Expiring Soon",
+                    message=f"Your {plan_name} subscription will expire in {days_remaining} days on {expires_at.strftime('%B %d, %Y')}. Renew now to avoid service interruption.",
+                    priority=NotificationPriority.HIGH,
+                    payload={
+                        "plan_name": plan_name,
+                        "expires_at": expires_at.isoformat(),
+                        "days_remaining": days_remaining,
+                        "action_url": "/dashboard/billing",
+                    },
+                )
+            )
+            logger.info(f"Subscription expiring notification sent to user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to send subscription expiring notification: {e}")
+    
+    async def notify_subscription_expired(
+        self,
+        user_id: uuid.UUID,
+        plan_name: str,
+    ) -> None:
+        """Notify when a subscription has expired."""
+        try:
+            await self.notification_service.send_notification(
+                NotificationSendRequest(
+                    user_id=user_id,
+                    event_type="subscription.expired",
+                    title="Subscription Expired",
+                    message=f"Your {plan_name} subscription has expired. Renew now to restore full access.",
+                    priority=NotificationPriority.CRITICAL,
+                    payload={
+                        "plan_name": plan_name,
+                        "action_url": "/dashboard/billing",
+                    },
+                )
+            )
+            logger.info(f"Subscription expired notification sent to user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to send subscription expired notification: {e}")
+    
+    async def notify_subscription_renewed(
+        self,
+        user_id: uuid.UUID,
+        plan_name: str,
+        next_billing_date: Optional[datetime] = None,
+    ) -> None:
+        """Notify when a subscription is renewed."""
+        try:
+            message = f"Your {plan_name} subscription has been renewed successfully."
+            if next_billing_date:
+                message += f" Next billing date: {next_billing_date.strftime('%B %d, %Y')}."
+            
+            await self.notification_service.send_notification(
+                NotificationSendRequest(
+                    user_id=user_id,
+                    event_type="subscription.renewed",
+                    title="Subscription Renewed",
+                    message=message,
+                    priority=NotificationPriority.NORMAL,
+                    payload={
+                        "plan_name": plan_name,
+                        "next_billing_date": next_billing_date.isoformat() if next_billing_date else None,
+                        "action_url": "/dashboard/billing",
+                    },
+                )
+            )
+            logger.info(f"Subscription renewed notification sent to user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to send subscription renewed notification: {e}")

@@ -40,3 +40,15 @@ logs/
 # Build
 dist/
 build/
+
+# Test files
+**/__tests__/
+**/test/
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+vitest.config.*
+jest.config.*
+
+.rules

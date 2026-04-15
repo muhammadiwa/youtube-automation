@@ -10,8 +10,10 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.account.models import YouTubeAccount
 from app.modules.account.repository import YouTubeAccountRepository
+from app.modules.account.service import YouTubeAccountService
 from app.modules.stream.models import (
     LiveEvent,
     LiveEventStatus,
@@ -97,6 +99,7 @@ class StreamService:
         self.account_repository = YouTubeAccountRepository(session)
         self.playlist_repository = StreamPlaylistRepository(session)
         self.playlist_item_repository = PlaylistItemRepository(session)
+        self.account_service = YouTubeAccountService(session)
 
     async def create_live_event(
         self,
@@ -169,6 +172,8 @@ class StreamService:
                 raise
 
         await self.session.commit()
+        # Refresh event to get updated data after commit
+        await self.session.refresh(event)
         return event
 
     async def schedule_live_event(
@@ -229,6 +234,8 @@ class StreamService:
             raise
 
         await self.session.commit()
+        # Refresh event to get updated data after commit
+        await self.session.refresh(event)
         return event
 
     async def create_recurring_event(
@@ -335,6 +342,34 @@ class StreamService:
             include_past=include_past,
             limit=limit,
             offset=offset,
+        )
+
+    async def get_user_events(
+        self,
+        user_id: uuid.UUID,
+        account_id: Optional[uuid.UUID] = None,
+        status: Optional[LiveEventStatus] = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> tuple[list[LiveEvent], int]:
+        """Get all live events for a user across all accounts.
+
+        Args:
+            user_id: User UUID
+            account_id: Optional account filter
+            status: Optional status filter
+            page: Page number (1-indexed)
+            page_size: Items per page
+
+        Returns:
+            tuple: (list of events, total count)
+        """
+        return await self.event_repository.get_by_user_id(
+            user_id=user_id,
+            account_id=account_id,
+            status=status,
+            page=page,
+            page_size=page_size,
         )
 
     async def update_live_event(
@@ -490,6 +525,9 @@ class StreamService:
         Raises:
             YouTubeAPIError: If API call fails
         """
+        # Refresh token if expired or expiring soon
+        account = await self.account_service.refresh_token_if_needed(account)
+        
         client = YouTubeLiveStreamingClient(account.access_token)
 
         # Create broadcast
@@ -553,7 +591,7 @@ class StreamService:
         current_date = pattern.next_occurrence_at or parent_event.scheduled_start_at
 
         if current_date is None:
-            current_date = datetime.utcnow()
+            current_date = to_naive_utc(utcnow())
 
         for _ in range(count):
             if not pattern.should_generate_more():
@@ -723,6 +761,19 @@ class StreamService:
 
         await self.session.commit()
         
+        # Start live chat moderation
+        try:
+            if event.youtube_broadcast_id:
+                from app.modules.moderation.chat_worker import start_moderation_for_broadcast
+                await start_moderation_for_broadcast(
+                    account_id=event.account_id,
+                    broadcast_id=event.youtube_broadcast_id,
+                    session_id=session.id,
+                )
+                logger.info(f"Started live chat moderation for broadcast {event.youtube_broadcast_id}")
+        except Exception as e:
+            logger.error(f"Failed to start live chat moderation: {e}")
+        
         # Send notification
         try:
             from app.modules.notification.integration import NotificationIntegrationService
@@ -738,6 +789,30 @@ class StreamService:
                 )
         except Exception as e:
             logger.error(f"Failed to send stream started notification: {e}")
+        
+        # Trigger webhook for stream started
+        try:
+            from app.modules.integration.webhook_trigger import trigger_stream_started
+            account = await self.account_repository.get_by_id(event.account_id)
+            if account:
+                await trigger_stream_started(
+                    session=self.session,
+                    user_id=account.user_id,
+                    stream_id=event.id,
+                    stream_data={
+                        "title": event.title,
+                        "description": event.description,
+                        "youtube_broadcast_id": event.youtube_broadcast_id,
+                        "youtube_url": f"https://youtube.com/watch?v={event.youtube_broadcast_id}" if event.youtube_broadcast_id else None,
+                        "status": event.status,
+                        "privacy_status": event.privacy_status,
+                    },
+                    account_id=event.account_id,
+                )
+                await self.session.commit()
+                logger.info(f"Triggered stream.started webhook for event {event_id}")
+        except Exception as e:
+            logger.error(f"Failed to trigger stream.started webhook: {e}")
         
         return session
 
@@ -768,13 +843,25 @@ class StreamService:
         if active_session:
             if active_session.started_at:
                 from datetime import datetime
-                duration_minutes = int((datetime.utcnow() - active_session.started_at).total_seconds() / 60)
+                duration_minutes = int((to_naive_utc(utcnow()) - active_session.started_at).total_seconds() / 60)
             await self.session_repository.end_session(active_session, end_reason=reason)
 
         # Update event status
         await self.event_repository.set_status(event, LiveEventStatus.ENDED)
 
         await self.session.commit()
+        
+        # Stop live chat moderation
+        try:
+            if event.youtube_broadcast_id:
+                from app.modules.moderation.chat_worker import stop_moderation_for_broadcast
+                await stop_moderation_for_broadcast(
+                    account_id=event.account_id,
+                    broadcast_id=event.youtube_broadcast_id,
+                )
+                logger.info(f"Stopped live chat moderation for broadcast {event.youtube_broadcast_id}")
+        except Exception as e:
+            logger.error(f"Failed to stop live chat moderation: {e}")
         
         # Send notification
         try:
@@ -792,6 +879,30 @@ class StreamService:
                 )
         except Exception as e:
             logger.error(f"Failed to send stream ended notification: {e}")
+        
+        # Trigger webhook for stream ended
+        try:
+            from app.modules.integration.webhook_trigger import trigger_stream_ended
+            account = await self.account_repository.get_by_id(event.account_id)
+            if account:
+                await trigger_stream_ended(
+                    session=self.session,
+                    user_id=account.user_id,
+                    stream_id=event.id,
+                    stream_data={
+                        "title": event.title,
+                        "youtube_broadcast_id": event.youtube_broadcast_id,
+                        "status": event.status,
+                        "end_reason": reason,
+                        "duration_minutes": duration_minutes,
+                        "peak_viewers": active_session.peak_viewers if active_session and hasattr(active_session, 'peak_viewers') else None,
+                    },
+                    account_id=event.account_id,
+                )
+                await self.session.commit()
+                logger.info(f"Triggered stream.ended webhook for event {event_id}")
+        except Exception as e:
+            logger.error(f"Failed to trigger stream.ended webhook: {e}")
 
     async def handle_disconnection(
         self,
@@ -2117,7 +2228,7 @@ class SimulcastService:
             "error_count": target.error_count,
             "other_platforms_affected": other_platforms_affected,
             "active_platforms_count": len(other_active),
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": to_naive_utc(utcnow()).isoformat(),
         }
 
     async def get_simulcast_status(

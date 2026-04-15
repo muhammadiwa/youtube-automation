@@ -12,6 +12,7 @@ from sqlalchemy import select, and_, or_, func as sql_func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.stream.models import (
     LiveEvent,
     LiveEventStatus,
@@ -171,6 +172,68 @@ class LiveEventRepository:
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
+    async def get_by_user_id(
+        self,
+        user_id: uuid.UUID,
+        account_id: Optional[uuid.UUID] = None,
+        status: Optional[LiveEventStatus] = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> tuple[list[LiveEvent], int]:
+        """Get all live events for a user across all accounts.
+
+        Args:
+            user_id: User UUID
+            account_id: Optional account filter
+            status: Optional status filter
+            page: Page number (1-indexed)
+            page_size: Items per page
+
+        Returns:
+            tuple: (list of events, total count)
+        """
+        from app.modules.account.models import YouTubeAccount
+        from sqlalchemy import func as sql_func
+
+        # Base query - join with accounts to filter by user
+        base_query = (
+            select(LiveEvent)
+            .join(YouTubeAccount, LiveEvent.account_id == YouTubeAccount.id)
+            .where(YouTubeAccount.user_id == user_id)
+        )
+        count_query = (
+            select(sql_func.count(LiveEvent.id))
+            .join(YouTubeAccount, LiveEvent.account_id == YouTubeAccount.id)
+            .where(YouTubeAccount.user_id == user_id)
+        )
+
+        # Apply filters
+        if account_id:
+            base_query = base_query.where(LiveEvent.account_id == account_id)
+            count_query = count_query.where(LiveEvent.account_id == account_id)
+
+        if status:
+            base_query = base_query.where(LiveEvent.status == status.value)
+            count_query = count_query.where(LiveEvent.status == status.value)
+
+        # Get total count
+        count_result = await self.session.execute(count_query)
+        total = count_result.scalar_one() or 0
+
+        # Apply sorting and pagination
+        offset = (page - 1) * page_size
+        base_query = (
+            base_query
+            .order_by(LiveEvent.scheduled_start_at.desc().nullsfirst())
+            .offset(offset)
+            .limit(page_size)
+        )
+
+        result = await self.session.execute(base_query)
+        events = list(result.scalars().all())
+
+        return events, total
+
     async def get_scheduled_events(
         self,
         account_id: Optional[uuid.UUID] = None,
@@ -208,7 +271,7 @@ class LiveEventRepository:
         Returns:
             list[LiveEvent]: Events ready to start
         """
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         result = await self.session.execute(
             select(LiveEvent)
             .where(LiveEvent.status == LiveEventStatus.SCHEDULED.value)
@@ -326,9 +389,9 @@ class LiveEventRepository:
             event.last_error = error
 
         if status == LiveEventStatus.LIVE and event.actual_start_at is None:
-            event.actual_start_at = datetime.utcnow()
+            event.actual_start_at = to_naive_utc(utcnow())
         elif status in [LiveEventStatus.ENDED, LiveEventStatus.CANCELLED]:
-            event.actual_end_at = datetime.utcnow()
+            event.actual_end_at = to_naive_utc(utcnow())
 
         await self.session.flush()
         return event
@@ -452,7 +515,7 @@ class StreamSessionRepository:
         Returns:
             StreamSession: Updated session instance
         """
-        session.started_at = datetime.utcnow()
+        session.started_at = to_naive_utc(utcnow())
         session.connection_status = ConnectionStatus.GOOD.value
         await self.session.flush()
         return session
@@ -473,7 +536,7 @@ class StreamSessionRepository:
         Returns:
             StreamSession: Updated session instance
         """
-        session.ended_at = datetime.utcnow()
+        session.ended_at = to_naive_utc(utcnow())
         session.connection_status = ConnectionStatus.DISCONNECTED.value
         if end_reason:
             session.end_reason = end_reason
@@ -628,7 +691,7 @@ class RecurrencePatternRepository:
             RecurrencePattern: Updated pattern instance
         """
         pattern.generated_count += 1
-        pattern.last_generated_at = datetime.utcnow()
+        pattern.last_generated_at = to_naive_utc(utcnow())
         await self.session.flush()
         return pattern
 

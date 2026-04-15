@@ -121,13 +121,11 @@ class AnalyticsService:
             current_metrics["total_subscribers"] - comparison_metrics["total_subscribers"]
         )
         views_change = current_metrics["total_views"] - comparison_metrics["total_views"]
-        revenue_change = current_metrics["total_revenue"] - comparison_metrics["total_revenue"]
 
         return DashboardMetrics(
             total_subscribers=current_metrics["total_subscribers"],
             total_views=current_metrics["total_views"],
             total_videos=current_metrics["total_videos"],
-            total_revenue=current_metrics["total_revenue"],
             subscriber_change=subscriber_change,
             subscriber_change_percent=calculate_percent_change(
                 current_metrics["total_subscribers"],
@@ -137,11 +135,6 @@ class AnalyticsService:
             views_change_percent=calculate_percent_change(
                 current_metrics["total_views"],
                 comparison_metrics["total_views"],
-            ),
-            revenue_change=revenue_change,
-            revenue_change_percent=calculate_percent_change(
-                current_metrics["total_revenue"],
-                comparison_metrics["total_revenue"],
             ),
             total_likes=current_metrics["total_likes"],
             total_comments=current_metrics["total_comments"],
@@ -181,13 +174,17 @@ class AnalyticsService:
 
         # Calculate totals and changes
         total_views = sum(s.total_views for s in snapshots)
-        total_revenue = sum(s.estimated_revenue for s in snapshots)
+        total_likes = sum(s.total_likes for s in snapshots)
+        total_comments = sum(s.total_comments for s in snapshots)
         subscriber_change = sum(s.subscriber_change for s in snapshots)
         views_change = sum(s.views_change for s in snapshots)
         watch_time = sum(s.watch_time_minutes for s in snapshots)
+        
+        # Calculate engagement rate from totals (not averaging percentages)
+        # Engagement = (likes + comments) / views * 100
         avg_engagement = (
-            sum(s.engagement_rate for s in snapshots) / len(snapshots)
-            if snapshots else 0.0
+            ((total_likes + total_comments) / total_views * 100)
+            if total_views > 0 else 0.0
         )
 
         return AccountMetrics(
@@ -195,10 +192,8 @@ class AnalyticsService:
             subscriber_count=latest.subscriber_count,
             total_views=total_views,
             total_videos=latest.total_videos,
-            estimated_revenue=total_revenue,
             subscriber_change=subscriber_change,
             views_change=views_change,
-            revenue_change=total_revenue,  # For the period
             engagement_rate=avg_engagement,
             watch_time_minutes=watch_time,
         )
@@ -219,46 +214,52 @@ class AnalyticsService:
         Returns:
             ChannelComparisonResponse: Comparison data with variance indicators
         """
+        from sqlalchemy import select
+        from app.modules.account.models import YouTubeAccount
+        
         if len(account_ids) < 2:
             raise AnalyticsServiceError("At least 2 accounts required for comparison")
+
+        # Get account info for channel titles
+        account_result = await self.session.execute(
+            select(YouTubeAccount).where(YouTubeAccount.id.in_(account_ids))
+        )
+        accounts = {a.id: a for a in account_result.scalars().all()}
 
         # Get metrics for each account
         channel_metrics = []
         for account_id in account_ids:
             metrics = await self.get_account_metrics(account_id, start_date, end_date)
-            channel_metrics.append(metrics)
+            channel_metrics.append((account_id, metrics))
 
         # Calculate averages
         avg_subscribers = (
-            sum(m.subscriber_count for m in channel_metrics) / len(channel_metrics)
-        )
-        avg_views = sum(m.total_views for m in channel_metrics) / len(channel_metrics)
-        avg_revenue = (
-            sum(m.estimated_revenue for m in channel_metrics) / len(channel_metrics)
-        )
+            sum(m.subscriber_count for _, m in channel_metrics) / len(channel_metrics)
+        ) if channel_metrics else 0
+        avg_views = (
+            sum(m.total_views for _, m in channel_metrics) / len(channel_metrics)
+        ) if channel_metrics else 0
         avg_engagement = (
-            sum(m.engagement_rate for m in channel_metrics) / len(channel_metrics)
-        )
+            sum(m.engagement_rate for _, m in channel_metrics) / len(channel_metrics)
+        ) if channel_metrics else 0
 
         # Build comparison items with variance
         comparison_items = []
-        for metrics in channel_metrics:
+        for account_id, metrics in channel_metrics:
+            account = accounts.get(account_id)
             item = ChannelComparisonItem(
                 account_id=metrics.account_id,
+                channel_title=account.channel_title if account else None,
                 subscriber_count=metrics.subscriber_count,
                 subscriber_change=metrics.subscriber_change,
                 total_views=metrics.total_views,
                 views_change=metrics.views_change,
-                estimated_revenue=metrics.estimated_revenue,
                 engagement_rate=metrics.engagement_rate,
                 watch_time_minutes=metrics.watch_time_minutes,
                 subscriber_variance=calculate_variance(
                     metrics.subscriber_count, avg_subscribers
                 ),
                 views_variance=calculate_variance(metrics.total_views, avg_views),
-                revenue_variance=calculate_variance(
-                    metrics.estimated_revenue, avg_revenue
-                ),
                 engagement_variance=calculate_variance(
                     metrics.engagement_rate, avg_engagement
                 ),
@@ -271,7 +272,6 @@ class AnalyticsService:
             end_date=end_date,
             average_subscribers=avg_subscribers,
             average_views=avg_views,
-            average_revenue=avg_revenue,
             average_engagement=avg_engagement,
         )
 
@@ -403,6 +403,9 @@ class AnalyticsService:
         Returns:
             list[AIInsight]: Generated insights
         """
+        from app.core.datetime_utils import utcnow
+        import hashlib
+        
         # Get metrics for the period
         current_metrics = await self.snapshot_repo.get_aggregated_metrics(
             start_date, end_date, account_ids
@@ -417,6 +420,12 @@ class AnalyticsService:
         )
 
         insights = []
+        now = utcnow()
+
+        # Helper to generate unique ID
+        def generate_id(category: str, metric: str) -> str:
+            data = f"{category}-{metric}-{start_date}-{end_date}"
+            return hashlib.md5(data.encode()).hexdigest()[:12]
 
         # Subscriber growth insight
         sub_change_pct = calculate_percent_change(
@@ -424,8 +433,11 @@ class AnalyticsService:
             comparison_metrics["total_subscribers"],
         )
         if abs(sub_change_pct) > 5:
-            direction = "increased" if sub_change_pct > 0 else "decreased"
+            is_positive = sub_change_pct > 0
+            direction = "increased" if is_positive else "decreased"
             insights.append(AIInsight(
+                id=generate_id("growth", "subscribers"),
+                type="growth" if is_positive else "warning",
                 category="growth",
                 title=f"Subscriber Growth {direction.title()}",
                 description=(
@@ -434,12 +446,16 @@ class AnalyticsService:
                 ),
                 recommendation=(
                     "Continue creating engaging content to maintain growth momentum."
-                    if sub_change_pct > 0 else
+                    if is_positive else
                     "Consider analyzing your recent content to identify what resonates with your audience."
                 ),
                 confidence=0.85,
-                metric_change=sub_change_pct,
+                metric="subscribers",
                 metric_name="subscribers",
+                change_percentage=sub_change_pct,
+                metric_change=sub_change_pct,
+                priority="high" if abs(sub_change_pct) > 20 else "medium",
+                created_at=now,
             ))
 
         # Views insight
@@ -448,8 +464,11 @@ class AnalyticsService:
             comparison_metrics["total_views"],
         )
         if abs(views_change_pct) > 10:
-            direction = "increased" if views_change_pct > 0 else "decreased"
+            is_positive = views_change_pct > 0
+            direction = "increased" if is_positive else "decreased"
             insights.append(AIInsight(
+                id=generate_id("engagement", "views"),
+                type="trend" if is_positive else "warning",
                 category="engagement",
                 title=f"View Count {direction.title()}",
                 description=(
@@ -458,36 +477,16 @@ class AnalyticsService:
                 ),
                 recommendation=(
                     "Your content is gaining traction. Consider posting more frequently."
-                    if views_change_pct > 0 else
+                    if is_positive else
                     "Review your thumbnails and titles to improve click-through rates."
                 ),
                 confidence=0.80,
-                metric_change=views_change_pct,
+                metric="views",
                 metric_name="views",
-            ))
-
-        # Revenue insight
-        revenue_change_pct = calculate_percent_change(
-            current_metrics["total_revenue"],
-            comparison_metrics["total_revenue"],
-        )
-        if current_metrics["total_revenue"] > 0 and abs(revenue_change_pct) > 5:
-            direction = "increased" if revenue_change_pct > 0 else "decreased"
-            insights.append(AIInsight(
-                category="revenue",
-                title=f"Revenue {direction.title()}",
-                description=(
-                    f"Your estimated revenue has {direction} by {abs(revenue_change_pct):.1f}% "
-                    f"compared to the previous period."
-                ),
-                recommendation=(
-                    "Consider diversifying revenue streams with memberships or merchandise."
-                    if revenue_change_pct > 0 else
-                    "Focus on increasing watch time to improve ad revenue."
-                ),
-                confidence=0.75,
-                metric_change=revenue_change_pct,
-                metric_name="revenue",
+                change_percentage=views_change_pct,
+                metric_change=views_change_pct,
+                priority="high" if abs(views_change_pct) > 30 else "medium",
+                created_at=now,
             ))
 
         # Engagement insight
@@ -497,8 +496,11 @@ class AnalyticsService:
                 comparison_metrics["average_engagement_rate"]
             )
             if abs(engagement_change) > 0.5:
-                direction = "improved" if engagement_change > 0 else "declined"
+                is_positive = engagement_change > 0
+                direction = "improved" if is_positive else "declined"
                 insights.append(AIInsight(
+                    id=generate_id("engagement", "engagement_rate"),
+                    type="optimization" if is_positive else "recommendation",
                     category="engagement",
                     title=f"Engagement Rate {direction.title()}",
                     description=(
@@ -507,12 +509,149 @@ class AnalyticsService:
                     ),
                     recommendation=(
                         "Your audience is more engaged. Keep up the interactive content!"
-                        if engagement_change > 0 else
+                        if is_positive else
                         "Try adding more calls-to-action and engaging with comments."
                     ),
                     confidence=0.70,
-                    metric_change=engagement_change,
+                    metric="engagement_rate",
                     metric_name="engagement_rate",
+                    change_percentage=engagement_change,
+                    metric_change=engagement_change,
+                    priority="medium",
+                    created_at=now,
                 ))
 
         return insights
+
+    async def trigger_sync(self, account_id: uuid.UUID) -> dict:
+        """Trigger manual analytics sync for an account.
+
+        Args:
+            account_id: YouTube account UUID
+
+        Returns:
+            dict: Status message
+        """
+        from app.modules.analytics.tasks import sync_account_analytics
+        
+        # Queue the sync task
+        sync_account_analytics.delay(str(account_id))
+        
+        return {
+            "status": "queued",
+            "message": f"Analytics sync queued for account {account_id}",
+        }
+
+    async def trigger_sync_all(self) -> dict:
+        """Trigger manual analytics sync for all accounts.
+
+        Returns:
+            dict: Status message
+        """
+        from app.modules.analytics.tasks import sync_all_accounts_analytics
+        
+        # Queue the sync task
+        sync_all_accounts_analytics.delay()
+        
+        return {
+            "status": "queued",
+            "message": "Analytics sync queued for all accounts",
+        }
+
+    async def get_channel_detailed_metrics(
+        self,
+        account_id: uuid.UUID,
+        start_date: date,
+        end_date: date,
+    ) -> dict:
+        """Get detailed channel metrics including traffic sources and demographics.
+
+        Args:
+            account_id: YouTube account UUID
+            start_date: Start of date range
+            end_date: End of date range
+
+        Returns:
+            dict: Detailed metrics including traffic sources, demographics, top videos
+        """
+        # Get all snapshots in the date range
+        snapshots = await self.snapshot_repo.get_by_account_date_range(
+            account_id, start_date, end_date
+        )
+
+        if not snapshots:
+            return {
+                "traffic_sources": {},
+                "demographics": {},
+                "top_videos": [],
+            }
+
+        # Aggregate traffic sources from all snapshots
+        aggregated_traffic: dict[str, dict] = {}
+        for snapshot in snapshots:
+            if snapshot.traffic_sources:
+                for source, data in snapshot.traffic_sources.items():
+                    if source not in aggregated_traffic:
+                        aggregated_traffic[source] = {"views": 0, "watch_time_minutes": 0}
+                    aggregated_traffic[source]["views"] += data.get("views", 0)
+                    aggregated_traffic[source]["watch_time_minutes"] += data.get("watch_time_minutes", 0)
+
+        # Get the most recent demographics (demographics don't aggregate well)
+        latest_demographics = {}
+        for snapshot in reversed(snapshots):
+            if snapshot.demographics:
+                latest_demographics = snapshot.demographics
+                break
+
+        # Aggregate top videos - combine and sort by views
+        video_map: dict[str, dict] = {}
+        for snapshot in snapshots:
+            if snapshot.top_videos:
+                videos = snapshot.top_videos if isinstance(snapshot.top_videos, list) else []
+                for video in videos:
+                    video_id = video.get("video_id")
+                    if video_id:
+                        if video_id not in video_map:
+                            video_map[video_id] = {
+                                "video_id": video_id,
+                                "title": video.get("title", "Unknown"),
+                                "views": 0,
+                                "watch_time_minutes": 0,
+                                "average_view_duration": 0,
+                                "likes": 0,
+                                "comments": 0,
+                            }
+                        # Use max values for cumulative metrics
+                        video_map[video_id]["views"] = max(
+                            video_map[video_id]["views"], 
+                            video.get("views", 0)
+                        )
+                        video_map[video_id]["watch_time_minutes"] = max(
+                            video_map[video_id]["watch_time_minutes"],
+                            video.get("watch_time_minutes", 0)
+                        )
+                        video_map[video_id]["average_view_duration"] = video.get("average_view_duration", 0)
+                        video_map[video_id]["likes"] = max(
+                            video_map[video_id]["likes"],
+                            video.get("likes", 0)
+                        )
+                        video_map[video_id]["comments"] = max(
+                            video_map[video_id]["comments"],
+                            video.get("comments", 0)
+                        )
+                        # Keep the title from the most recent snapshot
+                        if video.get("title"):
+                            video_map[video_id]["title"] = video["title"]
+
+        # Sort top videos by views and take top 10
+        top_videos = sorted(
+            video_map.values(),
+            key=lambda x: x["views"],
+            reverse=True
+        )[:10]
+
+        return {
+            "traffic_sources": aggregated_traffic,
+            "demographics": latest_demographics,
+            "top_videos": top_videos,
+        }

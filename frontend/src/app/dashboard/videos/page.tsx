@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { Search, Upload, Grid3x3, List, MoreVertical, Trash2, Edit, Eye } from "lucide-react"
+import { Search, Upload, Grid3x3, List, MoreVertical, Trash2, Edit, Eye, Pencil, Loader2, Download } from "lucide-react"
 import { DashboardLayout } from "@/components/dashboard"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -23,18 +23,45 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog"
+import { useToast } from "@/components/ui/toast"
+import { ConfirmDialog, useConfirmDialog } from "@/components/ui/confirm-dialog"
 import { videosApi, type VideoFilters } from "@/lib/api/videos"
 import { accountsApi } from "@/lib/api/accounts"
+import { CategorySelect } from "@/components/videos/category-select"
 import type { Video, YouTubeAccount } from "@/types"
 
 export default function VideosPage() {
     const router = useRouter()
+    const { addToast } = useToast()
     const [videos, setVideos] = useState<Video[]>([])
     const [accounts, setAccounts] = useState<YouTubeAccount[]>([])
     const [loading, setLoading] = useState(true)
     const [viewMode, setViewMode] = useState<"grid" | "list">("grid")
     const [selectedVideos, setSelectedVideos] = useState<Set<string>>(new Set())
     const [bulkMode, setBulkMode] = useState(false)
+    const [isBulkEditOpen, setIsBulkEditOpen] = useState(false)
+    const [bulkEditSaving, setBulkEditSaving] = useState(false)
+    const [bulkEditData, setBulkEditData] = useState({
+        appendDescription: "",
+        addTags: [] as string[],
+        categoryId: "",
+        visibility: "",
+    })
+    const [tagInput, setTagInput] = useState("")
+
+    // Delete confirmation
+    const [deleteTarget, setDeleteTarget] = useState<{ type: "single" | "bulk"; videoId?: string; count?: number } | null>(null)
+    const [isDeleting, setIsDeleting] = useState(false)
 
     // Filters
     const [filters, setFilters] = useState<VideoFilters>({
@@ -115,30 +142,107 @@ export default function VideosPage() {
         }
     }
 
-    const handleBulkDelete = async () => {
+    const handleBulkDelete = () => {
+        if (selectedVideos.size === 0) return
+        setDeleteTarget({ type: "bulk", count: selectedVideos.size })
+    }
+
+    const handleSingleDelete = (videoId: string) => {
+        setDeleteTarget({ type: "single", videoId })
+    }
+
+    const confirmDelete = async () => {
+        if (!deleteTarget) return
+
+        setIsDeleting(true)
+        try {
+            if (deleteTarget.type === "bulk") {
+                await videosApi.bulkDelete(Array.from(selectedVideos))
+                addToast({ type: "success", title: "Deleted", description: `${selectedVideos.size} video(s) deleted successfully` })
+                setSelectedVideos(new Set())
+                setBulkMode(false)
+            } else if (deleteTarget.videoId) {
+                await videosApi.deleteVideo(deleteTarget.videoId)
+                addToast({ type: "success", title: "Deleted", description: "Video deleted successfully" })
+            }
+            loadVideos()
+        } catch (error) {
+            console.error("Failed to delete videos:", error)
+            addToast({ type: "error", title: "Error", description: "Failed to delete video(s)" })
+        } finally {
+            setIsDeleting(false)
+            setDeleteTarget(null)
+        }
+    }
+
+    const handleBulkEdit = async () => {
         if (selectedVideos.size === 0) return
 
-        if (!confirm(`Delete ${selectedVideos.size} video(s)?`)) return
-
+        setBulkEditSaving(true)
         try {
-            await videosApi.bulkDelete(Array.from(selectedVideos))
+            const updates: Record<string, unknown> = {}
+
+            // Note: Backend doesn't support append/add operations, it replaces values
+            // For now, we'll use description and tags as replacement values
+            if (bulkEditData.appendDescription) {
+                updates.description = bulkEditData.appendDescription
+            }
+            if (bulkEditData.addTags.length > 0) {
+                updates.tags = bulkEditData.addTags
+            }
+            if (bulkEditData.categoryId) {
+                updates.categoryId = bulkEditData.categoryId
+            }
+            if (bulkEditData.visibility) {
+                updates.visibility = bulkEditData.visibility
+            }
+
+            if (Object.keys(updates).length === 0) {
+                addToast({ type: "warning", title: "No Changes", description: "Please specify at least one field to update" })
+                setBulkEditSaving(false)
+                return
+            }
+
+            await videosApi.bulkUpdate({
+                videoIds: Array.from(selectedVideos),
+                updates: updates as any,
+            })
+
+            addToast({ type: "success", title: "Success", description: `Updated ${selectedVideos.size} video(s)` })
+            setIsBulkEditOpen(false)
+            setBulkEditData({ appendDescription: "", addTags: [], categoryId: "", visibility: "" })
             setSelectedVideos(new Set())
             setBulkMode(false)
             loadVideos()
         } catch (error) {
-            console.error("Failed to delete videos:", error)
+            console.error("Failed to update videos:", error)
+            addToast({ type: "error", title: "Error", description: "Failed to update videos" })
+        } finally {
+            setBulkEditSaving(false)
         }
     }
 
-    const getStatusBadge = (status: Video["status"]) => {
-        const variants: Record<Video["status"], { variant: any; label: string }> = {
+    const addBulkTag = () => {
+        if (tagInput.trim() && !bulkEditData.addTags.includes(tagInput.trim())) {
+            setBulkEditData({ ...bulkEditData, addTags: [...bulkEditData.addTags, tagInput.trim()] })
+            setTagInput("")
+        }
+    }
+
+    const removeBulkTag = (tag: string) => {
+        setBulkEditData({ ...bulkEditData, addTags: bulkEditData.addTags.filter((t) => t !== tag) })
+    }
+
+    const getStatusBadge = (status: string) => {
+        const variants: Record<string, { variant: "default" | "secondary" | "destructive" | "outline"; label: string }> = {
             draft: { variant: "secondary", label: "Draft" },
             uploading: { variant: "default", label: "Uploading" },
             processing: { variant: "default", label: "Processing" },
             published: { variant: "default", label: "Published" },
             scheduled: { variant: "outline", label: "Scheduled" },
+            failed: { variant: "destructive", label: "Failed" },
         }
-        const config = variants[status]
+        const config = variants[status] || { variant: "secondary", label: status }
         return <Badge variant={config.variant}>{config.label}</Badge>
     }
 
@@ -160,6 +264,10 @@ export default function VideosPage() {
                         </p>
                     </div>
                     <div className="flex gap-2">
+                        <Button variant="outline" onClick={() => router.push("/dashboard/videos/import")}>
+                            <Download className="mr-2 h-4 w-4" />
+                            Import
+                        </Button>
                         <Button variant="outline" onClick={() => router.push("/dashboard/videos/bulk-upload")}>
                             Bulk Upload
                         </Button>
@@ -305,6 +413,15 @@ export default function VideosPage() {
                                 </div>
                                 <div className="flex gap-2">
                                     <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => setIsBulkEditOpen(true)}
+                                        disabled={selectedVideos.size === 0}
+                                    >
+                                        <Pencil className="mr-2 h-4 w-4" />
+                                        Edit Selected
+                                    </Button>
+                                    <Button
                                         variant="destructive"
                                         size="sm"
                                         onClick={handleBulkDelete}
@@ -394,10 +511,16 @@ export default function VideosPage() {
                                             >
                                                 {video.title}
                                             </h3>
-                                            <div className="flex items-center gap-3 mt-2 text-sm text-muted-foreground">
-                                                <span className="flex items-center gap-1">
+                                            <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground flex-wrap">
+                                                <span className="flex items-center gap-1" title="Views">
                                                     <Eye className="h-3 w-3" />
                                                     {formatNumber(video.viewCount)}
+                                                </span>
+                                                <span className="flex items-center gap-1" title="Likes">
+                                                    👍 {formatNumber(video.likeCount)}
+                                                </span>
+                                                <span className="flex items-center gap-1" title="Comments">
+                                                    💬 {formatNumber(video.commentCount)}
                                                 </span>
                                                 <Badge variant="outline" className="text-xs">
                                                     {video.visibility}
@@ -419,12 +542,7 @@ export default function VideosPage() {
                                                 </DropdownMenuItem>
                                                 <DropdownMenuItem
                                                     className="text-destructive"
-                                                    onClick={async () => {
-                                                        if (confirm("Delete this video?")) {
-                                                            await videosApi.deleteVideo(video.id)
-                                                            loadVideos()
-                                                        }
-                                                    }}
+                                                    onClick={() => handleSingleDelete(video.id)}
                                                 >
                                                     <Trash2 className="mr-2 h-4 w-4" />
                                                     Delete
@@ -490,12 +608,7 @@ export default function VideosPage() {
                                                 </DropdownMenuItem>
                                                 <DropdownMenuItem
                                                     className="text-destructive"
-                                                    onClick={async () => {
-                                                        if (confirm("Delete this video?")) {
-                                                            await videosApi.deleteVideo(video.id)
-                                                            loadVideos()
-                                                        }
-                                                    }}
+                                                    onClick={() => handleSingleDelete(video.id)}
                                                 >
                                                     <Trash2 className="mr-2 h-4 w-4" />
                                                     Delete
@@ -537,6 +650,118 @@ export default function VideosPage() {
                     </div>
                 )}
             </div>
+
+            {/* Bulk Edit Dialog */}
+            <Dialog open={isBulkEditOpen} onOpenChange={setIsBulkEditOpen}>
+                <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle>Bulk Edit Videos</DialogTitle>
+                        <DialogDescription>
+                            Update {selectedVideos.size} selected video(s). Only filled fields will be updated.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div className="space-y-2">
+                            <Label>Append to Description</Label>
+                            <Textarea
+                                value={bulkEditData.appendDescription}
+                                onChange={(e) => setBulkEditData({ ...bulkEditData, appendDescription: e.target.value })}
+                                placeholder="Text to append to all descriptions..."
+                                rows={3}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                This text will be added to the end of each video's description
+                            </p>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label>Add Tags</Label>
+                            <div className="flex gap-2">
+                                <Input
+                                    value={tagInput}
+                                    onChange={(e) => setTagInput(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                            e.preventDefault()
+                                            addBulkTag()
+                                        }
+                                    }}
+                                    placeholder="Add tag and press Enter"
+                                />
+                                <Button type="button" onClick={addBulkTag} variant="outline">
+                                    Add
+                                </Button>
+                            </div>
+                            {bulkEditData.addTags.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-2">
+                                    {bulkEditData.addTags.map((tag) => (
+                                        <Badge
+                                            key={tag}
+                                            variant="secondary"
+                                            className="cursor-pointer"
+                                            onClick={() => removeBulkTag(tag)}
+                                        >
+                                            {tag}
+                                            <span className="ml-1">×</span>
+                                        </Badge>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <div className="space-y-2">
+                                <Label>Category</Label>
+                                <CategorySelect
+                                    value={bulkEditData.categoryId}
+                                    onValueChange={(value) => setBulkEditData({ ...bulkEditData, categoryId: value })}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Visibility</Label>
+                                <Select
+                                    value={bulkEditData.visibility}
+                                    onValueChange={(value) => setBulkEditData({ ...bulkEditData, visibility: value })}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="No change" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="private">Private</SelectItem>
+                                        <SelectItem value="unlisted">Unlisted</SelectItem>
+                                        <SelectItem value="public">Public</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsBulkEditOpen(false)}>
+                            Cancel
+                        </Button>
+                        <Button onClick={handleBulkEdit} disabled={bulkEditSaving}>
+                            {bulkEditSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                            Update {selectedVideos.size} Video(s)
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Delete Confirmation Dialog */}
+            <ConfirmDialog
+                open={deleteTarget !== null}
+                onOpenChange={(open) => !open && setDeleteTarget(null)}
+                title={deleteTarget?.type === "bulk" ? "Delete Multiple Videos" : "Delete Video"}
+                description={
+                    deleteTarget?.type === "bulk"
+                        ? `Are you sure you want to delete ${deleteTarget.count} video(s)? This will also delete the video files from storage. This action cannot be undone.`
+                        : "Are you sure you want to delete this video? This will also delete the video file from storage. This action cannot be undone."
+                }
+                confirmText={deleteTarget?.type === "bulk" ? `Delete ${deleteTarget.count} Video(s)` : "Delete Video"}
+                variant="destructive"
+                onConfirm={confirmDelete}
+                loading={isDeleting}
+            />
         </DashboardLayout>
     )
 }

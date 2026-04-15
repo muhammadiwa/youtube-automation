@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { DashboardLayout } from "@/components/dashboard"
+import { AdminLayout } from "@/components/admin/admin-layout"
 import { OverviewCard } from "@/components/dashboard/overview-card"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -124,13 +124,13 @@ export default function GatewayStatisticsPage() {
         }
     }
 
-    // Calculate totals
+    // Calculate totals (using USD converted values)
     const totals = statistics.reduce(
         (acc, stat) => ({
             transactions: acc.transactions + stat.total_transactions,
             successful: acc.successful + stat.successful_transactions,
             failed: acc.failed + stat.failed_transactions,
-            volume: acc.volume + stat.total_volume,
+            volume: acc.volume + stat.total_volume_usd,
         }),
         { transactions: 0, successful: 0, failed: 0, volume: 0 }
     )
@@ -139,10 +139,10 @@ export default function GatewayStatisticsPage() {
         ? ((totals.successful / totals.transactions) * 100).toFixed(1)
         : "0"
 
-    // Prepare chart data
+    // Prepare chart data (using USD converted values)
     const volumeChartData = statistics.map(stat => ({
         name: stat.provider.charAt(0).toUpperCase() + stat.provider.slice(1),
-        volume: stat.total_volume,
+        volume: stat.total_volume_usd,
         fill: gatewayColors[stat.provider],
     }))
 
@@ -177,7 +177,7 @@ export default function GatewayStatisticsPage() {
 
     if (loading) {
         return (
-            <DashboardLayout
+            <AdminLayout
                 breadcrumbs={[
                     { label: "Admin", href: "/admin" },
                     { label: "Payment Gateways", href: "/admin/payment-gateways" },
@@ -187,12 +187,12 @@ export default function GatewayStatisticsPage() {
                 <div className="flex items-center justify-center min-h-[400px]">
                     <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                 </div>
-            </DashboardLayout>
+            </AdminLayout>
         )
     }
 
     return (
-        <DashboardLayout
+        <AdminLayout
             breadcrumbs={[
                 { label: "Admin", href: "/admin" },
                 { label: "Payment Gateways", href: "/admin/payment-gateways" },
@@ -368,10 +368,10 @@ export default function GatewayStatisticsPage() {
                                                 </span>
                                             </TableCell>
                                             <TableCell className="text-right font-medium">
-                                                {formatCurrency(stat.total_volume)}
+                                                {formatCurrency(stat.total_volume_usd)}
                                             </TableCell>
                                             <TableCell className="text-right">
-                                                {formatCurrency(stat.average_transaction)}
+                                                {formatCurrency(stat.average_transaction_usd)}
                                             </TableCell>
                                             <TableCell className="text-right text-muted-foreground">
                                                 {stat.last_transaction_at
@@ -389,6 +389,6 @@ export default function GatewayStatisticsPage() {
                     </CardContent>
                 </Card>
             </div>
-        </DashboardLayout>
+        </AdminLayout>
     )
 }

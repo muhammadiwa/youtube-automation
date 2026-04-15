@@ -1,1 +1,0 @@
-"""Strike module tests."""

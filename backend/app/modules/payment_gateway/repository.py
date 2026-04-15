@@ -10,6 +10,7 @@ from typing import Optional
 from sqlalchemy import select, update, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.payment_gateway.models import (
     PaymentGatewayConfig,
     PaymentTransaction,
@@ -269,7 +270,7 @@ class PaymentTransactionRepository:
             gateway_payment_id=gateway_payment_id,
             payment_method=payment_method,
             gateway_response=gateway_response,
-            completed_at=datetime.utcnow(),
+            completed_at=to_naive_utc(utcnow()),
         )
     
     async def mark_failed(

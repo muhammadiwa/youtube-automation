@@ -6,6 +6,7 @@ Requirements: 27.1, 27.2, 27.3, 27.4, 27.5, 28.1, 28.3, 28.4, 28.5
 
 from app.modules.billing.router import router
 from app.modules.billing.service import BillingService
+from app.modules.billing.feature_gate import FeatureGateService, LimitExceededError
 from app.modules.billing.models import (
     Subscription,
     UsageRecord,
@@ -23,6 +24,8 @@ from app.modules.billing.models import (
 __all__ = [
     "router",
     "BillingService",
+    "FeatureGateService",
+    "LimitExceededError",
     "Subscription",
     "UsageRecord",
     "UsageAggregate",

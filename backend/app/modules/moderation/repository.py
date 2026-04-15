@@ -10,6 +10,8 @@ from typing import Optional
 from sqlalchemy import select, update, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
+
 from app.modules.moderation.models import (
     ChatMessage,
     CustomCommand,
@@ -40,21 +42,21 @@ class ModerationRuleRepository:
 
     async def get_by_account(
         self,
-        account_id: uuid.UUID,
+        account_id: Optional[uuid.UUID] = None,
         enabled_only: bool = True,
     ) -> list[ModerationRule]:
         """Get all moderation rules for an account.
         
         Args:
-            account_id: YouTube account ID
+            account_id: YouTube account ID (optional, if None returns all rules)
             enabled_only: Only return enabled rules
             
         Returns:
             List of moderation rules ordered by priority (descending)
         """
-        query = select(ModerationRule).where(
-            ModerationRule.account_id == account_id
-        )
+        query = select(ModerationRule)
+        if account_id:
+            query = query.where(ModerationRule.account_id == account_id)
         if enabled_only:
             query = query.where(ModerationRule.is_enabled == True)
         query = query.order_by(ModerationRule.priority.desc())
@@ -92,7 +94,7 @@ class ModerationRuleRepository:
             .where(ModerationRule.id == rule_id)
             .values(
                 trigger_count=ModerationRule.trigger_count + 1,
-                last_triggered_at=datetime.utcnow(),
+                last_triggered_at=to_naive_utc(utcnow()),
             )
         )
 
@@ -198,7 +200,7 @@ class ChatMessageRepository:
             message.is_hidden = is_hidden
             message.is_deleted = is_deleted
             message.moderation_reason = reason
-            message.moderated_at = datetime.utcnow() if is_moderated else None
+            message.moderated_at = to_naive_utc(utcnow()) if is_moderated else None
             message.analysis_completed = True
             if violated_rules:
                 message.violated_rules = violated_rules
@@ -213,7 +215,7 @@ class ChatMessageRepository:
     ) -> list[ChatMessage]:
         """Get recent messages from an author within a time window."""
         from datetime import timedelta
-        cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+        cutoff = to_naive_utc(utcnow()) - timedelta(minutes=minutes)
         
         result = await self.session.execute(
             select(ChatMessage)
@@ -316,13 +318,18 @@ class CustomCommandRepository:
 
     async def get_by_account(
         self,
-        account_id: uuid.UUID,
+        account_id: Optional[uuid.UUID] = None,
         enabled_only: bool = True,
     ) -> list[CustomCommand]:
-        """Get all custom commands for an account."""
-        query = select(CustomCommand).where(
-            CustomCommand.account_id == account_id
-        )
+        """Get all custom commands for an account.
+        
+        Args:
+            account_id: YouTube account ID (optional, if None returns all commands)
+            enabled_only: Only return enabled commands
+        """
+        query = select(CustomCommand)
+        if account_id:
+            query = query.where(CustomCommand.account_id == account_id)
         if enabled_only:
             query = query.where(CustomCommand.is_enabled == True)
         
@@ -359,6 +366,6 @@ class CustomCommandRepository:
             .where(CustomCommand.id == command_id)
             .values(
                 usage_count=CustomCommand.usage_count + 1,
-                last_used_at=datetime.utcnow(),
+                last_used_at=to_naive_utc(utcnow()),
             )
         )

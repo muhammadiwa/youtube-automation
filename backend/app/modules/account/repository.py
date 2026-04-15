@@ -5,12 +5,13 @@ Requirements: 2.1, 2.2, 25.1
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.account.models import AccountStatus, YouTubeAccount
 
 
@@ -68,7 +69,7 @@ class YouTubeAccountRepository:
             has_live_streaming_enabled=has_live_streaming_enabled,
             token_expires_at=token_expires_at,
             status=AccountStatus.ACTIVE.value,
-            last_sync_at=datetime.utcnow(),
+            last_sync_at=to_naive_utc(utcnow()),
         )
         # Set tokens through properties to ensure encryption
         account.access_token = access_token
@@ -106,6 +107,17 @@ class YouTubeAccountRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_all(self) -> list[YouTubeAccount]:
+        """Get all YouTube accounts.
+
+        Returns:
+            list[YouTubeAccount]: List of all YouTube accounts
+        """
+        result = await self.session.execute(
+            select(YouTubeAccount).order_by(YouTubeAccount.created_at.desc())
+        )
+        return list(result.scalars().all())
+
     async def get_by_user_id(self, user_id: uuid.UUID) -> list[YouTubeAccount]:
         """Get all accounts for a user.
 
@@ -134,12 +146,12 @@ class YouTubeAccountRepository:
             list[YouTubeAccount]: Accounts with expiring tokens
         """
         from datetime import timedelta
-        threshold = datetime.utcnow() + timedelta(hours=hours)
+        threshold = to_naive_utc(utcnow()) + timedelta(hours=hours)
         result = await self.session.execute(
             select(YouTubeAccount)
             .where(YouTubeAccount.status == AccountStatus.ACTIVE.value)
             .where(YouTubeAccount.token_expires_at <= threshold)
-            .where(YouTubeAccount.token_expires_at > datetime.utcnow())
+            .where(YouTubeAccount.token_expires_at > to_naive_utc(utcnow()))
         )
         return list(result.scalars().all())
 
@@ -232,7 +244,7 @@ class YouTubeAccountRepository:
         if strike_count is not None:
             account.strike_count = strike_count
 
-        account.last_sync_at = datetime.utcnow()
+        account.last_sync_at = to_naive_utc(utcnow())
         await self.session.flush()
         return account
 
@@ -278,7 +290,7 @@ class YouTubeAccountRepository:
             YouTubeAccount: Updated account instance
         """
         account.daily_quota_used = 0
-        account.quota_reset_at = datetime.utcnow()
+        account.quota_reset_at = to_naive_utc(utcnow())
         await self.session.flush()
         return account
 
@@ -361,3 +373,33 @@ class YouTubeAccountRepository:
             .where(YouTubeAccount.daily_quota_used >= threshold_value)
         )
         return list(result.scalars().all())
+
+    async def update_stream_key(
+        self,
+        account: YouTubeAccount,
+        stream_key: Optional[str] = None,
+        rtmp_url: Optional[str] = None,
+        default_stream_id: Optional[str] = None,
+    ) -> YouTubeAccount:
+        """Update stream key and RTMP configuration for an account.
+
+        Args:
+            account: Account instance
+            stream_key: YouTube stream key (will be encrypted)
+            rtmp_url: RTMP ingestion URL
+            default_stream_id: YouTube liveStream ID
+
+        Returns:
+            YouTubeAccount: Updated account instance
+        """
+        if stream_key is not None:
+            account.stream_key = stream_key
+        if rtmp_url is not None:
+            account.rtmp_url = rtmp_url
+        if default_stream_id is not None:
+            account.default_stream_id = default_stream_id
+        
+        account.last_sync_at = to_naive_utc(utcnow())
+        await self.session.flush()
+        return account
+

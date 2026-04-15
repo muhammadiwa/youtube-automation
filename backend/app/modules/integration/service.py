@@ -12,6 +12,8 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, ensure_utc
+
 from app.modules.integration.models import (
     APIKey,
     Webhook,
@@ -105,7 +107,7 @@ class APIKeyService:
         if not api_key.is_valid():
             if api_key.revoked_at:
                 return False, api_key, "API key has been revoked"
-            if api_key.expires_at and datetime.utcnow() > api_key.expires_at:
+            if api_key.expires_at and utcnow() > ensure_utc(api_key.expires_at):
                 return False, api_key, "API key has expired"
             return False, api_key, "API key is inactive"
         
@@ -131,17 +133,18 @@ class APIKeyService:
         """
         usage = await self.usage_repo.get_current_usage(api_key.id)
         
+        now = utcnow()
+        
         # Check minute limit
         if usage["minute"] >= api_key.rate_limit_per_minute:
-            return False, "minute", 60 - datetime.utcnow().second
+            return False, "minute", 60 - now.second
         
         # Check hour limit
         if usage["hour"] >= api_key.rate_limit_per_hour:
-            return False, "hour", 3600 - (datetime.utcnow().minute * 60 + datetime.utcnow().second)
+            return False, "hour", 3600 - (now.minute * 60 + now.second)
         
         # Check day limit
         if usage["day"] >= api_key.rate_limit_per_day:
-            now = datetime.utcnow()
             seconds_until_midnight = (
                 24 * 3600 - (now.hour * 3600 + now.minute * 60 + now.second)
             )
@@ -154,7 +157,7 @@ class APIKeyService:
         
         Requirements: 29.2 - Track usage for rate limiting
         """
-        now = datetime.utcnow()
+        now = utcnow()
         
         # Record usage for all time windows
         minute_start = now.replace(second=0, microsecond=0)
@@ -175,7 +178,7 @@ class APIKeyService:
         """
         usage = await self.usage_repo.get_current_usage(api_key.id)
         
-        now = datetime.utcnow()
+        now = utcnow()
         next_minute = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
         
         is_rate_limited = (
@@ -183,6 +186,9 @@ class APIKeyService:
             usage["hour"] >= api_key.rate_limit_per_hour or
             usage["day"] >= api_key.rate_limit_per_day
         )
+        
+        now = utcnow()
+        next_minute = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
         
         return RateLimitStatus(
             api_key_id=api_key.id,
@@ -382,7 +388,7 @@ class WebhookService:
             payload = WebhookEventPayload(
                 id=event_id,
                 type=event_type,
-                created_at=datetime.utcnow(),
+                created_at=utcnow(),
                 data=data,
                 user_id=user_id,
                 account_id=account_id,

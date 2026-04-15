@@ -33,7 +33,7 @@ const mapNotificationType = (apiType: string): "info" | "success" | "warning" | 
     ];
     const warningTypes = [
         "quota_warning", "token_expiring", "subscription_expiring",
-        "subscription_cancelled", "stream_disconnected", "competitor_update"
+        "subscription_cancelled", "stream_disconnected"
     ];
     const errorTypes = [
         "payment_failed", "stream_error", "upload_failed", "strike_detected",

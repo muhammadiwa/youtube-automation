@@ -1,33 +1,63 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/dashboard";
 import { OverviewCard } from "@/components/dashboard/overview-card";
 import { QuickActions } from "@/components/dashboard/quick-actions";
 import { RecentActivity } from "@/components/dashboard/recent-activity";
 import { PerformanceChart } from "@/components/dashboard/performance-chart";
-import { Users, Eye, DollarSign, Radio } from "lucide-react";
+import { Users, Eye, Clock, Radio } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { analyticsApi, type AnalyticsOverview } from "@/lib/api/analytics";
+
+// Helper function to format numbers
+function formatNumber(num: number): string {
+    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
+    if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
+    return num.toString();
+}
 
 export default function DashboardPage() {
     const { user } = useAuth();
+    const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
+    const [loading, setLoading] = useState(true);
 
-    // Mock data - will be replaced with real API data
+    useEffect(() => {
+        const loadOverview = async () => {
+            try {
+                const data = await analyticsApi.getOverview({ period: "30d" });
+                setOverview(data);
+            } catch (error) {
+                console.error("Failed to load analytics overview:", error);
+            } finally {
+                setLoading(false);
+            }
+        };
+        loadOverview();
+    }, []);
+
+    // Calculate stats from real API data
     const stats = {
         subscribers: {
-            value: "12,345",
-            trend: { value: 12.5, isPositive: true },
+            value: loading ? "..." : formatNumber(overview?.total_subscribers || 0),
+            trend: {
+                value: overview?.subscribers_change || 0,
+                isPositive: (overview?.subscribers_change || 0) >= 0
+            },
         },
         views: {
-            value: "1.2M",
-            trend: { value: 8.3, isPositive: true },
+            value: loading ? "..." : formatNumber(overview?.total_views || 0),
+            trend: {
+                value: overview?.views_change || 0,
+                isPositive: (overview?.views_change || 0) >= 0
+            },
         },
-        revenue: {
-            value: "$4,231",
-            trend: { value: 15.2, isPositive: true },
-        },
-        activeStreams: {
-            value: "3",
-            trend: { value: 2.1, isPositive: false },
+        watchTime: {
+            value: loading ? "..." : formatNumber(overview?.total_watch_time || 0),
+            trend: {
+                value: overview?.watch_time_change || 0,
+                isPositive: (overview?.watch_time_change || 0) >= 0
+            },
         },
     };
 
@@ -45,7 +75,7 @@ export default function DashboardPage() {
                 </div>
 
                 {/* Overview Cards */}
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     <OverviewCard
                         title="Total Subscribers"
                         value={stats.subscribers.value}
@@ -61,18 +91,11 @@ export default function DashboardPage() {
                         gradient="from-purple-500 to-purple-600"
                     />
                     <OverviewCard
-                        title="Revenue"
-                        value={stats.revenue.value}
-                        icon={DollarSign}
-                        trend={stats.revenue.trend}
+                        title="Watch Time (min)"
+                        value={stats.watchTime.value}
+                        icon={Clock}
+                        trend={stats.watchTime.trend}
                         gradient="from-green-500 to-green-600"
-                    />
-                    <OverviewCard
-                        title="Active Streams"
-                        value={stats.activeStreams.value}
-                        icon={Radio}
-                        trend={stats.activeStreams.trend}
-                        gradient="from-red-500 to-red-600"
                     />
                 </div>
 

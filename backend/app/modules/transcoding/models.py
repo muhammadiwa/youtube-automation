@@ -21,6 +21,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 
 from app.core.database import Base
 
@@ -100,7 +101,7 @@ class TranscodeJob(Base):
     worker_load_at_assignment = Column(Float, nullable=True)
     
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, server_default=func.now())
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     
@@ -133,7 +134,7 @@ class TranscodeWorker(Base):
     
     # Status
     is_healthy = Column(Boolean, default=True)
-    last_heartbeat = Column(DateTime, default=datetime.utcnow)
+    last_heartbeat = Column(DateTime, server_default=func.now())
     
     # Capabilities
     supports_4k = Column(Boolean, default=True)
@@ -141,7 +142,7 @@ class TranscodeWorker(Base):
     gpu_type = Column(String(100), nullable=True)
     
     # Timestamps
-    registered_at = Column(DateTime, default=datetime.utcnow)
+    registered_at = Column(DateTime, server_default=func.now())
 
     def __repr__(self) -> str:
         return f"<TranscodeWorker {self.hostname} - load: {self.current_load}%>"
@@ -177,7 +178,7 @@ class TranscodedOutput(Base):
     cdn_url = Column(String(1024), nullable=False)
     
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, server_default=func.now())
     expires_at = Column(DateTime, nullable=True)
 
     def __repr__(self) -> str:

@@ -5,11 +5,13 @@ Requirements: 24.4
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional, Callable, Any
 from dataclasses import dataclass, field
 from enum import Enum
 from collections import defaultdict
+
+from app.core.datetime_utils import utcnow, to_naive_utc, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +216,7 @@ class AlertManager:
         Returns:
             Alert if triggered, None otherwise
         """
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         
         # Track when condition started
         if alert_key not in self._condition_start_times:
@@ -293,7 +295,7 @@ class AlertManager:
         if alert_key in self._active_alerts:
             alert = self._active_alerts.pop(alert_key)
             alert.status = AlertStatus.RESOLVED
-            alert.resolved_at = datetime.utcnow()
+            alert.resolved_at = to_naive_utc(utcnow())
             
             self._alert_history.append(alert)
             
@@ -462,3 +464,4 @@ def setup_default_thresholds() -> None:
     ))
     
     logger.info("Default alert thresholds configured")
+

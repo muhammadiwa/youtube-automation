@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.billing.models import Subscription, SubscriptionStatus
 from app.modules.billing.notifications import BillingNotificationService
 
@@ -29,7 +30,7 @@ async def check_expiring_subscriptions(session: AsyncSession) -> int:
     notification_service = BillingNotificationService(session)
     notifications_sent = 0
     
-    now = datetime.utcnow()
+    now = to_naive_utc(utcnow())
     
     # Check for subscriptions expiring in 7, 3, and 1 days
     reminder_days = [7, 3, 1]
@@ -90,7 +91,7 @@ async def check_expired_subscriptions(session: AsyncSession) -> int:
     notification_service = BillingNotificationService(session)
     expired_count = 0
     
-    now = datetime.utcnow()
+    now = to_naive_utc(utcnow())
     
     # Find active subscriptions that have passed their end date
     result = await session.execute(
@@ -148,7 +149,7 @@ async def run_billing_tasks(session: AsyncSession) -> dict:
     summary = {
         "expiring_notifications_sent": expiring_notifications,
         "subscriptions_expired": expired_subscriptions,
-        "run_at": datetime.utcnow().isoformat(),
+        "run_at": utcnow().isoformat(),
     }
     
     logger.info(f"Billing tasks completed: {summary}")

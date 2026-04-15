@@ -93,6 +93,8 @@ class VideoService:
         request: VideoUploadRequest,
         file_path: str,
         file_size: int,
+        thumbnail_path: Optional[str] = None,
+        duration: Optional[int] = None,
     ) -> Video:
         """Create a new video record.
 
@@ -101,6 +103,8 @@ class VideoService:
             request: Upload request data
             file_path: Path to uploaded file
             file_size: Size of file in bytes
+            thumbnail_path: Optional path to thumbnail file
+            duration: Video duration in seconds (extracted via ffprobe)
 
         Returns:
             Video: Created video instance
@@ -118,6 +122,8 @@ class VideoService:
             file_path=file_path,
             file_size=file_size,
             scheduled_publish_at=request.scheduled_publish_at,
+            thumbnail_path=thumbnail_path,
+            duration=duration,
         )
 
         return video
@@ -193,6 +199,64 @@ class VideoService:
             account_id, status, limit, offset
         )
 
+    async def get_all_videos_paginated(
+        self,
+        user_id: uuid.UUID,
+        account_id: Optional[uuid.UUID] = None,
+        status: Optional[VideoStatus] = None,
+        visibility: Optional[str] = None,
+        search: Optional[str] = None,
+        sort_by: str = "date",
+        sort_order: str = "desc",
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[Video], int]:
+        """Get all videos for a user with pagination.
+
+        Args:
+            user_id: User UUID
+            account_id: Optional account filter
+            status: Optional status filter
+            visibility: Optional visibility filter
+            search: Optional search query
+            sort_by: Sort field (date, views, status)
+            sort_order: Sort order (asc, desc)
+            page: Page number
+            page_size: Items per page
+
+        Returns:
+            tuple: (list of videos, total count)
+        """
+        from app.modules.video.models import VideoVisibility
+
+        # Map frontend sort_by to database column
+        sort_mapping = {
+            "date": "created_at",
+            "views": "view_count",
+            "status": "status",
+        }
+        db_sort_by = sort_mapping.get(sort_by, "created_at")
+
+        # Parse visibility
+        visibility_enum = None
+        if visibility:
+            try:
+                visibility_enum = VideoVisibility(visibility)
+            except ValueError:
+                pass
+
+        return await self.video_repo.get_all_paginated(
+            user_id=user_id,
+            account_id=account_id,
+            status=status,
+            visibility=visibility_enum,
+            search=search,
+            sort_by=db_sort_by,
+            sort_order=sort_order,
+            page=page,
+            page_size=page_size,
+        )
+
     async def get_upload_progress(self, video_id: uuid.UUID) -> dict:
         """Get upload progress for a video.
 
@@ -240,6 +304,35 @@ class VideoService:
             changed_by=changed_by,
             change_reason="Manual metadata update",
         )
+
+        # Trigger webhook for video metadata updated
+        try:
+            from app.modules.integration.webhook_trigger import trigger_video_metadata_updated
+            from app.modules.account.repository import YouTubeAccountRepository
+            
+            account_repo = YouTubeAccountRepository(self.session)
+            account = await account_repo.get_by_id(video.account_id)
+            
+            if account:
+                await trigger_video_metadata_updated(
+                    session=self.session,
+                    user_id=account.user_id,
+                    video_id=video_id,
+                    video_data={
+                        "title": video.title,
+                        "description": video.description,
+                        "tags": video.tags,
+                        "category_id": video.category_id,
+                        "visibility": video.visibility,
+                        "youtube_id": video.youtube_id,
+                    },
+                    account_id=video.account_id,
+                )
+                import logging
+                logging.info(f"Triggered video.metadata_updated webhook for video {video_id}")
+        except Exception as e:
+            import logging
+            logging.error(f"Failed to trigger video.metadata_updated webhook: {e}")
 
         return video
 
@@ -307,41 +400,63 @@ class VideoService:
 
         return video
 
-    async def get_metadata_versions(self, video_id: uuid.UUID) -> list:
-        """Get metadata version history for a video.
+    async def sync_video_stats(self, video_id: uuid.UUID) -> Video:
+        """Sync video statistics from YouTube.
+
+        Fetches current view count, like count, and comment count from YouTube API.
 
         Args:
             video_id: Video UUID
 
         Returns:
-            list: List of metadata versions
+            Video: Updated video instance with synced stats
         """
-        # Verify video exists
-        await self.get_video(video_id)
-        return await self.video_repo.get_metadata_versions(video_id)
+        from app.modules.video.youtube_upload_api import YouTubeUploadClient
+        from app.modules.account.repository import YouTubeAccountRepository
+        from sqlalchemy import select
 
-    async def rollback_metadata(
-        self, video_id: uuid.UUID, version_number: int
-    ) -> Video:
-        """Rollback video metadata to a specific version.
+        # Get video with explicit query to ensure it's bound to session
+        result = await self.session.execute(
+            select(Video).where(Video.id == video_id)
+        )
+        video = result.scalar_one_or_none()
 
-        Args:
-            video_id: Video UUID
-            version_number: Version to rollback to
+        if not video:
+            raise VideoNotFoundError(f"Video {video_id} not found")
 
-        Returns:
-            Video: Updated video instance
+        if not video.youtube_id:
+            raise VideoServiceError("Video not uploaded to YouTube yet")
 
-        Raises:
-            VideoServiceError: If version not found
-        """
-        video = await self.get_video(video_id)
-        result = await self.video_repo.rollback_to_version(video, version_number)
+        # Get account access token
+        account_repo = YouTubeAccountRepository(self.session)
+        account = await account_repo.get_by_id(video.account_id)
 
-        if not result:
-            raise VideoServiceError(f"Version {version_number} not found")
+        if not account:
+            raise VideoServiceError("YouTube account not found")
 
-        return result
+        # Refresh token if needed
+        from app.modules.account.service import YouTubeAccountService
+        account_service = YouTubeAccountService(self.session)
+        if account.is_token_expired() or account.is_token_expiring_soon(hours=1):
+            account = await account_service._refresh_account_token(account)
+            await self.session.flush()
+
+        # Fetch stats from YouTube
+        client = YouTubeUploadClient(account.access_token)
+        video_data = await client.get_video_details(video.youtube_id)
+
+        if not video_data:
+            raise VideoServiceError("Video not found on YouTube")
+
+        # Update stats
+        statistics = video_data.get("statistics", {})
+        video.view_count = int(statistics.get("viewCount", 0))
+        video.like_count = int(statistics.get("likeCount", 0))
+        video.comment_count = int(statistics.get("commentCount", 0))
+
+        await self.session.flush()
+        await self.session.refresh(video)
+        return video
 
     async def schedule_publish(
         self, video_id: uuid.UUID, publish_at: datetime
@@ -376,44 +491,134 @@ class VideoService:
         return await self.video_repo.set_published(video)
 
     async def delete_video(self, video_id: uuid.UUID) -> None:
-        """Delete a video.
+        """Soft delete a video and hard delete its associated files from storage.
+        
+        This preserves database records (including VideoUsageLog for billing accuracy)
+        while removing files from storage to save costs.
 
         Args:
             video_id: Video UUID
         """
+        from app.core.storage import get_storage, is_cloud_storage
+        
         video = await self.get_video(video_id)
-        await self.video_repo.delete(video)
+        
+        # Check if already deleted
+        if video.is_deleted():
+            raise VideoServiceError("Video already deleted")
+        
+        # Get account info for webhook before deletion
+        account_id = video.account_id
+        video_title = video.title
+        video_youtube_id = video.youtube_id
+        
+        storage = get_storage()
+        
+        # Hard delete video file from storage
+        if video.file_path:
+            try:
+                if is_cloud_storage():
+                    # For cloud storage, use storage service
+                    storage.delete(video.file_path)
+                else:
+                    # For local storage, check if it's a storage key or absolute path
+                    if os.path.isabs(video.file_path):
+                        if os.path.exists(video.file_path):
+                            os.remove(video.file_path)
+                    else:
+                        # It's a storage key
+                        storage.delete(video.file_path)
+            except Exception as e:
+                # Log but don't fail if file deletion fails
+                import logging
+                logging.warning(f"Failed to delete video file {video.file_path}: {e}")
+        
+        # Hard delete thumbnail file from storage
+        if video.local_thumbnail_path:
+            try:
+                if is_cloud_storage():
+                    # For cloud storage, use storage service
+                    storage.delete(video.local_thumbnail_path)
+                else:
+                    # For local storage
+                    if os.path.isabs(video.local_thumbnail_path):
+                        if os.path.exists(video.local_thumbnail_path):
+                            os.remove(video.local_thumbnail_path)
+                    else:
+                        storage.delete(video.local_thumbnail_path)
+            except Exception as e:
+                import logging
+                logging.warning(f"Failed to delete thumbnail file {video.local_thumbnail_path}: {e}")
+        
+        # Soft delete the video record (preserves VideoUsageLog for billing)
+        video.soft_delete()
+        await self.session.flush()
+        
+        # Trigger webhook for video deleted
+        try:
+            from app.modules.integration.webhook_trigger import trigger_video_deleted
+            from app.modules.account.repository import YouTubeAccountRepository
+            
+            account_repo = YouTubeAccountRepository(self.session)
+            account = await account_repo.get_by_id(account_id)
+            
+            if account:
+                await trigger_video_deleted(
+                    session=self.session,
+                    user_id=account.user_id,
+                    video_id=video_id,
+                    video_data={
+                        "title": video_title,
+                        "youtube_id": video_youtube_id,
+                    },
+                    account_id=account_id,
+                )
+                import logging
+                logging.info(f"Triggered video.deleted webhook for video {video_id}")
+        except Exception as e:
+            import logging
+            logging.error(f"Failed to trigger video.deleted webhook: {e}")
 
     # Template methods
     async def create_template(
         self,
         user_id: uuid.UUID,
         name: str,
+        title_template: Optional[str] = None,
         description_template: Optional[str] = None,
         tags: Optional[list[str]] = None,
         category_id: Optional[str] = None,
         visibility: str = VideoVisibility.PRIVATE.value,
+        is_default: bool = False,
     ) -> VideoTemplate:
         """Create a video template.
 
         Args:
             user_id: Owner user UUID
             name: Template name
+            title_template: Title template
             description_template: Description template
             tags: Default tags
             category_id: Default category
             visibility: Default visibility
+            is_default: Whether this is the default template
 
         Returns:
             VideoTemplate: Created template
         """
+        # If setting as default, unset other defaults
+        if is_default:
+            await self.template_repo.unset_defaults(user_id)
+        
         return await self.template_repo.create(
             user_id=user_id,
             name=name,
+            title_template=title_template,
             description_template=description_template,
             tags=tags,
             category_id=category_id,
             visibility=visibility,
+            is_default=is_default,
         )
 
     async def get_templates(self, user_id: uuid.UUID) -> list[VideoTemplate]:
@@ -426,6 +631,100 @@ class VideoService:
             list[VideoTemplate]: List of templates
         """
         return await self.template_repo.get_by_user_id(user_id)
+
+    async def get_imported_youtube_ids(self, account_id: uuid.UUID) -> set[str]:
+        """Get set of YouTube video IDs that have been imported for an account.
+
+        Args:
+            account_id: YouTube account UUID
+
+        Returns:
+            set[str]: Set of YouTube video IDs
+        """
+        from sqlalchemy import select
+        
+        result = await self.session.execute(
+            select(Video.youtube_id)
+            .where(Video.account_id == account_id)
+            .where(Video.youtube_id.isnot(None))
+        )
+        return {row[0] for row in result.fetchall() if row[0]}
+
+    async def import_youtube_video(
+        self,
+        account_id: uuid.UUID,
+        youtube_id: str,
+        title: str,
+        description: str,
+        tags: list[str],
+        category_id: str,
+        visibility: VideoVisibility,
+        thumbnail_url: str,
+        view_count: int,
+        like_count: int,
+        comment_count: int,
+        published_at: Optional[str] = None,
+    ) -> Video:
+        """Import an existing YouTube video into the platform.
+
+        Args:
+            account_id: YouTube account UUID
+            youtube_id: YouTube video ID
+            title: Video title
+            description: Video description
+            tags: Video tags
+            category_id: YouTube category ID
+            visibility: Video visibility
+            thumbnail_url: Thumbnail URL
+            view_count: View count
+            like_count: Like count
+            comment_count: Comment count
+            published_at: Published date string
+
+        Returns:
+            Video: Created video instance
+        """
+        from datetime import datetime
+        
+        # Check if already imported
+        existing = await self.session.execute(
+            select(Video).where(
+                Video.account_id == account_id,
+                Video.youtube_id == youtube_id
+            )
+        )
+        if existing.scalar_one_or_none():
+            raise VideoServiceError(f"Video {youtube_id} already imported")
+        
+        # Parse published date
+        published_datetime = None
+        if published_at:
+            try:
+                published_datetime = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                pass
+        
+        # Create video record
+        video = Video(
+            account_id=account_id,
+            youtube_id=youtube_id,
+            title=title,
+            description=description,
+            tags=tags,
+            category_id=category_id,
+            visibility=visibility.value,
+            thumbnail_url=thumbnail_url,
+            view_count=view_count,
+            like_count=like_count,
+            comment_count=comment_count,
+            status=VideoStatus.PUBLISHED.value,
+            published_at=published_datetime,
+        )
+        
+        self.session.add(video)
+        await self.session.flush()
+        
+        return video
 
 
 def parse_csv_for_bulk_upload(csv_content: str) -> tuple[list[BulkUploadEntry], list[str]]:

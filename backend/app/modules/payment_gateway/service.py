@@ -16,6 +16,7 @@ from typing import Optional, Type
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow
 from app.modules.payment_gateway.interface import (
     PaymentGatewayInterface,
     CreatePaymentDTO,
@@ -41,6 +42,68 @@ from app.modules.payment_gateway.gateways import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def _trigger_payment_completed_webhook(
+    session: AsyncSession,
+    transaction: PaymentTransaction,
+) -> None:
+    """Trigger payment.completed webhook event.
+    
+    Requirements: 3.8 - Trigger payment.completed event
+    """
+    try:
+        from app.modules.integration.webhook_trigger import trigger_payment_completed
+        await trigger_payment_completed(
+            session=session,
+            user_id=transaction.user_id,
+            payment_id=transaction.id,
+            payment_data={
+                "amount": float(transaction.amount),
+                "currency": transaction.currency,
+                "gateway_provider": transaction.gateway_provider,
+                "gateway_payment_id": transaction.gateway_payment_id,
+                "description": transaction.description,
+                "subscription_id": str(transaction.subscription_id) if transaction.subscription_id else None,
+                "completed_at": utcnow().isoformat(),
+            },
+        )
+        logger.info(f"Triggered payment.completed webhook for transaction {transaction.id}")
+    except Exception as e:
+        # Don't fail the payment if webhook fails
+        logger.error(f"Failed to trigger payment.completed webhook: {e}")
+
+
+async def _trigger_payment_failed_webhook(
+    session: AsyncSession,
+    transaction: PaymentTransaction,
+    error_message: Optional[str] = None,
+    error_code: Optional[str] = None,
+) -> None:
+    """Trigger payment.failed webhook event.
+    
+    Requirements: 3.9 - Trigger payment.failed event
+    """
+    try:
+        from app.modules.integration.webhook_trigger import trigger_payment_failed
+        await trigger_payment_failed(
+            session=session,
+            user_id=transaction.user_id,
+            payment_id=transaction.id,
+            payment_data={
+                "amount": float(transaction.amount),
+                "currency": transaction.currency,
+                "gateway_provider": transaction.gateway_provider,
+                "description": transaction.description,
+                "error_message": error_message,
+                "error_code": error_code,
+                "failed_at": utcnow().isoformat(),
+            },
+        )
+        logger.info(f"Triggered payment.failed webhook for transaction {transaction.id}")
+    except Exception as e:
+        # Don't fail if webhook fails
+        logger.error(f"Failed to trigger payment.failed webhook: {e}")
 
 
 class PaymentGatewayFactory:
@@ -539,6 +602,16 @@ class PaymentService:
                 )
             except Exception as notif_error:
                 logger.error(f"Failed to send payment failed notification: {notif_error}")
+            
+            # Trigger payment.failed webhook event
+            # Requirements: 3.9 - Trigger payment.failed event
+            updated_transaction = await self.transaction_repo.get_transaction(transaction_id)
+            await _trigger_payment_failed_webhook(
+                self.session,
+                updated_transaction,
+                error_message=result.error_message,
+                error_code=result.error_code,
+            )
         else:
             await self.transaction_repo.update_transaction(
                 transaction_id,
@@ -784,6 +857,11 @@ class PaymentService:
             except Exception as e:
                 logger.error(f"Failed to activate subscription for transaction {transaction_id}: {e}")
             
+            # Trigger payment.completed webhook event
+            # Requirements: 3.8 - Trigger payment.completed event
+            updated_transaction = await self.transaction_repo.get_transaction(transaction_id)
+            await _trigger_payment_completed_webhook(self.session, updated_transaction)
+            
         elif verification.status == PaymentStatus.FAILED.value:
             await self.transaction_repo.mark_failed(
                 transaction_id,
@@ -794,6 +872,15 @@ class PaymentService:
                 config.provider, 
                 transaction.amount, 
                 success=False
+            )
+            
+            # Trigger payment.failed webhook event
+            # Requirements: 3.9 - Trigger payment.failed event
+            updated_transaction = await self.transaction_repo.get_transaction(transaction_id)
+            await _trigger_payment_failed_webhook(
+                self.session,
+                updated_transaction,
+                error_message="Payment verification failed",
             )
         else:
             await self.transaction_repo.update_transaction(
@@ -843,7 +930,7 @@ class PaymentService:
             return
         
         # Calculate subscription period
-        now = datetime.utcnow()
+        now = utcnow()
         if billing_cycle == "yearly":
             period_end = now + timedelta(days=365)
         else:
@@ -893,6 +980,16 @@ class PaymentService:
                 )
                 logger.info(f"Successfully linked transaction to subscription")
             
+            # Track promo code usage if applied
+            promo_code = metadata.get("promo_code")
+            if promo_code:
+                try:
+                    await self._track_promo_code_usage(promo_code)
+                    logger.info(f"Tracked promo code usage: {promo_code}")
+                except Exception as promo_error:
+                    # Don't fail the subscription activation if promo tracking fails
+                    logger.error(f"Failed to track promo code usage: {promo_error}")
+            
             # Send notifications
             try:
                 notification_service = BillingNotificationService(self.session)
@@ -933,6 +1030,28 @@ class PaymentService:
         except Exception as e:
             logger.error(f"Error in subscription activation: {e}")
             raise
+
+    async def _track_promo_code_usage(self, promo_code: str) -> None:
+        """Track promo code usage after successful payment.
+        
+        Args:
+            promo_code: The promo code that was used
+        """
+        from sqlalchemy import select
+        from app.modules.admin.models import DiscountCode
+        
+        # Find the discount code
+        result = await self.session.execute(
+            select(DiscountCode).where(DiscountCode.code == promo_code.upper())
+        )
+        discount_code = result.scalar_one_or_none()
+        
+        if discount_code:
+            # Increment usage count
+            discount_code.usage_count += 1
+            logger.info(f"Incremented usage count for promo code {promo_code} to {discount_code.usage_count}")
+        else:
+            logger.warning(f"Promo code {promo_code} not found for usage tracking")
     
     async def handle_webhook(
         self,
@@ -995,6 +1114,12 @@ class PaymentService:
                 transaction.amount, 
                 success=True
             )
+            
+            # Trigger payment.completed webhook event
+            # Requirements: 3.8 - Trigger payment.completed event
+            updated_transaction = await self.transaction_repo.get_transaction(transaction.id)
+            await _trigger_payment_completed_webhook(self.session, updated_transaction)
+            
         elif result.status == PaymentStatus.FAILED.value:
             await self.transaction_repo.mark_failed(
                 transaction.id,
@@ -1004,6 +1129,15 @@ class PaymentService:
                 provider, 
                 transaction.amount, 
                 success=False
+            )
+            
+            # Trigger payment.failed webhook event
+            # Requirements: 3.9 - Trigger payment.failed event
+            updated_transaction = await self.transaction_repo.get_transaction(transaction.id)
+            await _trigger_payment_failed_webhook(
+                self.session,
+                updated_transaction,
+                error_message=f"Payment failed via webhook: {result.event_type}",
             )
         elif result.status:
             await self.transaction_repo.update_transaction(

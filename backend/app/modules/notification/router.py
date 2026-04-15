@@ -11,6 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.datetime_utils import utcnow, to_naive_utc
+from app.modules.auth.jwt import get_current_user
 from app.modules.notification.service import NotificationService
 from app.modules.notification.schemas import (
     NotificationSendRequest,
@@ -46,54 +48,59 @@ async def get_notifications(
     page_size: int = Query(20, ge=1, le=100),
     unread_only: bool = Query(False),
     type: Optional[str] = Query(None),
+    current_user=Depends(get_current_user),
     service: NotificationService = Depends(get_notification_service),
     db: AsyncSession = Depends(get_db),
 ):
     """Get notifications for the current user.
     
     Returns notifications from notification_logs table.
+    Deduplicates notifications with same event_type, title, message within 1 minute.
     """
-    from sqlalchemy import select, func, desc
+    from sqlalchemy import select, func, desc, and_
     from app.modules.notification.models import NotificationLog
     
-    # For now, show all notifications (no user filter)
-    # In production, this should filter by authenticated user
-    user_id = None
+    # Filter by authenticated user
+    user_id = current_user.id
     
-    # Build query
-    query = select(NotificationLog).order_by(desc(NotificationLog.created_at))
+    # Build subquery to get distinct notifications (deduplicate by event_type + title + message)
+    # Group by event_type, title, message and take the first one (min id or max created_at)
+    # This deduplicates notifications sent to multiple channels for the same event
     
-    if user_id:
-        query = query.where(NotificationLog.user_id == user_id)
+    # First, get all logs
+    base_query = select(NotificationLog).where(NotificationLog.user_id == user_id)
     
     if unread_only:
-        query = query.where(NotificationLog.acknowledged == False)
+        base_query = base_query.where(NotificationLog.acknowledged == False)
     
     if type:
-        query = query.where(NotificationLog.event_type == type)
+        base_query = base_query.where(NotificationLog.event_type == type)
     
-    # Get total count
-    count_query = select(func.count()).select_from(NotificationLog)
-    if user_id:
-        count_query = count_query.where(NotificationLog.user_id == user_id)
+    base_query = base_query.order_by(desc(NotificationLog.created_at))
     
-    total_result = await db.execute(count_query)
-    total = total_result.scalar() or 0
+    result = await db.execute(base_query)
+    all_logs = result.scalars().all()
     
-    # Get unread count
-    unread_query = select(func.count()).select_from(NotificationLog).where(NotificationLog.acknowledged == False)
-    if user_id:
-        unread_query = unread_query.where(NotificationLog.user_id == user_id)
+    # Deduplicate: group by (event_type, title, message) within 60 seconds
+    seen = {}  # key: (event_type, title, message, minute_bucket) -> log
+    deduplicated_logs = []
     
-    unread_result = await db.execute(unread_query)
-    unread_count = unread_result.scalar() or 0
+    for log in all_logs:
+        # Create a time bucket (round to nearest minute)
+        time_bucket = log.created_at.replace(second=0, microsecond=0) if log.created_at else None
+        key = (log.event_type, log.title, log.message, time_bucket)
+        
+        if key not in seen:
+            seen[key] = log
+            deduplicated_logs.append(log)
     
-    # Apply pagination
+    # Calculate totals from deduplicated list
+    total = len(deduplicated_logs)
+    unread_count = sum(1 for log in deduplicated_logs if not log.acknowledged)
+    
+    # Apply pagination to deduplicated list
     offset = (page - 1) * page_size
-    query = query.offset(offset).limit(page_size)
-    
-    result = await db.execute(query)
-    logs = result.scalars().all()
+    paginated_logs = deduplicated_logs[offset:offset + page_size]
     
     # Map to response format
     items = [
@@ -109,7 +116,7 @@ async def get_notifications(
             "metadata": log.payload,
             "created_at": log.created_at.isoformat() if log.created_at else None,
         }
-        for log in logs
+        for log in paginated_logs
     ]
     
     return {
@@ -121,16 +128,32 @@ async def get_notifications(
 
 @router.get("/unread/count")
 async def get_unread_count(
+    current_user=Depends(get_current_user),
     service: NotificationService = Depends(get_notification_service),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get count of unread notifications."""
-    from sqlalchemy import select, func
+    """Get count of unread notifications for current user (deduplicated)."""
+    from sqlalchemy import select, desc
     from app.modules.notification.models import NotificationLog
     
-    query = select(func.count()).select_from(NotificationLog).where(NotificationLog.acknowledged == False)
+    # Get all unread logs
+    query = select(NotificationLog).where(
+        NotificationLog.user_id == current_user.id,
+        NotificationLog.acknowledged == False
+    ).order_by(desc(NotificationLog.created_at))
+    
     result = await db.execute(query)
-    count = result.scalar() or 0
+    all_logs = result.scalars().all()
+    
+    # Deduplicate
+    seen = set()
+    count = 0
+    for log in all_logs:
+        time_bucket = log.created_at.replace(second=0, microsecond=0) if log.created_at else None
+        key = (log.event_type, log.title, log.message, time_bucket)
+        if key not in seen:
+            seen.add(key)
+            count += 1
     
     return {"count": count}
 
@@ -138,6 +161,7 @@ async def get_unread_count(
 @router.post("/{notification_id}/read")
 async def mark_notification_as_read(
     notification_id: uuid.UUID,
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Mark a notification as read."""
@@ -145,7 +169,10 @@ async def mark_notification_as_read(
     from app.modules.notification.models import NotificationLog
     
     result = await db.execute(
-        select(NotificationLog).where(NotificationLog.id == notification_id)
+        select(NotificationLog).where(
+            NotificationLog.id == notification_id,
+            NotificationLog.user_id == current_user.id
+        )
     )
     log = result.scalar_one_or_none()
     
@@ -153,7 +180,7 @@ async def mark_notification_as_read(
         raise HTTPException(status_code=404, detail="Notification not found")
     
     log.acknowledged = True
-    log.acknowledged_at = datetime.utcnow()
+    log.acknowledged_at = to_naive_utc(utcnow())
     await db.commit()
     
     return {
@@ -170,16 +197,20 @@ async def mark_notification_as_read(
 
 @router.post("/read-all")
 async def mark_all_notifications_as_read(
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Mark all notifications as read."""
+    """Mark all notifications as read for current user."""
     from sqlalchemy import update
     from app.modules.notification.models import NotificationLog
     
     await db.execute(
         update(NotificationLog)
-        .where(NotificationLog.acknowledged == False)
-        .values(acknowledged=True, acknowledged_at=datetime.utcnow())
+        .where(
+            NotificationLog.user_id == current_user.id,
+            NotificationLog.acknowledged == False
+        )
+        .values(acknowledged=True, acknowledged_at=to_naive_utc(utcnow()))
     )
     await db.commit()
     
@@ -189,6 +220,7 @@ async def mark_all_notifications_as_read(
 @router.delete("/{notification_id}")
 async def delete_notification(
     notification_id: uuid.UUID,
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a notification."""
@@ -196,7 +228,10 @@ async def delete_notification(
     from app.modules.notification.models import NotificationLog
     
     result = await db.execute(
-        select(NotificationLog).where(NotificationLog.id == notification_id)
+        select(NotificationLog).where(
+            NotificationLog.id == notification_id,
+            NotificationLog.user_id == current_user.id
+        )
     )
     log = result.scalar_one_or_none()
     
@@ -213,13 +248,16 @@ async def delete_notification(
 
 @router.delete("/clear")
 async def clear_all_notifications(
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Clear all notifications."""
+    """Clear all notifications for current user."""
     from sqlalchemy import delete
     from app.modules.notification.models import NotificationLog
     
-    await db.execute(delete(NotificationLog))
+    await db.execute(
+        delete(NotificationLog).where(NotificationLog.user_id == current_user.id)
+    )
     await db.commit()
     
     return {"message": "All notifications cleared"}
@@ -241,43 +279,58 @@ async def send_notification(
 
 # ==================== Notification Preferences (23.2) ====================
 
-@router.post("/preferences", response_model=NotificationPreferenceResponse)
+@router.post("/preferences/me", response_model=NotificationPreferenceResponse)
 async def create_preference(
-    user_id: uuid.UUID,
     data: NotificationPreferenceCreate,
+    current_user=Depends(get_current_user),
     service: NotificationService = Depends(get_notification_service),
 ):
-    """Create notification preference for a user.
+    """Create notification preference for current user.
     
     Requirements: 23.2 - Store settings per account and event type
     """
-    return await service.create_preference(user_id, data)
+    return await service.create_preference(current_user.id, data)
 
 
-@router.get("/preferences/{user_id}", response_model=list[NotificationPreferenceResponse])
+@router.get("/preferences/me", response_model=list[NotificationPreferenceResponse])
 async def get_user_preferences(
-    user_id: uuid.UUID,
     event_type: Optional[str] = Query(None, description="Filter by event type"),
     account_id: Optional[uuid.UUID] = Query(None, description="Filter by account"),
+    current_user=Depends(get_current_user),
     service: NotificationService = Depends(get_notification_service),
 ):
-    """Get user's notification preferences.
+    """Get current user's notification preferences.
     
     Requirements: 23.2
     """
-    return await service.get_user_preferences(user_id, event_type, account_id)
+    return await service.get_user_preferences(current_user.id, event_type, account_id)
 
 
 @router.put("/preferences/{preference_id}", response_model=NotificationPreferenceResponse)
 async def update_preference(
     preference_id: uuid.UUID,
     data: NotificationPreferenceUpdate,
+    current_user=Depends(get_current_user),
     service: NotificationService = Depends(get_notification_service),
+    db: AsyncSession = Depends(get_db),
 ):
     """Update notification preference.
     
     Requirements: 23.2
     """
+    from sqlalchemy import select
+    from app.modules.notification.models import NotificationPreference
+    
+    # Verify preference belongs to current user
+    pref_result = await db.execute(
+        select(NotificationPreference).where(
+            NotificationPreference.id == preference_id,
+            NotificationPreference.user_id == current_user.id
+        )
+    )
+    if not pref_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Preference not found")
+    
     result = await service.update_preference(preference_id, data)
     if not result:
         raise HTTPException(status_code=404, detail="Preference not found")
@@ -287,9 +340,24 @@ async def update_preference(
 @router.delete("/preferences/{preference_id}")
 async def delete_preference(
     preference_id: uuid.UUID,
+    current_user=Depends(get_current_user),
     service: NotificationService = Depends(get_notification_service),
+    db: AsyncSession = Depends(get_db),
 ):
     """Delete notification preference."""
+    from sqlalchemy import select
+    from app.modules.notification.models import NotificationPreference
+    
+    # Verify preference belongs to current user
+    pref_result = await db.execute(
+        select(NotificationPreference).where(
+            NotificationPreference.id == preference_id,
+            NotificationPreference.user_id == current_user.id
+        )
+    )
+    if not pref_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Preference not found")
+    
     success = await service.delete_preference(preference_id)
     if not success:
         raise HTTPException(status_code=404, detail="Preference not found")
@@ -298,9 +366,8 @@ async def delete_preference(
 
 # ==================== Notification Logs ====================
 
-@router.get("/logs/{user_id}", response_model=NotificationLogListResponse)
+@router.get("/logs/me", response_model=NotificationLogListResponse)
 async def get_notification_logs(
-    user_id: uuid.UUID,
     status: Optional[NotificationStatus] = Query(None),
     channel: Optional[NotificationChannel] = Query(None),
     event_type: Optional[str] = Query(None),
@@ -310,9 +377,10 @@ async def get_notification_logs(
     acknowledged: Optional[bool] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
+    current_user=Depends(get_current_user),
     service: NotificationService = Depends(get_notification_service),
 ):
-    """Get notification logs for a user."""
+    """Get notification logs for current user."""
     filters = NotificationLogFilters(
         status=status,
         channel=channel,
@@ -322,7 +390,7 @@ async def get_notification_logs(
         created_before=created_before,
         acknowledged=acknowledged,
     )
-    return await service.get_notification_logs(user_id, filters, page, page_size)
+    return await service.get_notification_logs(current_user.id, filters, page, page_size)
 
 
 # ==================== Acknowledgment (23.5) ====================
@@ -344,41 +412,56 @@ async def acknowledge_notification(
 
 # ==================== Escalation Rules (23.4) ====================
 
-@router.post("/escalation-rules", response_model=EscalationRuleResponse)
+@router.post("/escalation-rules/me", response_model=EscalationRuleResponse)
 async def create_escalation_rule(
-    user_id: uuid.UUID,
     data: EscalationRuleCreate,
+    current_user=Depends(get_current_user),
     service: NotificationService = Depends(get_notification_service),
 ):
     """Create escalation rule.
     
     Requirements: 23.4 - Multi-channel escalation for critical issues
     """
-    return await service.create_escalation_rule(user_id, data)
+    return await service.create_escalation_rule(current_user.id, data)
 
 
-@router.get("/escalation-rules/{user_id}", response_model=list[EscalationRuleResponse])
+@router.get("/escalation-rules/me", response_model=list[EscalationRuleResponse])
 async def get_escalation_rules(
-    user_id: uuid.UUID,
+    current_user=Depends(get_current_user),
     service: NotificationService = Depends(get_notification_service),
 ):
-    """Get user's escalation rules.
+    """Get current user's escalation rules.
     
     Requirements: 23.4
     """
-    return await service.get_user_escalation_rules(user_id)
+    return await service.get_user_escalation_rules(current_user.id)
 
 
 @router.put("/escalation-rules/{rule_id}", response_model=EscalationRuleResponse)
 async def update_escalation_rule(
     rule_id: uuid.UUID,
     data: EscalationRuleUpdate,
+    current_user=Depends(get_current_user),
     service: NotificationService = Depends(get_notification_service),
+    db: AsyncSession = Depends(get_db),
 ):
     """Update escalation rule.
     
     Requirements: 23.4
     """
+    from sqlalchemy import select
+    from app.modules.notification.models import EscalationRule
+    
+    # Verify rule belongs to current user
+    rule_result = await db.execute(
+        select(EscalationRule).where(
+            EscalationRule.id == rule_id,
+            EscalationRule.user_id == current_user.id
+        )
+    )
+    if not rule_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Rule not found")
+    
     result = await service.update_escalation_rule(rule_id, data)
     if not result:
         raise HTTPException(status_code=404, detail="Rule not found")
@@ -388,9 +471,24 @@ async def update_escalation_rule(
 @router.delete("/escalation-rules/{rule_id}")
 async def delete_escalation_rule(
     rule_id: uuid.UUID,
+    current_user=Depends(get_current_user),
     service: NotificationService = Depends(get_notification_service),
+    db: AsyncSession = Depends(get_db),
 ):
     """Delete escalation rule."""
+    from sqlalchemy import select
+    from app.modules.notification.models import EscalationRule
+    
+    # Verify rule belongs to current user
+    rule_result = await db.execute(
+        select(EscalationRule).where(
+            EscalationRule.id == rule_id,
+            EscalationRule.user_id == current_user.id
+        )
+    )
+    if not rule_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Rule not found")
+    
     success = await service.delete_escalation_rule(rule_id)
     if not success:
         raise HTTPException(status_code=404, detail="Rule not found")
@@ -471,6 +569,8 @@ async def configure_channel(
 @router.post("/channels/{channel_type}/test")
 async def test_channel(
     channel_type: str,
+    config: Optional[dict] = None,
+    current_user=Depends(get_current_user),
     service: NotificationService = Depends(get_notification_service),
     db: AsyncSession = Depends(get_db),
 ):
@@ -478,26 +578,46 @@ async def test_channel(
     
     Args:
         channel_type: Type of channel to test (email, telegram)
+        config: Optional config with chat_id for telegram
     """
     from app.modules.notification.channels import (
         EmailChannel,
         TelegramChannel,
     )
-    
-    # Get test recipient from request or use default
-    test_recipient = "test@example.com"
+    from sqlalchemy import select
+    from app.modules.notification.models import NotificationPreference
     
     if channel_type == "email":
+        # Use user's email from their account
         channel = EmailChannel()
         result = await channel.deliver(
-            recipient=test_recipient,
+            recipient=current_user.email,
             title="Test Notification",
             message="This is a test notification from YouTube Automation Platform.",
         )
     elif channel_type == "telegram":
+        # Get chat_id from request config or from user's preferences
+        chat_id = None
+        if config and config.get("chat_id"):
+            chat_id = config.get("chat_id")
+        else:
+            # Try to get from user's preferences
+            pref_result = await db.execute(
+                select(NotificationPreference).where(
+                    NotificationPreference.user_id == current_user.id,
+                    NotificationPreference.telegram_chat_id.isnot(None)
+                ).limit(1)
+            )
+            pref = pref_result.scalar_one_or_none()
+            if pref:
+                chat_id = pref.telegram_chat_id
+        
+        if not chat_id:
+            return {"success": False, "message": "Telegram Chat ID not configured"}
+        
         channel = TelegramChannel()
         result = await channel.deliver(
-            recipient="test_chat_id",
+            recipient=chat_id,
             title="Test Notification",
             message="This is a test notification from YouTube Automation Platform.",
         )
@@ -526,16 +646,16 @@ async def disable_channel(
 
 # ==================== Batch Processing (23.3) ====================
 
-@router.post("/batches/{user_id}/process")
+@router.post("/batches/me/process")
 async def process_batches(
-    user_id: uuid.UUID,
+    current_user=Depends(get_current_user),
     service: NotificationService = Depends(get_notification_service),
 ):
-    """Process pending notification batches for a user.
+    """Process pending notification batches for current user.
     
     Requirements: 23.3 - Batch simultaneous alerts
     """
-    processed_count = await service.process_batches(user_id)
+    processed_count = await service.process_batches(current_user.id)
     return {"processed_count": processed_count}
 
 

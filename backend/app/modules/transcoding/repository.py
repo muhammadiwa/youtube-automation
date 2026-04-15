@@ -10,6 +10,7 @@ from typing import Optional
 from sqlalchemy import select, update, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow
 from app.modules.transcoding.models import (
     TranscodeJob,
     TranscodeWorker,
@@ -100,7 +101,7 @@ class TranscodeJobRepository:
         job.assigned_worker_id = worker_id
         job.worker_load_at_assignment = worker_load
         job.status = TranscodeStatus.PROCESSING
-        job.started_at = datetime.utcnow()
+        job.started_at = utcnow()
 
     async def update_progress(
         self,
@@ -141,7 +142,7 @@ class TranscodeJobRepository:
         job.output_height = output_height
         job.output_file_size = output_file_size
         job.cdn_url = cdn_url
-        job.completed_at = datetime.utcnow()
+        job.completed_at = utcnow()
 
     async def fail_job(
         self,
@@ -156,7 +157,7 @@ class TranscodeJobRepository:
         """
         job.status = TranscodeStatus.FAILED
         job.error_message = error_message
-        job.completed_at = datetime.utcnow()
+        job.completed_at = utcnow()
 
 
 class TranscodeWorkerRepository:
@@ -207,7 +208,7 @@ class TranscodeWorkerRepository:
             worker.supports_hardware_encoding = supports_hardware_encoding
             worker.gpu_type = gpu_type
             worker.is_healthy = True
-            worker.last_heartbeat = datetime.utcnow()
+            worker.last_heartbeat = utcnow()
         else:
             # Create new worker
             worker = TranscodeWorker(
@@ -261,14 +262,14 @@ class TranscodeWorkerRepository:
         if worker:
             worker.current_jobs = current_jobs
             worker.current_load = current_load
-            worker.last_heartbeat = datetime.utcnow()
+            worker.last_heartbeat = utcnow()
             worker.is_healthy = True
 
         return worker
 
     async def get_healthy_workers(self) -> list[TranscodeWorker]:
         """Get all healthy workers."""
-        cutoff = datetime.utcnow() - timedelta(seconds=self.HEARTBEAT_TIMEOUT)
+        cutoff = utcnow() - timedelta(seconds=self.HEARTBEAT_TIMEOUT)
         result = await self.session.execute(
             select(TranscodeWorker)
             .where(
@@ -289,7 +290,7 @@ class TranscodeWorkerRepository:
         Returns:
             List of available workers
         """
-        cutoff = datetime.utcnow() - timedelta(seconds=self.HEARTBEAT_TIMEOUT)
+        cutoff = utcnow() - timedelta(seconds=self.HEARTBEAT_TIMEOUT)
         
         query = select(TranscodeWorker).where(
             and_(

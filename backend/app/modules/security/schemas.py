@@ -15,6 +15,8 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from app.core.datetime_utils import utcnow
+
 
 class VulnerabilitySeverity(str, Enum):
     """Severity levels for security vulnerabilities."""
@@ -50,7 +52,7 @@ class Vulnerability(BaseModel):
     recommendation: str
     cve_id: Optional[str] = None
     cvss_score: Optional[float] = None
-    discovered_at: datetime = Field(default_factory=datetime.utcnow)
+    discovered_at: datetime = Field(default_factory=lambda: utcnow())
     
     class Config:
         use_enum_values = True
@@ -178,7 +180,7 @@ class AuditExportResponse(BaseModel):
     record_count: int
     file_path: Optional[str] = None
     file_content: Optional[str] = None  # For JSON/CSV inline content
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    generated_at: datetime = Field(default_factory=lambda: utcnow())
     start_date: datetime
     end_date: datetime
     
@@ -210,7 +212,7 @@ class SecurityAlert(BaseModel):
     title: str
     description: str
     source: str  # scan, monitoring, user_report
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: utcnow())
     acknowledged: bool = False
     acknowledged_by: Optional[uuid.UUID] = None
     acknowledged_at: Optional[datetime] = None

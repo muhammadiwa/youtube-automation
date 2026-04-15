@@ -10,6 +10,8 @@ from typing import Optional
 from sqlalchemy import select, update, delete, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
+
 from app.modules.billing.models import (
     Subscription,
     UsageRecord,
@@ -92,7 +94,7 @@ class SubscriptionRepository:
         stripe_price_id: Optional[str] = None,
     ) -> Subscription:
         """Create a new subscription."""
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         if current_period_start is None:
             current_period_start = now
         if current_period_end is None:
@@ -179,7 +181,7 @@ class SubscriptionRepository:
         return await self.update_subscription(
             subscription_id,
             cancel_at_period_end=cancel_at_period_end,
-            canceled_at=datetime.utcnow(),
+            canceled_at=to_naive_utc(utcnow()),
         )
 
     async def expire_subscription(
@@ -201,7 +203,7 @@ class SubscriptionRepository:
         days_until_expiry: int = 7,
     ) -> list[Subscription]:
         """Get subscriptions expiring within specified days."""
-        expiry_threshold = datetime.utcnow() + timedelta(days=days_until_expiry)
+        expiry_threshold = to_naive_utc(utcnow()) + timedelta(days=days_until_expiry)
         result = await self.session.execute(
             select(Subscription).where(
                 and_(
@@ -223,7 +225,7 @@ class SubscriptionRepository:
         - Current period has ended
         - cancel_at_period_end is True OR status is PAST_DUE
         """
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         result = await self.session.execute(
             select(Subscription).where(
                 and_(
@@ -262,7 +264,7 @@ class SubscriptionRepository:
         
         # Calculate data preservation date (30 days from now)
         if preserve_data_until is None:
-            preserve_data_until = datetime.utcnow() + timedelta(days=30)
+            preserve_data_until = to_naive_utc(utcnow()) + timedelta(days=30)
         
         # Update subscription
         subscription.status = SubscriptionStatus.EXPIRED.value
@@ -300,7 +302,7 @@ class SubscriptionRepository:
         
         subscription.status = SubscriptionStatus.ACTIVE.value
         subscription.plan_tier = plan_tier
-        subscription.current_period_start = datetime.utcnow()
+        subscription.current_period_start = to_naive_utc(utcnow())
         subscription.current_period_end = period_end
         subscription.cancel_at_period_end = False
         subscription.canceled_at = None
@@ -669,7 +671,7 @@ class InvoiceRepository:
             return None
 
         invoice.status = InvoiceStatus.PAID.value
-        invoice.paid_at = datetime.utcnow()
+        invoice.paid_at = to_naive_utc(utcnow())
         invoice.amount_paid = invoice.total
         invoice.amount_due = 0
         if payment_intent_id:

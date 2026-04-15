@@ -4,6 +4,7 @@ Implements FFmpeg worker with Celery and job distribution based on load.
 Requirements: 10.1, 10.2, 10.3, 10.4, 10.5
 """
 
+import asyncio
 import uuid
 import os
 from datetime import datetime
@@ -12,7 +13,8 @@ from typing import Optional
 from celery import Task
 
 from app.core.celery_app import celery_app
-from app.core.database import async_session_maker
+from app.core.database import celery_session_maker
+from app.core.datetime_utils import utcnow
 from app.modules.job.tasks import BaseTaskWithRetry, RetryConfig, RETRY_CONFIGS
 from app.modules.transcoding.models import (
     TranscodeJob,
@@ -27,6 +29,16 @@ from app.modules.transcoding.repository import (
     TranscodeWorkerRepository,
     TranscodedOutputRepository,
 )
+
+
+def _run_async(coro):
+    """Run async coroutine in Celery task context.
+    
+    Uses asyncio.run() which creates a fresh event loop for each task.
+    Combined with NullPool in celery_session_maker, this avoids
+    connection pool conflicts across different event loops.
+    """
+    return asyncio.run(coro)
 from app.modules.transcoding.ffmpeg import (
     FFmpegTranscoder,
     FFmpegConfig,
@@ -61,14 +73,11 @@ class TranscodeTask(Task):
         """Handle task failure."""
         job_id = args[0] if args else kwargs.get("job_id")
         if job_id:
-            import asyncio
-            asyncio.get_event_loop().run_until_complete(
-                self._mark_job_failed(job_id, str(exc))
-            )
+            _run_async(self._mark_job_failed(job_id, str(exc)))
 
     async def _mark_job_failed(self, job_id: str, error: str):
         """Mark job as failed in database."""
-        async with async_session_maker() as session:
+        async with celery_session_maker() as session:
             repo = TranscodeJobRepository(session)
             job = await repo.get_by_id(uuid.UUID(job_id))
             if job:
@@ -120,15 +129,12 @@ def transcode_video_task(
     Returns:
         dict: Transcoding result
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
-        _transcode_video_async(job_id)
-    )
+    return _run_async(_transcode_video_async(job_id))
 
 
 async def _transcode_video_async(job_id: str) -> dict:
     """Async implementation of video transcoding."""
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         job_repo = TranscodeJobRepository(session)
         worker_repo = TranscodeWorkerRepository(session)
         
@@ -256,10 +262,7 @@ def transcode_abr_task(
     Returns:
         dict: ABR transcoding result
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
-        _transcode_abr_async(job_id, resolutions, bitrates)
-    )
+    return _run_async(_transcode_abr_async(job_id, resolutions, bitrates))
 
 
 async def _transcode_abr_async(
@@ -268,7 +271,7 @@ async def _transcode_abr_async(
     bitrates: Optional[list[int]],
 ) -> dict:
     """Async implementation of ABR transcoding."""
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         job_repo = TranscodeJobRepository(session)
         
         job = await job_repo.get_by_id(uuid.UUID(job_id))
@@ -347,15 +350,12 @@ def dispatch_transcode_job(
     Returns:
         dict: Dispatch result
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
-        _dispatch_job_async(job_id)
-    )
+    return _run_async(_dispatch_job_async(job_id))
 
 
 async def _dispatch_job_async(job_id: str) -> dict:
     """Async implementation of job dispatch."""
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         job_repo = TranscodeJobRepository(session)
         worker_repo = TranscodeWorkerRepository(session)
         
@@ -395,10 +395,7 @@ def process_queued_transcode_jobs(self: BaseTaskWithRetry) -> dict:
     Returns:
         dict: Processing result
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
-        _process_queued_jobs_async()
-    )
+    return _run_async(_process_queued_jobs_async())
 
 
 async def _process_queued_jobs_async() -> dict:
@@ -406,7 +403,7 @@ async def _process_queued_jobs_async() -> dict:
     dispatched = []
     errors = []
     
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         job_repo = TranscodeJobRepository(session)
         worker_repo = TranscodeWorkerRepository(session)
         
@@ -429,7 +426,7 @@ async def _process_queued_jobs_async() -> dict:
                 })
     
     return {
-        "processed_at": datetime.utcnow().isoformat(),
+        "processed_at": utcnow().isoformat(),
         "dispatched_count": len(dispatched),
         "dispatched_jobs": dispatched,
         "errors": errors,
@@ -452,10 +449,7 @@ def worker_heartbeat_task(
     Returns:
         dict: Heartbeat result
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
-        _worker_heartbeat_async(hostname, current_jobs, current_load)
-    )
+    return _run_async(_worker_heartbeat_async(hostname, current_jobs, current_load))
 
 
 async def _worker_heartbeat_async(
@@ -464,7 +458,7 @@ async def _worker_heartbeat_async(
     current_load: float,
 ) -> dict:
     """Async implementation of worker heartbeat."""
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         repo = TranscodeWorkerRepository(session)
         worker = await repo.heartbeat(hostname, current_jobs, current_load)
         

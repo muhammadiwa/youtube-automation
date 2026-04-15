@@ -1,0 +1,23 @@
+{
+    "name": "YT Automation",
+    "short_name": "YT Auto",
+    "description": "Manage multiple YouTube channels effortlessly. Automate 24/7 live streaming, moderate comments with AI, and track analytics.",
+    "start_url": "/dashboard",
+    "display": "standalone",
+    "background_color": "#0a0a0a",
+    "theme_color": "#ef4444",
+    "orientation": "portrait-primary",
+    "icons": [
+        {
+            "src": "/favicon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any"
+        }
+    ],
+    "categories": [
+        "productivity",
+        "utilities",
+        "social"
+    ]
+}

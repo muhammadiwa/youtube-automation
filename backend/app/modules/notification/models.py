@@ -87,9 +87,6 @@ class EventType(str, Enum):
     COMMENT_RECEIVED = "comment.received"
     COMMENT_MODERATION_REQUIRED = "comment.moderation_required"
     
-    # Competitor events
-    COMPETITOR_UPDATE = "competitor.update"
-    
     # Channel events
     SUBSCRIBER_MILESTONE = "channel.subscriber_milestone"
     REVENUE_ALERT = "channel.revenue_alert"

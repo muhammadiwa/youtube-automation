@@ -236,9 +236,10 @@ class Subscription(Base):
         
         Requirements: 28.4 - Expiration handling
         """
+        from app.core.datetime_utils import utcnow, ensure_utc
         if self.status == SubscriptionStatus.EXPIRED.value:
             return True
-        return datetime.utcnow() > self.current_period_end
+        return utcnow() > ensure_utc(self.current_period_end)
 
 
 class UsageRecord(Base):
@@ -274,7 +275,7 @@ class UsageRecord(Base):
     amount: Mapped[float] = mapped_column(Float, nullable=False)
     
     # Optional usage metadata (e.g., resolution tier, stream_id, video_id)
-    usage_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    usage_metadata: Mapped[Optional[dict]] = mapped_column("metadata", JSON, nullable=True)
     
     # Billing period this usage belongs to
     billing_period_start: Mapped[date] = mapped_column(Date, nullable=False, index=True)
@@ -507,6 +508,10 @@ class Plan(Base):
     stripe_price_id_yearly: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     stripe_product_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     
+    # UI Customization
+    icon: Mapped[str] = mapped_column(String(50), default="Sparkles")  # Lucide icon name
+    color: Mapped[str] = mapped_column(String(20), default="slate")    # Tailwind color name
+    
     # Status
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_popular: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -531,7 +536,7 @@ class Plan(Base):
             "name": self.name,
             "description": self.description,
             "price_monthly": self.price_monthly / 100,  # Convert cents to dollars
-            "price_yearly": self.price_yearly / 100,
+            "price_yearly": self.price_yearly / 100,    # Convert cents to dollars
             "currency": self.currency,
             "features": self.display_features or [],
             "limits": {
@@ -542,6 +547,8 @@ class Plan(Base):
                 "max_bandwidth_gb": self.max_bandwidth_gb,
                 "ai_generations_per_month": self.ai_generations_per_month,
             },
+            "icon": self.icon,
+            "color": self.color,
             "is_popular": self.is_popular,
         }
 

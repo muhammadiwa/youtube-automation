@@ -11,6 +11,7 @@ from typing import Optional
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow
 from app.modules.ai.chatbot.models import (
     ChatbotConfig,
     ChatbotInteractionLog,
@@ -239,7 +240,7 @@ class ChatbotInteractionLogRepository:
         seconds: int = 60,
     ) -> list[ChatbotInteractionLog]:
         """Get recent interactions from a user (for cooldown check)."""
-        cutoff = datetime.utcnow() - timedelta(seconds=seconds)
+        cutoff = utcnow() - timedelta(seconds=seconds)
         result = await self.session.execute(
             select(ChatbotInteractionLog)
             .where(

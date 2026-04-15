@@ -16,6 +16,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
+from app.core.datetime_utils import utcnow
 from app.core.kms import (
     get_key_manager,
     get_key_rotation_status,
@@ -73,13 +74,13 @@ class AdminSessionStore:
             tuple: (session_token, expires_at)
         """
         token = secrets.token_urlsafe(32)
-        expires_at = datetime.utcnow() + timedelta(minutes=cls.SESSION_DURATION_MINUTES)
+        expires_at = utcnow() + timedelta(minutes=cls.SESSION_DURATION_MINUTES)
         
         cls._sessions[token] = {
             "user_id": user_id,
             "action": action,
             "ip_address": ip_address,
-            "created_at": datetime.utcnow(),
+            "created_at": utcnow(),
             "expires_at": expires_at,
         }
         
@@ -107,7 +108,7 @@ class AdminSessionStore:
             return False
         
         # Check expiration
-        if datetime.utcnow() > session["expires_at"]:
+        if utcnow() > session["expires_at"]:
             del cls._sessions[token]
             return False
         
@@ -143,7 +144,7 @@ class AdminSessionStore:
         Returns:
             int: Number of sessions removed
         """
-        now = datetime.utcnow()
+        now = utcnow()
         expired = [
             token for token, session in cls._sessions.items()
             if now > session["expires_at"]
@@ -224,7 +225,7 @@ class SecurityAlertStore:
             if alert.id == alert_id:
                 alert.acknowledged = True
                 alert.acknowledged_by = user_id
-                alert.acknowledged_at = datetime.utcnow()
+                alert.acknowledged_at = utcnow()
                 return True
         return False
     
@@ -235,7 +236,7 @@ class SecurityAlertStore:
         Returns:
             int: Number of alerts removed
         """
-        cutoff = datetime.utcnow() - timedelta(days=cls.RETENTION_DAYS)
+        cutoff = utcnow() - timedelta(days=cls.RETENTION_DAYS)
         original_count = len(cls._alerts)
         cls._alerts = [a for a in cls._alerts if a.created_at > cutoff]
         return original_count - len(cls._alerts)
@@ -481,7 +482,7 @@ class SecurityService:
             SecurityScanResult: Scan results with vulnerabilities
         """
         scan_id = str(uuid.uuid4())
-        started_at = datetime.utcnow()
+        started_at = utcnow()
         
         vulnerabilities: list[Vulnerability] = []
         
@@ -500,7 +501,7 @@ class SecurityService:
             code_vulns = self._scan_code()
             vulnerabilities.extend(code_vulns)
         
-        completed_at = datetime.utcnow()
+        completed_at = utcnow()
         
         # Count by severity
         critical_count = len([v for v in vulnerabilities if v.severity == VulnerabilitySeverity.CRITICAL])

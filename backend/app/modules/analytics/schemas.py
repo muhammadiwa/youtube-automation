@@ -114,15 +114,12 @@ class DashboardMetrics(BaseModel):
     total_subscribers: int = 0
     total_views: int = 0
     total_videos: int = 0
-    total_revenue: float = 0.0
 
     # Changes from previous period
     subscriber_change: int = 0
     subscriber_change_percent: float = 0.0
     views_change: int = 0
     views_change_percent: float = 0.0
-    revenue_change: float = 0.0
-    revenue_change_percent: float = 0.0
 
     # Engagement
     total_likes: int = 0
@@ -149,12 +146,10 @@ class AccountMetrics(BaseModel):
     subscriber_count: int = 0
     total_views: int = 0
     total_videos: int = 0
-    estimated_revenue: float = 0.0
 
     # Changes
     subscriber_change: int = 0
     views_change: int = 0
-    revenue_change: float = 0.0
 
     # Engagement
     engagement_rate: float = 0.0
@@ -180,14 +175,12 @@ class ChannelComparisonItem(BaseModel):
     subscriber_change: int = 0
     total_views: int = 0
     views_change: int = 0
-    estimated_revenue: float = 0.0
     engagement_rate: float = 0.0
     watch_time_minutes: int = 0
 
     # Variance from average (percentage)
     subscriber_variance: float = 0.0
     views_variance: float = 0.0
-    revenue_variance: float = 0.0
     engagement_variance: float = 0.0
 
 
@@ -201,27 +194,43 @@ class ChannelComparisonResponse(BaseModel):
     # Averages for variance calculation
     average_subscribers: float = 0.0
     average_views: float = 0.0
-    average_revenue: float = 0.0
     average_engagement: float = 0.0
 
 
 class ReportGenerationRequest(BaseModel):
     """Request schema for generating analytics report."""
 
-    title: str = Field(..., min_length=1, max_length=255)
-    report_type: str = Field(..., pattern="^(pdf|csv)$")
-    start_date: date
-    end_date: date
+    # Support both 'name' (frontend) and 'title' (original)
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    title: Optional[str] = Field(None, min_length=1, max_length=255)
+    # Support both 'format' (frontend) and 'report_type' (original)
+    format: Optional[str] = Field(None, pattern="^(pdf|csv|json)$")
+    report_type: Optional[str] = Field(None, pattern="^(pdf|csv|json)$")
+    # Support 'type' for report period type
+    type: Optional[str] = Field(None, pattern="^(daily|weekly|monthly|custom)$")
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
     account_ids: Optional[list[uuid.UUID]] = None  # None means all accounts
+    metrics: Optional[list[str]] = None  # List of metrics to include
     include_ai_insights: bool = True
 
     @field_validator("end_date")
     @classmethod
     def validate_date_range(cls, v: date, info) -> date:
+        if v is None:
+            return v
         start = info.data.get("start_date")
         if start and v < start:
             raise ValueError("end_date must be greater than or equal to start_date")
         return v
+    
+    def get_title(self) -> str:
+        """Get title from either 'name' or 'title' field."""
+        return self.name or self.title or "Analytics Report"
+    
+    def get_report_type(self) -> str:
+        """Get report type from either 'format' or 'report_type' field."""
+        return self.format or self.report_type or "pdf"
 
 
 class AnalyticsReportResponse(BaseModel):
@@ -249,13 +258,22 @@ class AnalyticsReportResponse(BaseModel):
 class AIInsight(BaseModel):
     """AI-generated insight for analytics."""
 
-    category: str  # 'growth', 'engagement', 'revenue', 'content', 'audience'
+    id: str = ""  # Unique identifier
+    type: str  # 'growth', 'optimization', 'warning', 'trend', 'recommendation'
     title: str
     description: str
     recommendation: Optional[str] = None
+    metric: Optional[str] = None  # metric name
+    change_percentage: Optional[float] = None  # percentage change
+    action_url: Optional[str] = None
+    action_label: Optional[str] = None
+    priority: str = "medium"  # 'high', 'medium', 'low'
+    created_at: Optional[datetime] = None
+    # Keep old fields for backward compatibility
+    category: Optional[str] = None  # deprecated, use 'type' instead
     confidence: float = 0.0  # 0.0 to 1.0
-    metric_change: Optional[float] = None
-    metric_name: Optional[str] = None
+    metric_change: Optional[float] = None  # deprecated, use 'change_percentage'
+    metric_name: Optional[str] = None  # deprecated, use 'metric'
 
 
 class AIInsightsResponse(BaseModel):
@@ -265,3 +283,23 @@ class AIInsightsResponse(BaseModel):
     generated_at: datetime
     period_start: date
     period_end: date
+
+
+class AnalyticsOverviewResponse(BaseModel):
+    """Response schema for analytics overview (simplified dashboard).
+    
+    Used by client dashboard home page.
+    """
+    total_views: int = 0
+    total_subscribers: int = 0
+    total_watch_time: int = 0  # in minutes
+    views_change: float = 0.0  # percentage change
+    subscribers_change: float = 0.0  # percentage change
+    watch_time_change: float = 0.0  # percentage change
+    period: str = "30d"
+
+
+class TimeSeriesDataPoint(BaseModel):
+    """Single data point for time series charts."""
+    date: str  # ISO format date string
+    value: int = 0

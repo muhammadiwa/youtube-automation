@@ -4,6 +4,8 @@ Implements stream scheduling, auto-start/stop, and auto-restart on disconnection
 Requirements: 6.1, 6.4, 6.5
 """
 
+import asyncio
+import logging
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional
@@ -13,7 +15,8 @@ from sqlalchemy import select
 
 from app.core.celery_app import celery_app
 from app.core.config import settings
-from app.core.database import async_session_maker
+from app.core.database import celery_session_maker
+from app.core.datetime_utils import utcnow, ensure_utc, to_naive_utc
 from app.modules.job.tasks import BaseTaskWithRetry, RetryConfig, RETRY_CONFIGS
 from app.modules.stream.models import (
     LiveEvent,
@@ -28,6 +31,18 @@ from app.modules.stream.repository import (
     StreamHealthLogRepository,
 )
 from app.modules.account.repository import YouTubeAccountRepository
+
+logger = logging.getLogger(__name__)
+
+
+def _run_async(coro):
+    """Run async coroutine in Celery task context.
+    
+    Uses asyncio.run() which creates a fresh event loop for each task.
+    Combined with NullPool in celery_session_maker, this avoids
+    connection pool conflicts across different event loops.
+    """
+    return asyncio.run(coro)
 
 
 # Stream-specific retry configuration
@@ -98,7 +113,7 @@ class StreamScheduler:
             bool: True if within start window
         """
         if current_time is None:
-            current_time = datetime.utcnow()
+            current_time = to_naive_utc(utcnow())
             
         # Normalize timezones
         scheduled = scheduled_time.replace(tzinfo=None) if scheduled_time.tzinfo else scheduled_time
@@ -191,8 +206,7 @@ def check_scheduled_streams(self: BaseTaskWithRetry) -> dict:
     Returns:
         dict: Summary of processed streams
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(_check_scheduled_streams_async())
+    return _run_async(_check_scheduled_streams_async())
 
 
 async def _check_scheduled_streams_async() -> dict:
@@ -200,7 +214,7 @@ async def _check_scheduled_streams_async() -> dict:
     started = []
     errors = []
     
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         repo = LiveEventRepository(session)
         
         # Get events ready to start
@@ -221,7 +235,7 @@ async def _check_scheduled_streams_async() -> dict:
         await session.commit()
     
     return {
-        "checked_at": datetime.utcnow().isoformat(),
+        "checked_at": utcnow().isoformat(),
         "started_count": len(started),
         "started_events": started,
         "errors": errors,
@@ -240,13 +254,12 @@ def start_stream_task(self: BaseTaskWithRetry, event_id: str) -> dict:
     Returns:
         dict: Result of stream start operation
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(_start_stream_async(event_id))
+    return _run_async(_start_stream_async(event_id))
 
 
 async def _start_stream_async(event_id: str) -> dict:
     """Async implementation of stream start."""
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         event_repo = LiveEventRepository(session)
         session_repo = StreamSessionRepository(session)
         
@@ -259,7 +272,7 @@ async def _start_stream_async(event_id: str) -> dict:
             return {"success": False, "error": f"Event in invalid state: {event.status}"}
         
         # Record start time for timing validation
-        actual_start = datetime.utcnow()
+        actual_start = to_naive_utc(utcnow())
         
         # Calculate deviation if scheduled
         deviation_seconds = None
@@ -306,13 +319,12 @@ def stop_stream_task(self: BaseTaskWithRetry, event_id: str, reason: str = "sche
     Returns:
         dict: Result of stream stop operation
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(_stop_stream_async(event_id, reason))
+    return _run_async(_stop_stream_async(event_id, reason))
 
 
 async def _stop_stream_async(event_id: str, reason: str) -> dict:
     """Async implementation of stream stop."""
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         event_repo = LiveEventRepository(session)
         session_repo = StreamSessionRepository(session)
         
@@ -327,7 +339,7 @@ async def _stop_stream_async(event_id: str, reason: str) -> dict:
         
         # Update event status
         event.status = LiveEventStatus.ENDED.value
-        event.actual_end_at = datetime.utcnow()
+        event.actual_end_at = to_naive_utc(utcnow())
         
         await session.commit()
         
@@ -358,17 +370,14 @@ def handle_stream_disconnection(
     Returns:
         dict: Result of disconnection handling
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
-        _handle_disconnection_async(event_id, session_id, error)
-    )
+    return _run_async(_handle_disconnection_async(event_id, session_id, error))
 
 
 async def _handle_disconnection_async(event_id: str, session_id: str, error: Optional[str]) -> dict:
     """Async implementation of disconnection handling."""
     restart_manager = StreamAutoRestartManager()
     
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         event_repo = LiveEventRepository(session)
         session_repo = StreamSessionRepository(session)
         
@@ -453,15 +462,12 @@ def restart_stream_task(self: BaseTaskWithRetry, event_id: str, session_id: str)
     Returns:
         dict: Result of restart operation
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
-        _restart_stream_async(event_id, session_id)
-    )
+    return _run_async(_restart_stream_async(event_id, session_id))
 
 
 async def _restart_stream_async(event_id: str, session_id: str) -> dict:
     """Async implementation of stream restart."""
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         event_repo = LiveEventRepository(session)
         session_repo = StreamSessionRepository(session)
         
@@ -500,8 +506,7 @@ def check_stream_end_times(self: BaseTaskWithRetry) -> dict:
     Returns:
         dict: Summary of processed streams
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(_check_stream_end_times_async())
+    return _run_async(_check_stream_end_times_async())
 
 
 async def _check_stream_end_times_async() -> dict:
@@ -509,7 +514,7 @@ async def _check_stream_end_times_async() -> dict:
     stopped = []
     errors = []
     
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         event_repo = LiveEventRepository(session)
         
         # Get live events with scheduled end times
@@ -521,7 +526,7 @@ async def _check_stream_end_times_async() -> dict:
         )
         events = result.scalars().all()
         
-        now = datetime.utcnow()
+        now = to_naive_utc(utcnow())
         
         for event in events:
             try:
@@ -533,7 +538,7 @@ async def _check_stream_end_times_async() -> dict:
                 errors.append({"event_id": str(event.id), "error": str(e)})
     
     return {
-        "checked_at": datetime.utcnow().isoformat(),
+        "checked_at": utcnow().isoformat(),
         "stopped_count": len(stopped),
         "stopped_events": stopped,
         "errors": errors,
@@ -693,7 +698,7 @@ class StreamHealthMonitor:
             return True
         
         # For warnings, don't spam - wait at least 30 seconds
-        elapsed = (datetime.utcnow() - last_alert_time).total_seconds()
+        elapsed = (to_naive_utc(utcnow()) - last_alert_time).total_seconds()
         return elapsed >= self.MAX_ALERT_DELAY_SECONDS
 
 
@@ -762,17 +767,14 @@ def collect_stream_health_metrics(self: BaseTaskWithRetry, session_id: str) -> d
     Returns:
         dict: Collected metrics and status
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
-        _collect_health_metrics_async(session_id)
-    )
+    return _run_async(_collect_health_metrics_async(session_id))
 
 
 async def _collect_health_metrics_async(session_id: str) -> dict:
     """Async implementation of health metric collection."""
     monitor = StreamHealthMonitor()
     
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         session_repo = StreamSessionRepository(session)
         health_repo = StreamHealthLogRepository(session)
         
@@ -785,7 +787,7 @@ async def _collect_health_metrics_async(session_id: str) -> dict:
         
         # In a real implementation, these would come from the streaming agent
         # For now, we simulate metric collection
-        collected_at = datetime.utcnow()
+        collected_at = to_naive_utc(utcnow())
         
         # Get previous log to calculate deltas
         previous_log = await health_repo.get_latest_by_session(uuid.UUID(session_id))
@@ -837,6 +839,41 @@ async def _collect_health_metrics_async(session_id: str) -> dict:
             stream_session,
             connection_status=ConnectionStatus(connection_status),
         )
+        
+        # Check if health status changed and trigger webhook
+        previous_status = previous_log.connection_status if previous_log else None
+        if previous_status and previous_status != connection_status:
+            try:
+                from app.modules.integration.webhook_trigger import trigger_stream_health_changed
+                from app.modules.stream.repository import LiveEventRepository
+                from app.modules.account.repository import YouTubeAccountRepository
+                
+                event_repo = LiveEventRepository(session)
+                account_repo = YouTubeAccountRepository(session)
+                
+                event = await event_repo.get_by_id(stream_session.live_event_id)
+                if event:
+                    account = await account_repo.get_by_id(event.account_id)
+                    if account:
+                        await trigger_stream_health_changed(
+                            session=session,
+                            user_id=account.user_id,
+                            stream_id=event.id,
+                            stream_data={
+                                "title": event.title,
+                                "youtube_broadcast_id": event.youtube_broadcast_id,
+                                "previous_status": previous_status,
+                                "current_status": connection_status,
+                                "bitrate": bitrate,
+                                "frame_rate": frame_rate,
+                                "dropped_frames_delta": dropped_frames_delta,
+                                "latency_ms": latency_ms,
+                            },
+                            account_id=event.account_id,
+                        )
+                        logger.info(f"Triggered stream.health_changed webhook for session {session_id}")
+            except Exception as e:
+                logger.error(f"Failed to trigger stream.health_changed webhook: {e}")
         
         await session.commit()
         
@@ -890,7 +927,7 @@ def trigger_health_alert(
         "session_id": session_id,
         "alert_type": alert_type,
         "alert_message": alert_message,
-        "triggered_at": datetime.utcnow().isoformat(),
+        "triggered_at": utcnow().isoformat(),
     }
 
 
@@ -903,8 +940,7 @@ def check_active_streams_health(self: BaseTaskWithRetry) -> dict:
     Returns:
         dict: Summary of health checks
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(_check_active_streams_health_async())
+    return _run_async(_check_active_streams_health_async())
 
 
 async def _check_active_streams_health_async() -> dict:
@@ -912,7 +948,7 @@ async def _check_active_streams_health_async() -> dict:
     checked = []
     errors = []
     
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         # Get all active stream sessions
         result = await session.execute(
             select(StreamSession)
@@ -930,7 +966,7 @@ async def _check_active_streams_health_async() -> dict:
                 errors.append({"session_id": str(stream_session.id), "error": str(e)})
     
     return {
-        "checked_at": datetime.utcnow().isoformat(),
+        "checked_at": utcnow().isoformat(),
         "active_sessions": len(checked),
         "checked_sessions": checked,
         "errors": errors,
@@ -956,17 +992,14 @@ def attempt_stream_reconnection(
     Returns:
         dict: Reconnection result
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
-        _attempt_reconnection_async(event_id, session_id, attempt)
-    )
+    return _run_async(_attempt_reconnection_async(event_id, session_id, attempt))
 
 
 async def _attempt_reconnection_async(event_id: str, session_id: str, attempt: int) -> dict:
     """Async implementation of stream reconnection attempt."""
     reconnection_manager = StreamReconnectionManager()
     
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         event_repo = LiveEventRepository(session)
         session_repo = StreamSessionRepository(session)
         
@@ -1043,15 +1076,12 @@ def trigger_stream_failover(
     Returns:
         dict: Failover result
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
-        _trigger_failover_async(event_id, session_id)
-    )
+    return _run_async(_trigger_failover_async(event_id, session_id))
 
 
 async def _trigger_failover_async(event_id: str, session_id: str) -> dict:
     """Async implementation of stream failover."""
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         event_repo = LiveEventRepository(session)
         session_repo = StreamSessionRepository(session)
         
@@ -1105,18 +1135,15 @@ def cleanup_old_health_logs(
     Returns:
         dict: Cleanup result
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
-        _cleanup_old_health_logs_async(retention_days)
-    )
+    return _run_async(_cleanup_old_health_logs_async(retention_days))
 
 
 async def _cleanup_old_health_logs_async(retention_days: int) -> dict:
     """Async implementation of health log cleanup."""
-    cutoff_date = datetime.utcnow() - timedelta(days=retention_days)
+    cutoff_date = to_naive_utc(utcnow()) - timedelta(days=retention_days)
     total_deleted = 0
     
-    async with async_session_maker() as session:
+    async with celery_session_maker() as session:
         health_repo = StreamHealthLogRepository(session)
         
         # Get all sessions with old logs
@@ -1140,3 +1167,42 @@ async def _cleanup_old_health_logs_async(retention_days: int) -> dict:
         "sessions_processed": len(session_ids),
         "logs_deleted": total_deleted,
     }
+
+
+# ============================================
+# Import Video-to-Live Stream Job Tasks
+# ============================================
+# This import ensures Celery discovers the stream_job_tasks module
+# which contains FFmpeg worker management tasks for Video-to-Live streaming
+
+from app.modules.stream.stream_job_tasks import (
+    start_ffmpeg_worker,
+    stop_ffmpeg_worker,
+    monitor_ffmpeg_worker,
+    restart_ffmpeg_worker,
+    check_scheduled_streams as check_scheduled_stream_jobs,
+    collect_health_metrics as collect_stream_job_health_metrics,
+)
+
+__all__ = [
+    # YouTube Live tasks
+    "check_scheduled_streams",
+    "start_stream_task",
+    "stop_stream_task",
+    "handle_stream_disconnection",
+    "restart_stream_task",
+    "check_stream_end_times",
+    "collect_stream_health_metrics",
+    "check_active_streams_health",
+    "trigger_health_alert",
+    "attempt_stream_reconnection",
+    "trigger_stream_failover",
+    "cleanup_old_health_logs",
+    # Video-to-Live FFmpeg tasks
+    "start_ffmpeg_worker",
+    "stop_ffmpeg_worker",
+    "monitor_ffmpeg_worker",
+    "restart_ffmpeg_worker",
+    "check_scheduled_stream_jobs",
+    "collect_stream_job_health_metrics",
+]

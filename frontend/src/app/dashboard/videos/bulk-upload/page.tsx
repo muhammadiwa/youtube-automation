@@ -16,6 +16,8 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { useToast } from "@/components/ui/toast"
 
 interface CSVRow {
     id: string
@@ -36,11 +38,14 @@ const CSV_TEMPLATE = `title,description,tags,categoryId,visibility,scheduledPubl
 
 export default function BulkUploadPage() {
     const router = useRouter()
+    const { addToast } = useToast()
     const [csvFile, setCSVFile] = useState<File | null>(null)
     const [parsedData, setParsedData] = useState<CSVRow[]>([])
     const [isDragging, setIsDragging] = useState(false)
     const [isEditing, setIsEditing] = useState(false)
     const [editingRow, setEditingRow] = useState<string | null>(null)
+    const [submitConfirm, setSubmitConfirm] = useState(false)
+    const [isSubmitting, setIsSubmitting] = useState(false)
 
     const downloadTemplate = () => {
         const blob = new Blob([CSV_TEMPLATE], { type: "text/csv" })
@@ -125,7 +130,7 @@ export default function BulkUploadPage() {
 
     const handleFile = (file: File) => {
         if (!file.name.endsWith(".csv")) {
-            alert("Please upload a CSV file")
+            addToast({ type: "error", title: "Invalid File", description: "Please upload a CSV file" })
             return
         }
 
@@ -174,16 +179,18 @@ export default function BulkUploadPage() {
         setParsedData((prev) => prev.filter((row) => row.id !== id))
     }
 
-    const handleSubmit = async () => {
+    const handleSubmit = () => {
         const validRows = parsedData.filter((row) => row.isValid)
         if (validRows.length === 0) {
-            alert("No valid rows to upload")
+            addToast({ type: "warning", title: "No Valid Rows", description: "Please fix the errors before submitting" })
             return
         }
+        setSubmitConfirm(true)
+    }
 
-        if (!confirm(`Create ${validRows.length} video metadata entries?`)) {
-            return
-        }
+    const confirmSubmit = async () => {
+        const validRows = parsedData.filter((row) => row.isValid)
+        setIsSubmitting(true)
 
         try {
             // Create bulk metadata entries - actual video files need to be uploaded separately
@@ -197,12 +204,17 @@ export default function BulkUploadPage() {
             }))
 
             // Note: This creates metadata entries. Video files need to be uploaded via the upload page
-            console.log("Creating video metadata:", videoData)
-            alert(`${validRows.length} video metadata entries created! You can now upload the video files from the Videos page.`)
+            addToast({
+                type: "success",
+                title: "Success",
+                description: `${validRows.length} video metadata entries created! You can now upload the video files.`
+            })
             router.push("/dashboard/videos")
         } catch (error) {
             console.error("Failed to create video entries:", error)
-            alert("Failed to create video entries")
+            addToast({ type: "error", title: "Error", description: "Failed to create video entries" })
+        } finally {
+            setIsSubmitting(false)
         }
     }
 
@@ -459,7 +471,7 @@ export default function BulkUploadPage() {
                                 >
                                     Clear
                                 </Button>
-                                <Button onClick={handleSubmit} disabled={validCount === 0}>
+                                <Button onClick={handleSubmit} disabled={validCount === 0 || isSubmitting}>
                                     <Upload className="mr-2 h-4 w-4" />
                                     Create {validCount} Upload Job{validCount !== 1 ? "s" : ""}
                                 </Button>
@@ -467,6 +479,17 @@ export default function BulkUploadPage() {
                         </CardContent>
                     </Card>
                 )}
+
+                {/* Submit Confirmation Dialog */}
+                <ConfirmDialog
+                    open={submitConfirm}
+                    onOpenChange={setSubmitConfirm}
+                    title="Create Video Entries"
+                    description={`Are you sure you want to create ${validCount} video metadata entries? You will need to upload the video files separately.`}
+                    confirmText={`Create ${validCount} Entries`}
+                    onConfirm={confirmSubmit}
+                    loading={isSubmitting}
+                />
             </div>
         </DashboardLayout>
     )

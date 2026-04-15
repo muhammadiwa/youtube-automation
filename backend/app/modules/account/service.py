@@ -4,12 +4,14 @@ Implements OAuth2 flow, token management, and account operations.
 Requirements: 2.1, 2.2, 2.3, 2.5
 """
 
+import logging
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.account.models import AccountStatus, YouTubeAccount
 from app.modules.account.oauth import OAuthError, OAuthStateStore, YouTubeOAuthClient
 from app.modules.account.repository import YouTubeAccountRepository
@@ -20,6 +22,8 @@ from app.modules.account.schemas import (
     QuotaUsageResponse,
     YouTubeAccountResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class AccountExistsError(Exception):
@@ -84,11 +88,17 @@ class YouTubeAccountService:
         Raises:
             OAuthError: If state is invalid or token exchange fails
             AccountExistsError: If channel is already connected
+            LimitExceededError: If account limit reached
         """
         # Validate state and get user_id
         user_id = OAuthStateStore.validate_state(state)
         if user_id is None:
             raise OAuthError("Invalid or expired OAuth state")
+        
+        # Check account limit before proceeding
+        from app.modules.billing.feature_gate import FeatureGateService, LimitExceededError
+        feature_gate = FeatureGateService(self.session)
+        await feature_gate.check_accounts_limit(user_id, raise_on_exceed=True)
 
         # Exchange code for tokens
         token_response = await self.oauth_client.exchange_code(code)
@@ -101,7 +111,7 @@ class YouTubeAccountService:
             raise OAuthError("No refresh token received. Please revoke access and try again.")
 
         # Calculate token expiration
-        token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+        token_expires_at = to_naive_utc(utcnow()) + timedelta(seconds=expires_in)
 
         # Fetch channel information
         channel_info = await self.oauth_client.get_channel_info(access_token)
@@ -129,6 +139,32 @@ class YouTubeAccountService:
         )
 
         await self.session.commit()
+        # Refresh account to get updated data after commit
+        await self.session.refresh(account)
+        
+        # Trigger account.connected webhook event
+        # Requirements: 3.6 - Trigger account.connected event
+        try:
+            from app.modules.integration.webhook_trigger import trigger_account_connected
+            await trigger_account_connected(
+                session=self.session,
+                user_id=user_id,
+                account_id=account.id,
+                account_data={
+                    "channel_id": account.channel_id,
+                    "channel_title": account.channel_title,
+                    "thumbnail_url": account.thumbnail_url,
+                    "subscriber_count": account.subscriber_count,
+                    "video_count": account.video_count,
+                    "is_monetized": account.is_monetized,
+                    "has_live_streaming_enabled": account.has_live_streaming_enabled,
+                },
+            )
+            logger.info(f"Triggered account.connected webhook for account {account.id}")
+        except Exception as e:
+            # Don't fail the account connection if webhook fails
+            logger.error(f"Failed to trigger account.connected webhook: {e}")
+        
         return account
 
     async def get_account(self, account_id: uuid.UUID) -> Optional[YouTubeAccount]:
@@ -256,8 +292,95 @@ class YouTubeAccountService:
             has_live_streaming_enabled=channel_info.get("has_live_streaming_enabled"),
         )
 
+        # Also try to sync stream key if live streaming is enabled
+        if channel_info.get("has_live_streaming_enabled"):
+            try:
+                await self.sync_stream_key(account_id)
+            except OAuthError:
+                # Stream key sync failed, but channel sync succeeded
+                # Don't fail the whole operation
+                pass
+
         await self.session.commit()
+        # Refresh account to get updated data after commit
+        await self.session.refresh(account)
         return account
+
+    async def sync_stream_key(
+        self,
+        account_id: uuid.UUID,
+    ) -> YouTubeAccount:
+        """Sync stream key from YouTube Live Streaming API.
+
+        Fetches the default live stream configuration including stream key.
+
+        Args:
+            account_id: Account UUID
+
+        Returns:
+            YouTubeAccount: Updated account with stream key
+
+        Raises:
+            AccountNotFoundError: If account not found
+            OAuthError: If API call fails or live streaming not enabled
+        """
+        account = await self.repository.get_by_id(account_id)
+        if not account:
+            raise AccountNotFoundError(f"Account {account_id} not found")
+
+        # Refresh token if expired
+        if account.is_token_expired():
+            await self._refresh_account_token(account)
+
+        # Fetch live stream info
+        stream_info = await self.oauth_client.get_live_stream_info(account.access_token)
+
+        if not stream_info.get("has_streams"):
+            raise OAuthError(stream_info.get("message", "No live streams found"))
+
+        # Update stream key
+        account = await self.repository.update_stream_key(
+            account,
+            stream_key=stream_info.get("stream_key"),
+            rtmp_url=stream_info.get("rtmp_url"),
+            default_stream_id=stream_info.get("stream_id"),
+        )
+
+        await self.session.commit()
+        # Refresh account to get updated data after commit
+        await self.session.refresh(account)
+        return account
+
+    async def get_stream_key_status(
+        self,
+        account_id: uuid.UUID,
+    ) -> dict:
+        """Get stream key status for an account.
+
+        Args:
+            account_id: Account UUID
+
+        Returns:
+            dict: Stream key status information
+
+        Raises:
+            AccountNotFoundError: If account not found
+        """
+        account = await self.repository.get_by_id(account_id)
+        if not account:
+            raise AccountNotFoundError(f"Account {account_id} not found")
+
+        return {
+            "account_id": account.id,
+            "channel_title": account.channel_title,
+            "has_stream_key": account.has_stream_key(),
+            "stream_key_masked": account.get_masked_stream_key(),
+            "stream_key": account.stream_key,  # Return actual stream key for auto-fill
+            "rtmp_url": account.rtmp_url,
+            "default_stream_id": account.default_stream_id,
+            "has_live_streaming_enabled": account.has_live_streaming_enabled,
+            "last_sync_at": account.last_sync_at,
+        }
 
     async def disconnect_account(self, account_id: uuid.UUID) -> None:
         """Disconnect a YouTube account.
@@ -272,8 +395,33 @@ class YouTubeAccountService:
         if not account:
             raise AccountNotFoundError(f"Account {account_id} not found")
 
+        # Store account data for webhook before deletion
+        user_id = account.user_id
+        account_data = {
+            "channel_id": account.channel_id,
+            "channel_title": account.channel_title,
+            "thumbnail_url": account.thumbnail_url,
+            "subscriber_count": account.subscriber_count,
+            "video_count": account.video_count,
+        }
+
         await self.repository.delete(account)
         await self.session.commit()
+        
+        # Trigger account.disconnected webhook event
+        # Requirements: 3.7 - Trigger account.disconnected event
+        try:
+            from app.modules.integration.webhook_trigger import trigger_account_disconnected
+            await trigger_account_disconnected(
+                session=self.session,
+                user_id=user_id,
+                account_id=account_id,
+                account_data=account_data,
+            )
+            logger.info(f"Triggered account.disconnected webhook for account {account_id}")
+        except Exception as e:
+            # Don't fail the disconnect if webhook fails
+            logger.error(f"Failed to trigger account.disconnected webhook: {e}")
 
     async def refresh_account_token(
         self,
@@ -297,6 +445,8 @@ class YouTubeAccountService:
 
         account = await self._refresh_account_token(account)
         await self.session.commit()
+        # Refresh account to get updated data after commit
+        await self.session.refresh(account)
         return account
 
     async def increment_quota_usage(
@@ -322,6 +472,8 @@ class YouTubeAccountService:
 
         account = await self.repository.increment_quota_usage(account, amount)
         await self.session.commit()
+        # Refresh account to get updated data after commit
+        await self.session.refresh(account)
         return account
 
     async def reset_quota(self, account_id: uuid.UUID) -> YouTubeAccount:
@@ -342,6 +494,8 @@ class YouTubeAccountService:
 
         account = await self.repository.reset_daily_quota(account)
         await self.session.commit()
+        # Refresh account to get updated data after commit
+        await self.session.refresh(account)
         return account
 
     async def get_accounts_approaching_quota_limit(
@@ -362,6 +516,22 @@ class YouTubeAccountService:
             threshold_percent, daily_limit
         )
 
+    async def refresh_token_if_needed(self, account: YouTubeAccount) -> YouTubeAccount:
+        """Refresh access token if expired or expiring soon.
+
+        Args:
+            account: Account instance
+
+        Returns:
+            YouTubeAccount: Account with valid tokens
+        """
+        if account.is_token_expired() or account.is_token_expiring_soon(hours=1):
+            account = await self._refresh_account_token(account)
+            await self.session.commit()
+            # Refresh account to get updated data after commit
+            await self.session.refresh(account)
+        return account
+
     async def _refresh_account_token(self, account: YouTubeAccount) -> YouTubeAccount:
         """Refresh access token for an account.
 
@@ -381,7 +551,7 @@ class YouTubeAccountService:
 
             access_token = token_response["access_token"]
             expires_in = token_response.get("expires_in", 3600)
-            token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+            token_expires_at = to_naive_utc(utcnow()) + timedelta(seconds=expires_in)
 
             # Update tokens (refresh_token may or may not be returned)
             new_refresh_token = token_response.get("refresh_token")
@@ -402,4 +572,46 @@ class YouTubeAccountService:
                 AccountStatus.EXPIRED,
                 error=str(e),
             )
+            
+            # Trigger account.token_expired webhook event
+            # Requirements: 3.7 (token expired notification)
+            try:
+                from app.modules.integration.webhook_trigger import trigger_account_token_expired
+                await trigger_account_token_expired(
+                    session=self.session,
+                    user_id=account.user_id,
+                    account_id=account.id,
+                    account_data={
+                        "channel_id": account.channel_id,
+                        "channel_title": account.channel_title,
+                        "error": str(e),
+                    },
+                )
+                logger.info(f"Triggered account.token_expired webhook for account {account.id}")
+            except Exception as webhook_error:
+                # Don't fail if webhook fails
+                logger.error(f"Failed to trigger account.token_expired webhook: {webhook_error}")
+            
             raise
+
+    async def get_valid_access_token(self, account: YouTubeAccount) -> str:
+        """Get a valid access token, refreshing if necessary.
+
+        Args:
+            account: Account instance
+
+        Returns:
+            str: Valid access token
+
+        Raises:
+            OAuthError: If token refresh fails
+        """
+        if account.is_token_expired() or account.is_token_expiring_soon(hours=1):
+            account = await self._refresh_account_token(account)
+            await self.session.commit()
+        return account.access_token
+
+
+# Alias for backward compatibility
+AccountService = YouTubeAccountService
+

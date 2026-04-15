@@ -49,7 +49,6 @@ import {
     Radio,
     HardDrive,
     Wifi,
-    Download,
     Filter,
     Loader2,
     TrendingUp,
@@ -83,11 +82,15 @@ const defaultPlans: Plan[] = [
         features: [
             { name: "1 YouTube Account", included: true },
             { name: "5 Videos/month", included: true },
+            { name: "1 Live Stream/month", included: true },
             { name: "Basic Analytics", included: true },
-            { name: "AI Features", included: false },
-            { name: "Live Streaming", included: false },
+            { name: "Strike Monitoring", included: true },
+            { name: "Advanced Analytics", included: false },
         ],
-        limits: { max_accounts: 1, max_videos_per_month: 5, max_streams_per_month: 0, max_storage_gb: 1, max_bandwidth_gb: 5, ai_generations_per_month: 0 },
+        limits: { max_accounts: 1, max_videos_per_month: 5, max_streams_per_month: 1, max_storage_gb: 1, max_bandwidth_gb: 5, ai_generations_per_month: 0 },
+        icon: "Sparkles",
+        color: "slate",
+        is_popular: false,
     },
     {
         id: "basic",
@@ -96,13 +99,17 @@ const defaultPlans: Plan[] = [
         price_monthly: 9.99,
         price_yearly: 99.99,
         features: [
-            { name: "3 YouTube Accounts", included: true },
+            { name: "5 YouTube Accounts", included: true },
             { name: "50 Videos/month", included: true },
+            { name: "10 Live Streams/month", included: true },
+            { name: "5 Concurrent Streams", included: true },
             { name: "Advanced Analytics", included: true },
-            { name: "AI Features (100/month)", included: true },
-            { name: "Live Streaming (5/month)", included: true },
+            { name: "Strike Alerts", included: true },
         ],
-        limits: { max_accounts: 3, max_videos_per_month: 50, max_streams_per_month: 5, max_storage_gb: 10, max_bandwidth_gb: 50, ai_generations_per_month: 100 },
+        limits: { max_accounts: 5, max_videos_per_month: 50, max_streams_per_month: 10, max_storage_gb: 10, max_bandwidth_gb: 50, ai_generations_per_month: 0 },
+        icon: "Zap",
+        color: "blue",
+        is_popular: false,
     },
     {
         id: "pro",
@@ -111,13 +118,17 @@ const defaultPlans: Plan[] = [
         price_monthly: 29.99,
         price_yearly: 299.99,
         features: [
-            { name: "10 YouTube Accounts", included: true },
-            { name: "Unlimited Videos", included: true },
+            { name: "20 YouTube Accounts", included: true },
+            { name: "Unlimited Videos & Streams", included: true },
+            { name: "5 Concurrent Streams", included: true },
             { name: "Full Analytics Suite", included: true },
-            { name: "AI Features (500/month)", included: true },
-            { name: "Unlimited Streaming", included: true },
+            { name: "AI Insights", included: true },
+            { name: "Report Generation", included: true },
         ],
-        limits: { max_accounts: 10, max_videos_per_month: -1, max_streams_per_month: -1, max_storage_gb: 100, max_bandwidth_gb: 500, ai_generations_per_month: 500 },
+        limits: { max_accounts: 20, max_videos_per_month: -1, max_streams_per_month: -1, max_storage_gb: 100, max_bandwidth_gb: 500, ai_generations_per_month: 0 },
+        icon: "Crown",
+        color: "violet",
+        is_popular: true,
     },
     {
         id: "enterprise",
@@ -128,11 +139,15 @@ const defaultPlans: Plan[] = [
         features: [
             { name: "Unlimited Accounts", included: true },
             { name: "Unlimited Everything", included: true },
-            { name: "Priority Support", included: true },
-            { name: "Custom Integrations", included: true },
-            { name: "Dedicated Account Manager", included: true },
+            { name: "Unlimited Concurrent Streams", included: true },
+            { name: "Full Analytics & AI", included: true },
+            { name: "Priority Support 24/7", included: true },
+            { name: "Custom Reports", included: true },
         ],
         limits: { max_accounts: -1, max_videos_per_month: -1, max_streams_per_month: -1, max_storage_gb: -1, max_bandwidth_gb: -1, ai_generations_per_month: -1 },
+        icon: "Building2",
+        color: "amber",
+        is_popular: false,
     },
 ]
 
@@ -167,7 +182,7 @@ function BillingContent() {
             const [sub, planList, usageData, warningsData, invoiceData] = await Promise.all([
                 billingApi.getSubscription(),
                 billingApi.getPlans().catch(() => []),
-                billingApi.getUsage().catch(() => null),
+                billingApi.getUsage(), // getUsage now has internal error handling with defaults
                 billingApi.getUsageWarnings().catch(() => []),
                 billingApi.getInvoices().catch(() => []),
             ])
@@ -183,9 +198,28 @@ function BillingContent() {
             setInvoices(invoiceData)
         } catch (error) {
             console.error("Failed to load billing data:", error)
-            // Keep default plans for UI but show empty data for other sections
+            // Keep default plans for UI but show default usage data
             setPlans(defaultPlans)
-            setUsage(null)
+            // Set default usage so UI still shows something
+            const now = new Date()
+            const periodStart = new Date(now.getFullYear(), now.getMonth(), 1)
+            const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+            setUsage({
+                accounts_used: 0,
+                accounts_limit: 1,
+                videos_this_month: 0,
+                videos_limit: 5,
+                streams_this_month: 0,
+                streams_limit: 1,
+                concurrent_streams: 0,
+                concurrent_streams_limit: 1,
+                storage_used_gb: 0,
+                storage_limit_gb: 1,
+                bandwidth_used_gb: 0,
+                bandwidth_limit_gb: 5,
+                period_start: periodStart.toISOString(),
+                period_end: periodEnd.toISOString(),
+            })
             setWarnings([])
             setInvoices([])
         } finally {
@@ -202,9 +236,68 @@ function BillingContent() {
     }
     const handleResumeSubscription = async () => { try { await billingApi.resumeSubscription(); await loadAllData() } catch (error) { console.error("Failed to resume:", error) } }
 
-    const getPlanIcon = (slug: string) => ({ free: Sparkles, basic: Zap, pro: Crown, enterprise: Building2 }[slug] || Sparkles)
-    const getPlanGradient = (slug: string) => ({ free: "from-slate-500 to-slate-600", basic: "from-blue-500 to-cyan-500", pro: "from-violet-500 to-purple-600", enterprise: "from-amber-500 to-orange-500" }[slug] || "from-slate-500 to-slate-600")
-    const getPlanBg = (slug: string) => ({ free: "bg-slate-500/5 border-slate-500/20", basic: "bg-blue-500/5 border-blue-500/20", pro: "bg-violet-500/5 border-violet-500/20", enterprise: "bg-amber-500/5 border-amber-500/20" }[slug] || "bg-slate-500/5")
+    // Icon mapping from database icon name to component
+    const iconMap: Record<string, typeof Sparkles> = {
+        Sparkles, Zap, Crown, Building2, Rocket, Gift, Shield, Star
+    }
+
+    // Get icon from plan data or fallback to slug-based default
+    const getPlanIcon = (slug: string, iconName?: string) => {
+        if (iconName && iconMap[iconName]) return iconMap[iconName]
+        return { free: Sparkles, basic: Zap, pro: Crown, enterprise: Building2 }[slug] || Sparkles
+    }
+
+    // Color gradients mapping from database color name
+    const colorGradients: Record<string, string> = {
+        slate: "from-slate-500 to-slate-600",
+        blue: "from-blue-500 to-cyan-500",
+        violet: "from-violet-500 to-purple-600",
+        amber: "from-amber-500 to-orange-500",
+        emerald: "from-emerald-500 to-green-500",
+        rose: "from-rose-500 to-pink-500",
+        cyan: "from-cyan-500 to-teal-500",
+        orange: "from-orange-500 to-red-500",
+    }
+
+    // Get gradient from plan data or fallback to slug-based default
+    const getPlanGradient = (slug: string, colorName?: string) => {
+        if (colorName && colorGradients[colorName]) return colorGradients[colorName]
+        return { free: "from-slate-500 to-slate-600", basic: "from-blue-500 to-cyan-500", pro: "from-violet-500 to-purple-600", enterprise: "from-amber-500 to-orange-500" }[slug] || "from-slate-500 to-slate-600"
+    }
+
+    // Background colors mapping
+    const colorBgs: Record<string, string> = {
+        slate: "bg-slate-500/5 border-slate-500/20",
+        blue: "bg-blue-500/5 border-blue-500/20",
+        violet: "bg-violet-500/5 border-violet-500/20",
+        amber: "bg-amber-500/5 border-amber-500/20",
+        emerald: "bg-emerald-500/5 border-emerald-500/20",
+        rose: "bg-rose-500/5 border-rose-500/20",
+        cyan: "bg-cyan-500/5 border-cyan-500/20",
+        orange: "bg-orange-500/5 border-orange-500/20",
+    }
+
+    const getPlanBg = (slug: string, colorName?: string) => {
+        if (colorName && colorBgs[colorName]) return colorBgs[colorName]
+        return { free: "bg-slate-500/5 border-slate-500/20", basic: "bg-blue-500/5 border-blue-500/20", pro: "bg-violet-500/5 border-violet-500/20", enterprise: "bg-amber-500/5 border-amber-500/20" }[slug] || "bg-slate-500/5"
+    }
+
+    // Button gradients mapping
+    const buttonGradients: Record<string, string> = {
+        slate: "bg-gradient-to-r from-slate-500 to-slate-600 hover:from-slate-600 hover:to-slate-700 shadow-lg shadow-slate-500/30",
+        blue: "bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 shadow-lg shadow-blue-500/30",
+        violet: "bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 shadow-lg shadow-purple-500/30",
+        amber: "bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 shadow-lg shadow-amber-500/30",
+        emerald: "bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 shadow-lg shadow-emerald-500/30",
+        rose: "bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 shadow-lg shadow-rose-500/30",
+        cyan: "bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-600 hover:to-teal-600 shadow-lg shadow-cyan-500/30",
+        orange: "bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 shadow-lg shadow-orange-500/30",
+    }
+
+    const getButtonGradient = (slug: string, colorName?: string) => {
+        if (colorName && buttonGradients[colorName]) return buttonGradients[colorName]
+        return { free: buttonGradients.slate, basic: buttonGradients.blue, pro: buttonGradients.violet, enterprise: buttonGradients.amber }[slug] || buttonGradients.slate
+    }
     const formatPrice = (price: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(price)
     const formatCurrency = (amount: number, currency: string = "USD") => new Intl.NumberFormat("en-US", { style: "currency", currency }).format(amount)
     const getUsagePercentage = (used: number, limit: number): number => (limit === -1 || limit === 0) ? 0 : Math.min((used / limit) * 100, 100)
@@ -273,21 +366,24 @@ function BillingContent() {
                             Manage your plan, usage, and payments
                         </p>
                     </div>
-                    {subscription && (
-                        <div className="flex items-center gap-3 bg-muted/50 rounded-xl px-4 py-3">
-                            <div className={cn("flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br", getPlanGradient(subscription.plan_tier))}>
-                                {(() => { const Icon = getPlanIcon(subscription.plan_tier); return <Icon className="h-5 w-5 text-white" /> })()}
+                    {subscription && (() => {
+                        const currentPlanData = displayPlans.find(p => p.slug === subscription.plan_tier)
+                        return (
+                            <div className="flex items-center gap-3 bg-muted/50 rounded-xl px-4 py-3">
+                                <div className={cn("flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br", getPlanGradient(subscription.plan_tier, currentPlanData?.color))}>
+                                    {(() => { const Icon = getPlanIcon(subscription.plan_tier, currentPlanData?.icon); return <Icon className="h-5 w-5 text-white" /> })()}
+                                </div>
+                                <div>
+                                    <p className="text-xs text-muted-foreground">Current Plan</p>
+                                    <p className="font-semibold capitalize">{subscription.plan_tier} <span className="text-xs text-muted-foreground">({subscription.billing_cycle})</span></p>
+                                </div>
+                                <Badge variant="outline" className="ml-2">
+                                    <Calendar className="h-3 w-3 mr-1" />
+                                    Renews {new Date(subscription.current_period_end).toLocaleDateString()}
+                                </Badge>
                             </div>
-                            <div>
-                                <p className="text-xs text-muted-foreground">Current Plan</p>
-                                <p className="font-semibold capitalize">{subscription.plan_tier} <span className="text-xs text-muted-foreground">({subscription.billing_cycle})</span></p>
-                            </div>
-                            <Badge variant="outline" className="ml-2">
-                                <Calendar className="h-3 w-3 mr-1" />
-                                Renews {new Date(subscription.current_period_end).toLocaleDateString()}
-                            </Badge>
-                        </div>
-                    )}
+                        )
+                    })()}
                 </div>
 
                 {/* Modern Tabs */}
@@ -334,21 +430,13 @@ function BillingContent() {
                         {/* Plans Grid */}
                         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4 items-stretch">
                             {displayPlans.map((plan, index) => {
-                                const Icon = getPlanIcon(plan.slug)
+                                const Icon = getPlanIcon(plan.slug, plan.icon)
                                 const isCurrent = isCurrentPlan(plan.slug)
                                 const price = billingCycle === "monthly" ? plan.price_monthly : plan.price_yearly
                                 const planIndex = displayPlans.findIndex(p => p.slug === plan.slug)
                                 const currentIndex = displayPlans.findIndex(p => p.slug === currentPlan)
                                 const isUpgrade = planIndex > currentIndex
-                                const isPro = plan.slug === "pro"
-
-                                // Button gradient colors matching plan icon colors
-                                const getButtonGradient = (slug: string) => ({
-                                    free: "bg-gradient-to-r from-slate-500 to-slate-600 hover:from-slate-600 hover:to-slate-700 shadow-lg shadow-slate-500/30",
-                                    basic: "bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 shadow-lg shadow-blue-500/30",
-                                    pro: "bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 shadow-lg shadow-purple-500/30",
-                                    enterprise: "bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 shadow-lg shadow-amber-500/30"
-                                }[slug] || "bg-gradient-to-r from-slate-500 to-slate-600")
+                                const isPro = plan.slug === "pro" || plan.is_popular
 
                                 return (
                                     <div key={plan.id} className={cn("relative group flex", isPro && "lg:-mt-4 lg:mb-4")}>
@@ -380,7 +468,7 @@ function BillingContent() {
                                                 "relative overflow-hidden transition-all duration-500 hover:shadow-2xl flex flex-col w-full h-full",
                                                 isCurrent ? "border-0 shadow-lg shadow-red-500/20" : "border-2 border-transparent hover:border-primary/30",
                                                 isPro && !isCurrent && "shadow-xl shadow-purple-500/10",
-                                                getPlanBg(plan.slug)
+                                                getPlanBg(plan.slug, plan.color)
                                             )}>
                                                 {isCurrent && (
                                                     <div className="absolute top-4 right-4">
@@ -388,7 +476,7 @@ function BillingContent() {
                                                     </div>
                                                 )}
                                                 <CardHeader className="text-center pb-2 pt-8">
-                                                    <div className={cn("mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br shadow-lg mb-4 transition-transform duration-300 group-hover:scale-110", getPlanGradient(plan.slug))}>
+                                                    <div className={cn("mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br shadow-lg mb-4 transition-transform duration-300 group-hover:scale-110", getPlanGradient(plan.slug, plan.color))}>
                                                         <Icon className="h-8 w-8 text-white" />
                                                     </div>
                                                     <CardTitle className="text-xl">{plan.name}</CardTitle>
@@ -424,7 +512,7 @@ function BillingContent() {
                                                         <Button
                                                             className={cn(
                                                                 "w-full h-12 rounded-xl font-semibold transition-all duration-300",
-                                                                !isCurrent && getButtonGradient(plan.slug),
+                                                                !isCurrent && getButtonGradient(plan.slug, plan.color),
                                                                 !isCurrent && "text-white",
                                                                 isCurrent && "border-2"
                                                             )}
@@ -475,23 +563,6 @@ function BillingContent() {
 
                     {/* ==================== USAGE TAB ==================== */}
                     <TabsContent value="usage" className="space-y-6 animate-in fade-in-50 duration-500">
-                        {/* Empty State when no usage data */}
-                        {!usage && (
-                            <Card className="border-0 shadow-lg">
-                                <CardContent className="flex flex-col items-center justify-center py-16">
-                                    <BarChart3 className="h-16 w-16 text-muted-foreground/30 mb-4" />
-                                    <h3 className="text-lg font-semibold mb-2">No Usage Data Available</h3>
-                                    <p className="text-muted-foreground text-center max-w-md">
-                                        Usage data will appear here once you start using the platform.
-                                        Connect a YouTube account to get started.
-                                    </p>
-                                    <Button className="mt-6" onClick={() => router.push("/dashboard/accounts")}>
-                                        Connect YouTube Account
-                                    </Button>
-                                </CardContent>
-                            </Card>
-                        )}
-
                         {/* Warnings */}
                         {usage && warnings.length > 0 && (
                             <div className="space-y-3">
@@ -516,20 +587,14 @@ function BillingContent() {
                         {usage && (
                             <Card className="border-0 shadow-lg bg-gradient-to-r from-primary/5 via-primary/10 to-primary/5">
                                 <CardContent className="p-6">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-4">
-                                            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-                                                <Calendar className="h-6 w-6 text-primary" />
-                                            </div>
-                                            <div>
-                                                <p className="text-sm text-muted-foreground">Current Billing Period</p>
-                                                <p className="font-semibold">{new Date(usage.period_start).toLocaleDateString()} - {new Date(usage.period_end).toLocaleDateString()}</p>
-                                            </div>
+                                    <div className="flex items-center gap-4">
+                                        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
+                                            <Calendar className="h-6 w-6 text-primary" />
                                         </div>
-                                        <Button variant="outline" className="gap-2">
-                                            <Download className="h-4 w-4" />
-                                            Export
-                                        </Button>
+                                        <div>
+                                            <p className="text-sm text-muted-foreground">Current Billing Period</p>
+                                            <p className="font-semibold">{new Date(usage.period_start).toLocaleDateString()} - {new Date(usage.period_end).toLocaleDateString()}</p>
+                                        </div>
                                     </div>
                                 </CardContent>
                             </Card>
@@ -537,59 +602,138 @@ function BillingContent() {
 
                         {/* Usage Meters Grid */}
                         {usage && (
-                            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                                {[
-                                    { key: "accounts", label: "YouTube Accounts", icon: Users, used: usage.accounts_used, limit: usage.accounts_limit, gradient: "from-blue-500 to-cyan-500", bg: "bg-blue-500/10" },
-                                    { key: "videos", label: "Videos Uploaded", icon: Video, used: usage.videos_uploaded, limit: usage.videos_limit, unit: "/month", gradient: "from-red-500 to-rose-500", bg: "bg-red-500/10" },
-                                    { key: "streams", label: "Streams Created", icon: Radio, used: usage.streams_created, limit: usage.streams_limit, unit: "/month", gradient: "from-violet-500 to-purple-500", bg: "bg-violet-500/10" },
-                                    { key: "storage", label: "Storage Used", icon: HardDrive, used: usage.storage_used_gb, limit: usage.storage_limit_gb, unit: " GB", gradient: "from-emerald-500 to-green-500", bg: "bg-emerald-500/10" },
-                                    { key: "bandwidth", label: "Bandwidth Used", icon: Wifi, used: usage.bandwidth_used_gb, limit: usage.bandwidth_limit_gb, unit: " GB", gradient: "from-orange-500 to-amber-500", bg: "bg-orange-500/10" },
-                                    { key: "ai", label: "AI Generations", icon: Sparkles, used: usage.ai_generations_used, limit: usage.ai_generations_limit, unit: "/month", gradient: "from-pink-500 to-rose-500", bg: "bg-pink-500/10" },
-                                ].map((metric) => {
-                                    const percentage = getUsagePercentage(metric.used, metric.limit)
-                                    const Icon = metric.icon
-                                    return (
-                                        <Card key={metric.key} className="border-0 shadow-lg overflow-hidden group hover:shadow-xl transition-all duration-300">
-                                            <CardContent className="p-6">
-                                                <div className="flex items-center justify-between mb-4">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className={cn("flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br shadow-lg transition-transform duration-300 group-hover:scale-110", metric.gradient)}>
-                                                            <Icon className="h-6 w-6 text-white" />
+                            <div className="space-y-6">
+                                {/* Plan Limits Section */}
+                                <div>
+                                    <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                                        <Shield className="h-5 w-5 text-primary" />
+                                        Plan Limits
+                                    </h3>
+                                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                                        {[
+                                            { key: "accounts", label: "YouTube Accounts", icon: Users, used: usage.accounts_used, limit: usage.accounts_limit, gradient: "from-blue-500 to-cyan-500", description: "Connected channels" },
+                                            { key: "videos", label: "YouTube Uploads", icon: Video, used: usage.videos_this_month, limit: usage.videos_limit, gradient: "from-red-500 to-rose-500", description: "Published to YouTube this month" },
+                                            { key: "streams", label: "Streams This Month", icon: Radio, used: usage.streams_this_month, limit: usage.streams_limit, gradient: "from-violet-500 to-purple-500", description: "Live streams created" },
+                                            { key: "concurrent", label: "Concurrent Streams", icon: Zap, used: usage.concurrent_streams, limit: usage.concurrent_streams_limit, gradient: "from-amber-500 to-orange-500", description: "Streams running now" },
+                                        ].map((metric) => {
+                                            const percentage = getUsagePercentage(metric.used, metric.limit)
+                                            const Icon = metric.icon
+                                            const isNearLimit = percentage >= 75
+                                            const isCritical = percentage >= 90
+                                            return (
+                                                <Card key={metric.key} className="border-0 shadow-lg overflow-hidden group hover:shadow-xl transition-all duration-300">
+                                                    <CardContent className="p-5">
+                                                        <div className="flex items-center justify-between mb-3">
+                                                            <div className={cn("flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br shadow-lg transition-transform duration-300 group-hover:scale-110", metric.gradient)}>
+                                                                <Icon className="h-5 w-5 text-white" />
+                                                            </div>
+                                                            {metric.limit === -1 ? (
+                                                                <Badge variant="outline" className="text-emerald-600 border-emerald-500/50">∞</Badge>
+                                                            ) : isNearLimit && (
+                                                                <div className={cn("flex h-7 w-7 items-center justify-center rounded-full", isCritical ? "bg-red-500/10" : "bg-amber-500/10")}>
+                                                                    <AlertTriangle className={cn("h-4 w-4", isCritical ? "text-red-500" : "text-amber-500")} />
+                                                                </div>
+                                                            )}
                                                         </div>
-                                                        <div>
-                                                            <p className="font-semibold">{metric.label}</p>
-                                                            <p className="text-xs text-muted-foreground">{metric.unit || ""}</p>
+                                                        <p className="font-medium text-sm mb-1">{metric.label}</p>
+                                                        <div className="flex items-baseline gap-1 mb-2">
+                                                            <span className={cn("text-2xl font-bold", getUsageColor(percentage))}>
+                                                                {metric.used}
+                                                            </span>
+                                                            <span className="text-sm text-muted-foreground">
+                                                                / {metric.limit === -1 ? "∞" : metric.limit}
+                                                            </span>
                                                         </div>
-                                                    </div>
-                                                    {percentage >= 75 && (
-                                                        <div className={cn("flex h-8 w-8 items-center justify-center rounded-full", percentage >= 90 ? "bg-red-500/10" : "bg-amber-500/10")}>
-                                                            <AlertTriangle className={cn("h-4 w-4", percentage >= 90 ? "text-red-500" : "text-amber-500")} />
+                                                        {metric.limit !== -1 && (
+                                                            <div className="relative h-2 rounded-full bg-muted overflow-hidden mb-2">
+                                                                <div
+                                                                    className={cn("absolute inset-y-0 left-0 rounded-full bg-gradient-to-r transition-all duration-500", getProgressGradient(percentage))}
+                                                                    style={{ width: `${Math.min(percentage, 100)}%` }}
+                                                                />
+                                                            </div>
+                                                        )}
+                                                        <p className="text-xs text-muted-foreground">
+                                                            {metric.limit === -1 ? (
+                                                                <span className="text-emerald-600">✓ Unlimited on your plan</span>
+                                                            ) : isCritical ? (
+                                                                <span className="text-red-500">⚠ Limit almost reached!</span>
+                                                            ) : isNearLimit ? (
+                                                                <span className="text-amber-500">⚠ {metric.limit - metric.used} remaining</span>
+                                                            ) : (
+                                                                metric.description
+                                                            )}
+                                                        </p>
+                                                    </CardContent>
+                                                </Card>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+
+                                {/* Storage & Bandwidth Section */}
+                                <div>
+                                    <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                                        <HardDrive className="h-5 w-5 text-primary" />
+                                        Storage & Bandwidth
+                                    </h3>
+                                    <div className="grid gap-4 sm:grid-cols-2">
+                                        {[
+                                            { key: "storage", label: "Storage Used", icon: HardDrive, used: usage.storage_used_gb, limit: usage.storage_limit_gb, unit: "GB", gradient: "from-emerald-500 to-green-500" },
+                                            { key: "bandwidth", label: "Bandwidth Used", icon: Wifi, used: usage.bandwidth_used_gb, limit: usage.bandwidth_limit_gb, unit: "GB", gradient: "from-pink-500 to-rose-500" },
+                                        ].map((metric) => {
+                                            const percentage = getUsagePercentage(metric.used, metric.limit)
+                                            const Icon = metric.icon
+                                            return (
+                                                <Card key={metric.key} className="border-0 shadow-lg overflow-hidden group hover:shadow-xl transition-all duration-300">
+                                                    <CardContent className="p-6">
+                                                        <div className="flex items-center justify-between mb-4">
+                                                            <div className="flex items-center gap-3">
+                                                                <div className={cn("flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br shadow-lg transition-transform duration-300 group-hover:scale-110", metric.gradient)}>
+                                                                    <Icon className="h-6 w-6 text-white" />
+                                                                </div>
+                                                                <div>
+                                                                    <p className="font-semibold">{metric.label}</p>
+                                                                    <p className="text-xs text-muted-foreground">{metric.unit}</p>
+                                                                </div>
+                                                            </div>
+                                                            {percentage >= 75 && (
+                                                                <div className={cn("flex h-8 w-8 items-center justify-center rounded-full", percentage >= 90 ? "bg-red-500/10" : "bg-amber-500/10")}>
+                                                                    <AlertTriangle className={cn("h-4 w-4", percentage >= 90 ? "text-red-500" : "text-amber-500")} />
+                                                                </div>
+                                                            )}
                                                         </div>
-                                                    )}
-                                                </div>
-                                                <div className="space-y-3">
-                                                    <div className="flex items-baseline justify-between">
-                                                        <span className={cn("text-3xl font-bold", getUsageColor(percentage))}>
-                                                            {typeof metric.used === "number" && metric.used % 1 !== 0 ? metric.used.toFixed(1) : metric.used}
-                                                        </span>
-                                                        <span className="text-sm text-muted-foreground">
-                                                            / {metric.limit === -1 ? "∞" : `${metric.limit}${metric.unit?.replace("/month", "") || ""}`}
-                                                        </span>
-                                                    </div>
-                                                    <div className="relative h-3 rounded-full bg-muted overflow-hidden">
-                                                        <div
-                                                            className={cn("absolute inset-y-0 left-0 rounded-full bg-gradient-to-r transition-all duration-500", getProgressGradient(percentage))}
-                                                            style={{ width: `${percentage}%` }}
-                                                        />
-                                                    </div>
-                                                    <p className="text-xs text-muted-foreground text-right">
-                                                        {metric.limit === -1 ? "Unlimited" : `${percentage.toFixed(0)}% used`}
-                                                    </p>
-                                                </div>
-                                            </CardContent>
-                                        </Card>
-                                    )
-                                })}
+                                                        <div className="space-y-3">
+                                                            <div className="flex items-baseline justify-between">
+                                                                <span className={cn("text-3xl font-bold", getUsageColor(percentage))}>
+                                                                    {typeof metric.used === "number" && metric.used % 1 !== 0 ? metric.used.toFixed(1) : metric.used}
+                                                                </span>
+                                                                <span className="text-sm text-muted-foreground">
+                                                                    / {metric.limit === -1 ? "∞" : `${metric.limit} ${metric.unit}`}
+                                                                </span>
+                                                            </div>
+                                                            {metric.limit !== -1 && (
+                                                                <>
+                                                                    <div className="relative h-3 rounded-full bg-muted overflow-hidden">
+                                                                        <div
+                                                                            className={cn("absolute inset-y-0 left-0 rounded-full bg-gradient-to-r transition-all duration-500", getProgressGradient(percentage))}
+                                                                            style={{ width: `${percentage}%` }}
+                                                                        />
+                                                                    </div>
+                                                                    <p className="text-xs text-muted-foreground text-right">
+                                                                        {percentage.toFixed(0)}% used
+                                                                    </p>
+                                                                </>
+                                                            )}
+                                                            {metric.limit === -1 && (
+                                                                <p className="text-xs text-emerald-600">✓ Unlimited on your plan</p>
+                                                            )}
+                                                        </div>
+                                                    </CardContent>
+                                                </Card>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
                             </div>
                         )}
                     </TabsContent>

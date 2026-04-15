@@ -15,6 +15,7 @@ from typing import Optional
 import httpx
 
 from app.core.config import settings
+from app.core.datetime_utils import utcnow, to_naive_utc
 
 
 @dataclass
@@ -64,7 +65,7 @@ class NotificationChannelBase(ABC):
             success=True,
             channel=self.channel_name,
             recipient=recipient,
-            delivered_at=datetime.utcnow(),
+            delivered_at=to_naive_utc(utcnow()),
             response_data=response_data,
         )
     

@@ -8,6 +8,7 @@ from jose import JWTError, jwt
 from pydantic import BaseModel
 
 from app.core.config import settings
+from app.core.datetime_utils import utcnow, to_naive_utc
 
 
 class TokenPayload(BaseModel):
@@ -69,7 +70,7 @@ def create_token(
         tuple[str, str]: (token, jti) - The encoded token and its unique ID
     """
     jti = str(uuid.uuid4())
-    now = datetime.utcnow()
+    now = utcnow()
     expire = now + expires_delta
 
     payload = {
@@ -146,10 +147,14 @@ def decode_token(token: str) -> TokenPayload | None:
     """
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+        # Convert timestamps to naive UTC datetime for consistency
+        exp_dt = datetime.fromtimestamp(payload["exp"], tz=None)
+        iat_dt = datetime.fromtimestamp(payload["iat"], tz=None)
+        
         return TokenPayload(
             sub=payload["sub"],
-            exp=datetime.utcfromtimestamp(payload["exp"]),
-            iat=datetime.utcfromtimestamp(payload["iat"]),
+            exp=exp_dt,
+            iat=iat_dt,
             type=payload["type"],
             jti=payload["jti"],
         )
@@ -180,8 +185,8 @@ def validate_token(token: str, expected_type: str = "access") -> TokenPayload | 
     if TokenBlacklist.is_blacklisted(payload.jti):
         return None
 
-    # Check expiration
-    if payload.exp < datetime.utcnow():
+    # Check expiration (compare naive datetimes)
+    if payload.exp < to_naive_utc(utcnow()):
         return None
 
     return payload
@@ -246,8 +251,7 @@ async def get_current_user(
     Raises:
         HTTPException: If token is invalid or user not found
     """
-    from sqlalchemy.ext.asyncio import AsyncSession
-    from app.core.database import get_db
+    from app.core.database import async_session_maker
     from app.modules.auth.repository import UserRepository
     
     token = credentials.credentials
@@ -264,8 +268,8 @@ async def get_current_user(
     # Get user from database
     user_id = uuid.UUID(payload.sub)
     
-    # Get database session
-    async for db in get_db():
+    # Get database session properly
+    async with async_session_maker() as db:
         user_repo = UserRepository(db)
         user = await user_repo.get_by_id(user_id)
         

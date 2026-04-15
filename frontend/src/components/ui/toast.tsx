@@ -78,13 +78,13 @@ function ToastContainer({
     )
 }
 
-function ToastItem({
-    toast,
-    onRemove,
-}: {
-    toast: Toast
-    onRemove: (id: string) => void
-}) {
+const ToastItem = React.forwardRef<
+    HTMLDivElement,
+    {
+        toast: Toast
+        onRemove: (id: string) => void
+    }
+>(({ toast, onRemove }, ref) => {
     const icons = {
         success: <CheckCircle className="h-5 w-5 text-green-500" />,
         error: <XCircle className="h-5 w-5 text-red-500" />,
@@ -101,6 +101,7 @@ function ToastItem({
 
     return (
         <motion.div
+            ref={ref}
             layout
             initial={{ opacity: 0, y: 50, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -125,7 +126,9 @@ function ToastItem({
             </button>
         </motion.div>
     )
-}
+})
+
+ToastItem.displayName = "ToastItem"
 
 // Convenience functions for common toast types
 export function toast(_options: Omit<Toast, "id">) {

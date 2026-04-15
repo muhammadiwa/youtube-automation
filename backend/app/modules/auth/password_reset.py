@@ -2,8 +2,10 @@
 
 import secrets
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import NamedTuple
+
+from app.core.datetime_utils import utcnow, datetime
 
 
 class PasswordResetToken(NamedTuple):
@@ -34,7 +36,7 @@ class PasswordResetStore:
             str: Reset token
         """
         token = secrets.token_urlsafe(32)
-        expires_at = datetime.utcnow() + timedelta(hours=expires_hours)
+        expires_at = utcnow() + timedelta(hours=expires_hours)
 
         cls._tokens[token] = PasswordResetToken(
             token=token,
@@ -59,7 +61,7 @@ class PasswordResetStore:
         if reset_token is None:
             return None
 
-        if reset_token.expires_at < datetime.utcnow():
+        if reset_token.expires_at < utcnow():
             # Token expired, remove it
             cls._tokens.pop(token, None)
             return None
@@ -93,7 +95,7 @@ class PasswordResetStore:
         Returns:
             int: Number of tokens removed
         """
-        now = datetime.utcnow()
+        now = utcnow()
         expired = [
             token for token, data in cls._tokens.items()
             if data.expires_at < now

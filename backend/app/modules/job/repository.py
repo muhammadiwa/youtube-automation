@@ -10,6 +10,7 @@ from typing import Optional
 from sqlalchemy import select, func, and_, or_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import utcnow, to_naive_utc
 from app.modules.job.models import Job, DLQAlert, JobStatus
 
 
@@ -81,10 +82,10 @@ class JobRepository:
         job.status = status.value
         
         if status == JobStatus.PROCESSING:
-            job.started_at = datetime.utcnow()
+            job.started_at = to_naive_utc(utcnow())
             job.attempts += 1
         elif status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.DLQ):
-            job.completed_at = datetime.utcnow()
+            job.completed_at = to_naive_utc(utcnow())
         
         if result is not None:
             job.result = result
@@ -113,7 +114,7 @@ class JobRepository:
         conditions.append(
             or_(
                 Job.scheduled_at.is_(None),
-                Job.scheduled_at <= datetime.utcnow(),
+                Job.scheduled_at <= to_naive_utc(utcnow()),
             )
         )
         
@@ -153,9 +154,9 @@ class JobRepository:
             return None
         
         job.status = JobStatus.DLQ.value
-        job.moved_to_dlq_at = datetime.utcnow()
+        job.moved_to_dlq_at = to_naive_utc(utcnow())
         job.dlq_reason = reason
-        job.completed_at = datetime.utcnow()
+        job.completed_at = to_naive_utc(utcnow())
         
         await self.session.flush()
         return job
@@ -209,7 +210,7 @@ class JobRepository:
             return None
         
         job.dlq_alert_sent = True
-        job.dlq_alert_sent_at = datetime.utcnow()
+        job.dlq_alert_sent_at = to_naive_utc(utcnow())
         
         await self.session.flush()
         return job
@@ -304,7 +305,7 @@ class JobRepository:
         
         Requirements: 22.4 - Processing rate
         """
-        since = datetime.utcnow() - timedelta(minutes=minutes)
+        since = to_naive_utc(utcnow()) - timedelta(minutes=minutes)
         query = select(func.count(Job.id)).where(
             and_(
                 Job.status == JobStatus.COMPLETED.value,
@@ -320,7 +321,7 @@ class JobRepository:
         
         Requirements: 22.4 - Failure statistics
         """
-        since = datetime.utcnow() - timedelta(minutes=minutes)
+        since = to_naive_utc(utcnow()) - timedelta(minutes=minutes)
         
         # Get completed jobs
         completed_query = select(func.count(Job.id)).where(
@@ -350,7 +351,7 @@ class JobRepository:
         
         Requirements: 22.4
         """
-        since = datetime.utcnow() - timedelta(minutes=minutes)
+        since = to_naive_utc(utcnow()) - timedelta(minutes=minutes)
         query = select(Job.started_at, Job.completed_at).where(
             and_(
                 Job.status == JobStatus.COMPLETED.value,
@@ -482,7 +483,7 @@ class DLQAlertRepository:
         
         alert.acknowledged = True
         alert.acknowledged_by = acknowledged_by
-        alert.acknowledged_at = datetime.utcnow()
+        alert.acknowledged_at = to_naive_utc(utcnow())
         
         await self.session.flush()
         return alert
